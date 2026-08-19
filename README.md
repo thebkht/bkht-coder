@@ -50,6 +50,21 @@ when present — `provider.py` normalizes both into one type.
 truncates past it, which is the most common cause of a bad local-model session;
 a `num_ctx` below 4096 is refused outright.
 
+The default is **8192**, not the model's native 32768, because the binding
+constraint is host RAM. Measured on a 16 GB machine with `qwen2.5-coder:14b`,
+one warm trivial completion:
+
+| `num_ctx` | Placement | Size | Warm turn |
+|---|---|---|---|
+| 8192 | 100% GPU | 10 GB | 0.9 s |
+| 16384 | 9% CPU / 91% GPU | 12 GB | 11.1 s |
+| 32768 | 27% CPU / 73% GPU | 15 GB | >300 s (timed out) |
+
+Past 8192 the KV cache pushes the working set off the GPU and every turn pays
+for it. On a machine with more memory, raise it with `--num-ctx` — that is the
+only change needed. This is also why context compaction earns its place: an
+8K window fills quickly.
+
 ## Development
 
 ```sh

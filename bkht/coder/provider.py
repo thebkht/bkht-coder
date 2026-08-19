@@ -25,7 +25,19 @@ from .parsing import ToolCall, parse_tool_calls, strip_json
 
 DEFAULT_HOST = "http://localhost:11434"
 DEFAULT_MODEL = "qwen2.5-coder:14b"
-DEFAULT_NUM_CTX = 32768
+# Measured on a 16 GB M-series machine with qwen2.5-coder:14b (Q4, ~9 GB of
+# weights), one trivial completion, warm:
+#
+#     num_ctx  placement                size   warm turn
+#      8192    100% GPU                 10 GB      0.9 s
+#     16384    9% CPU / 91% GPU         12 GB     11.1 s
+#     32768    27% CPU / 73% GPU        15 GB    >300 s (timed out)
+#
+# The model advertises 32768 natively, but the binding constraint is host RAM,
+# not the model: past 8192 the KV cache pushes the working set off the GPU and
+# every turn pays for it. Raise this with --num-ctx on a machine with more
+# memory; that is the only change needed.
+DEFAULT_NUM_CTX = 8192
 
 # Ollama's own default is 2048, which silently truncates instead of erroring.
 # Anything at or below it is a misconfiguration rather than a small window.
