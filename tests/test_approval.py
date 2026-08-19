@@ -67,3 +67,24 @@ def test_the_question_and_hint_are_shown():
     assert "Allow bash?" in shown
     assert "$ rm -rf /" in shown
     assert "[y] yes" in shown
+
+
+def test_the_status_line_is_held_for_the_whole_exchange():
+    # Otherwise the spinner repaints over the diff being approved -- the one
+    # piece of output that has to survive long enough to be read.
+    import contextlib
+
+    events = []
+
+    @contextlib.contextmanager
+    def pause():
+        events.append("paused")
+        yield
+        events.append("resumed")
+
+    def keys():
+        events.append("key")
+        return "y"
+
+    assert ask_tty("Allow?", "-a\n+b", keys=keys, out=io.StringIO(), pause=pause) == "y"
+    assert events == ["paused", "key", "resumed"]

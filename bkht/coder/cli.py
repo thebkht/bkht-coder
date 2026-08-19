@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import sys
+from functools import partial
 from pathlib import Path
 
 from . import narrate, terminal
@@ -46,10 +47,9 @@ class TerminalListener:
     local agent feel dead.
 
     On a terminal the prose streams as the model writes it, with tool-call JSON
-    held back by the gate and a status line filling the silences. Everywhere
-    else -- a pipe, a file, the test suite -- this renders exactly what it
-    always did, because that output is parsed by things that did not ask for a
-    spinner.
+    held back by the gate and a status line filling the silences. A pipe or a
+    file gets none of that -- no colour, no spinner, no streamed tokens -- just
+    the narrated tool lines and the finished answer.
     """
 
     def __init__(self, verbose: bool = False, live: bool | None = None, stream=None) -> None:
@@ -211,9 +211,12 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
     registry, workspace = build_registry(
         root, read_only=(mode == PLAN), snapshots=snapshots
     )
+    # The prompt pauses the status line for the whole exchange: without it the
+    # spinner repaints over the diff being approved.
+    pause = listener.status.pause if getattr(listener, "status", None) else None
     permissions = Permissions(
         mode=mode, workspace=workspace,
-        **({"prompt": ask_tty} if terminal.interactive() else {}),
+        **({"prompt": partial(ask_tty, pause=pause)} if terminal.interactive() else {}),
     )
     provider = OllamaProvider(model=args.model, host=args.host, num_ctx=args.num_ctx)
 
