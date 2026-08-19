@@ -7,7 +7,7 @@ import contextlib
 import sys
 from pathlib import Path
 
-from . import terminal
+from . import narrate, terminal
 from .agent import Agent
 from .approval import ask_tty
 from .context import file_tree
@@ -115,8 +115,14 @@ class TerminalListener:
             print(text, file=self.stream, flush=True)
 
     def on_tool_call(self, call: ToolCall) -> None:
-        self._say(paint(f"  · {call.name}({summarize(call.arguments)})", CYAN, self.stream))
-        self.status.note(call.name)
+        # The sentence is what gets read; the call underneath is the evidence
+        # for it, which is why both are printed and neither replaces the other.
+        self._say(
+            paint(f"  · {narrate.intent(call)}", CYAN, self.stream)
+            + "\n"
+            + paint(f"    {call.name}({summarize(call.arguments)})", DIM, self.stream)
+        )
+        self.status.note(narrate.label(call))
 
     def on_tool_result(self, call: ToolCall, result: ToolResult) -> None:
         if not result.ok:

@@ -40,7 +40,7 @@ def test_a_pipe_gets_the_same_lines_it_always_did():
         listen.on_tool_call(ToolCall(name="read_file", arguments={"path": "a.py"}))
         listen.on_tool_result(ToolCall(name="read_file"), ToolResult.success("contents"))
 
-    assert stream.getvalue() == "  · read_file(path=a.py)\n"
+    assert stream.getvalue() == "  · Reading a.py\n    read_file(path=a.py)\n"
 
 
 def test_a_pipe_still_reports_tool_errors():
