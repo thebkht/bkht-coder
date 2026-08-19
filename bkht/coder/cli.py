@@ -3,34 +3,28 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import sys
 from pathlib import Path
 
+from . import terminal
 from .agent import Agent
+from .approval import ask_tty
 from .context import file_tree
 from .instructions import load_instructions, render, summarize as summarize_instructions
 from .parsing import ToolCall
 from .permissions import ASK, AUTO, PLAN, Permissions
 from .prompts import system_prompt
+from .prompt import Reader
 from .provider import DEFAULT_HOST, DEFAULT_MODEL, DEFAULT_NUM_CTX, OllamaProvider
 from .repl import Repl
 from .review import cli as review_cli
 from .session import Session, Snapshots
+from .status import Status
+from .streaming import Gate
+from .terminal import BOLD, CYAN, DIM, RED, RESET, YELLOW, paint
 from .tools import build_registry
 from .tools.base import ToolResult
-
-DIM = "\033[2m"
-BOLD = "\033[1m"
-RED = "\033[31m"
-YELLOW = "\033[33m"
-CYAN = "\033[36m"
-RESET = "\033[0m"
-
-
-def paint(text: str, colour: str, stream=None) -> str:
-    """Colour ``text`` only when the destination is a terminal."""
-    stream = stream or sys.stdout
-    return f"{colour}{text}{RESET}" if stream.isatty() else text
 
 
 def summarize(arguments: dict) -> str:
@@ -50,40 +44,90 @@ class TerminalListener:
     Streaming output matters more here than it does against a hosted model:
     waiting 30 seconds with no sign of life is the main thing that makes a
     local agent feel dead.
+
+    On a terminal the prose streams as the model writes it, with tool-call JSON
+    held back by the gate and a status line filling the silences. Everywhere
+    else -- a pipe, a file, the test suite -- this renders exactly what it
+    always did, because that output is parsed by things that did not ask for a
+    spinner.
     """
 
-    def __init__(self, verbose: bool = False) -> None:
+    def __init__(self, verbose: bool = False, live: bool | None = None, stream=None) -> None:
         self.verbose = verbose
+        self.stream = stream or sys.stdout
+        self.live = terminal.interactive() if live is None else live
+        # Not while --verbose: raw output is continuous, so there is no silence
+        # for a spinner to fill and nothing to gate.
+        self.rich = self.live and not verbose
+        self.status = Status(writer=self.stream, enabled=self.rich)
+        self.gate = Gate(self._emit) if self.rich else None
+        self.streamed = False
         self._streaming = False
 
+    # --- turn boundary ------------------------------------------------------
+
+    @contextlib.contextmanager
+    def turn(self):
+        """Bracket one agent.run(), so the spinner and the gate are bounded."""
+        self.streamed = False
+        self.status.start("thinking")
+        try:
+            yield self
+        finally:
+            self.status.stop()
+            if self.gate is not None:
+                self.gate.finish()
+            self._newline()
+
+    def _emit(self, text: str) -> None:
+        with self.status.pause():
+            self.stream.write(text)
+            self.stream.flush()
+            # Set inside the pause, so its redraw already knows to hold off.
+            self.status.suspend(not text.endswith("\n"))
+        self.streamed = True
+        self._streaming = not text.endswith("\n")
+
+    # --- loop events --------------------------------------------------------
+
     def on_token(self, text: str) -> None:
+        if self.gate is not None:
+            self.status.add_tokens()
+            self.gate.feed(text)
+            return
         # Tool-call JSON is streamed too; showing it would be noise.
         if not self.verbose:
             return
         self._streaming = True
-        sys.stdout.write(text)
-        sys.stdout.flush()
+        self.stream.write(text)
+        self.stream.flush()
 
     def _newline(self) -> None:
         if self._streaming:
-            sys.stdout.write("\n")
+            self.stream.write("\n")
+            self.stream.flush()
             self._streaming = False
+        self.status.suspend(False)
+
+    def _say(self, text: str) -> None:
+        with self.status.pause():
+            self._newline()
+            print(text, file=self.stream, flush=True)
 
     def on_tool_call(self, call: ToolCall) -> None:
-        self._newline()
-        label = f"{call.name}({summarize(call.arguments)})"
-        print(paint(f"  · {label}", CYAN))
+        self._say(paint(f"  · {call.name}({summarize(call.arguments)})", CYAN, self.stream))
+        self.status.note(call.name)
 
     def on_tool_result(self, call: ToolCall, result: ToolResult) -> None:
         if not result.ok:
-            print(paint(f"    ! {result.error.splitlines()[0]}", RED))
+            self._say(paint(f"    ! {result.error.splitlines()[0]}", RED, self.stream))
         elif self.verbose:
             for line in result.content.splitlines()[:20]:
-                print(paint(f"    {line}", DIM))
+                self._say(paint(f"    {line}", DIM, self.stream))
+        self.status.note("thinking")
 
     def on_retry(self, reason: str) -> None:
-        self._newline()
-        print(paint("  · retrying (malformed reply)", YELLOW))
+        self._say(paint("  · retrying (malformed reply)", YELLOW, self.stream))
 
 
 def add_common_arguments(parser) -> None:
@@ -161,7 +205,10 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
     registry, workspace = build_registry(
         root, read_only=(mode == PLAN), snapshots=snapshots
     )
-    permissions = Permissions(mode=mode, workspace=workspace)
+    permissions = Permissions(
+        mode=mode, workspace=workspace,
+        **({"prompt": ask_tty} if terminal.interactive() else {}),
+    )
     provider = OllamaProvider(model=args.model, host=args.host, num_ctx=args.num_ctx)
 
     # Announced rather than applied silently: instructions shape every answer
@@ -201,9 +248,13 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
     return agent, snapshots, permissions, workspace
 
 
-def report(outcome) -> int:
-    """Print an outcome and return the process exit status."""
-    if outcome.answer:
+def report(outcome, streamed: bool = False) -> int:
+    """Print an outcome and return the process exit status.
+
+    ``streamed`` means the listener already put this prose on the screen as it
+    arrived, so printing it again would show the answer twice.
+    """
+    if outcome.answer and not streamed:
         print(outcome.answer)
 
     if outcome.stopped != "answered":
@@ -216,15 +267,35 @@ def report(outcome) -> int:
     return 0
 
 
+def run_turn(agent, listener, task: str) -> int:
+    """One task, with the spinner and the gate bounded to it."""
+    if listener is None:
+        return report(agent.run(task))
+    with listener.turn():
+        outcome = agent.run(task)
+    return report(outcome, streamed=listener.streamed)
+
+
+def header(agent, permissions, workspace) -> str:
+    num_ctx = getattr(agent.provider, "num_ctx", DEFAULT_NUM_CTX)
+    used = agent.session.prompt_tokens
+    context = f"{used:,}/{num_ctx:,} ctx" if num_ctx else f"{used:,} tokens"
+    return (
+        f"coder · {agent.provider.model} · {permissions.mode} · "
+        f"{context} · {workspace.root}"
+    )
+
+
 def interactive(agent, snapshots, permissions, workspace, listener, use_instructions=True) -> int:
     """The REPL. Ctrl-C abandons the current line; Ctrl-D leaves."""
     repl = Repl(agent, snapshots, permissions, workspace, use_instructions=use_instructions)
-    print(paint(f"coder · {agent.provider.model} · {permissions.mode} · {workspace.root}", DIM))
+    reader = Reader(repl, enabled=terminal.interactive())
+    print(paint(header(agent, permissions, workspace), DIM))
     print(paint("/help for commands, /exit to leave.", DIM))
 
     while True:
         try:
-            line = input(paint("> ", BOLD))
+            line = reader.read(paint("> ", BOLD))
         except EOFError:
             print()
             return 0
@@ -239,7 +310,7 @@ def interactive(agent, snapshots, permissions, workspace, listener, use_instruct
             continue
 
         try:
-            report(agent.run(command.task))
+            run_turn(agent, listener, command.task)
         except KeyboardInterrupt:
             # Abandon this task but keep the session; a long local turn is
             # exactly the thing a user needs to be able to interrupt.
@@ -257,7 +328,7 @@ def main(argv: list[str] | None = None) -> int:
     agent, snapshots, permissions, workspace = make_agent(args, listener)
 
     if args.prompt:
-        return report(agent.run(" ".join(args.prompt)))
+        return run_turn(agent, listener, " ".join(args.prompt))
     return interactive(
         agent, snapshots, permissions, workspace, listener,
         use_instructions=not args.no_instructions,

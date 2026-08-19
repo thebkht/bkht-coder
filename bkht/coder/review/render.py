@@ -10,15 +10,8 @@ from __future__ import annotations
 
 import json
 
+from ..terminal import BLUE, BOLD, DIM, GREEN, RED, RESET, YELLOW
 from .reviewer import CONFIRMED, ReviewResult
-
-BOLD = "\033[1m"
-DIM = "\033[2m"
-RED = "\033[31m"
-YELLOW = "\033[33m"
-BLUE = "\033[34m"
-GREEN = "\033[32m"
-RESET = "\033[0m"
 
 SEVERITY_COLOUR = {"high": RED, "medium": YELLOW, "low": BLUE}
 

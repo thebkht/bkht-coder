@@ -37,6 +37,7 @@ class Status:
         self._started: float | None = None
         self._step = 0
         self._drawn = False
+        self._suspended = False
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         # Re-entrant because pause() may nest: an approval prompt inside a
@@ -78,6 +79,18 @@ class Status:
         self.stop()
 
     # --- updates ------------------------------------------------------------
+
+    def suspend(self, suspended: bool = True) -> None:
+        """Stop drawing while prose occupies the current line.
+
+        The spinner repaints with a carriage return and a line clear, so
+        sharing a line with half-written prose does not interleave -- it erases
+        it. Silence is the only thing this line is allowed to fill.
+        """
+        with self._lock:
+            if suspended and self._drawn:
+                self._erase()
+            self._suspended = suspended
 
     def note(self, label: str) -> None:
         """Change what the line says without restarting the clock."""
@@ -128,6 +141,8 @@ class Status:
             self._stop.wait(self.interval)
 
     def _draw(self) -> None:
+        if self._suspended:
+            return
         text = self.frame()
         self._write(f"{CLEAR_LINE}{DIM}{text}{RESET}" if self.colour else f"{CLEAR_LINE}{text}")
         self._drawn = True
