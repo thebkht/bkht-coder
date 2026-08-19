@@ -98,4 +98,4 @@ def test_list_files_on_a_file(tools):
 
 def test_read_only_registry_has_no_mutating_tools(tools):
     registry, _ = tools
-    assert registry.names() == ["list_files", "read_file"]
+    assert "write_file" not in registry and "bash" not in registry

@@ -96,6 +96,14 @@ def test_unknown_argument_names_it_and_the_expected_set():
     assert "nope" in str(exc.value) and "path" in str(exc.value)
 
 
+def test_a_renamed_argument_reports_both_problems():
+    # `filename` for `path` is one mistake that shows up as two violations.
+    with pytest.raises(ToolError) as exc:
+        validate_arguments(_tool(), {"filename": "a.py"})
+    assert "missing required argument(s) path" in str(exc.value)
+    assert "unknown argument(s) filename" in str(exc.value)
+
+
 def test_wrong_type_is_rejected():
     with pytest.raises(ToolError, match="must be a integer"):
         validate_arguments(_tool(), {"path": "a.py", "count": []})

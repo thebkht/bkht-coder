@@ -32,6 +32,10 @@ def build_registry(root: Path | str, read_only: bool = False) -> tuple[Registry,
     registry = Registry()
     register_read_tools(registry, workspace)
 
+    from .search import register_search_tools
+
+    register_search_tools(registry, workspace)
+
     if not read_only:
         from .fs import register_write_tools
         from .shell import register_shell_tools

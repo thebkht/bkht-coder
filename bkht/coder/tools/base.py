@@ -93,17 +93,19 @@ def validate_arguments(tool: Tool, arguments: dict) -> dict:
     properties: dict = schema.get("properties", {})
     required: list = schema.get("required", [])
 
-    missing = [key for key in required if key not in arguments]
-    if missing:
-        raise ToolError(
-            f"{tool.name}: missing required argument(s) {', '.join(sorted(missing))}. "
-            f"Expected: {', '.join(properties) or 'none'}"
-        )
+    missing = sorted(key for key in required if key not in arguments)
+    unknown = sorted(key for key in arguments if key not in properties)
 
-    unknown = [key for key in arguments if key not in properties]
-    if unknown:
+    # Reported together: a model that writes `filename` for `path` produces both
+    # at once, and naming only one of them makes the correction a guess.
+    if missing or unknown:
+        problems = []
+        if missing:
+            problems.append(f"missing required argument(s) {', '.join(missing)}")
+        if unknown:
+            problems.append(f"unknown argument(s) {', '.join(unknown)}")
         raise ToolError(
-            f"{tool.name}: unknown argument(s) {', '.join(sorted(unknown))}. "
+            f"{tool.name}: {'; '.join(problems)}. "
             f"Expected: {', '.join(properties) or 'none'}"
         )
 
