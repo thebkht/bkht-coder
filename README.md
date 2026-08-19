@@ -39,7 +39,7 @@ ollama serve &                                       # macOS app users: just lau
 ollama pull qwen2.5-coder:14b
 
 # 4. The agent
-git clone <this-repo> bkht-coder && cd bkht-coder
+git clone https://github.com/thebkht/bkht-coder.git && cd bkht-coder
 uv sync --extra dev                                  # creates .venv from uv.lock
 uv run coder                                         # interactive REPL
 ```
@@ -66,7 +66,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 ollama pull qwen2.5-coder:14b
 
 # 3. The agent
-git clone <this-repo> bkht-coder; cd bkht-coder
+git clone https://github.com/thebkht/bkht-coder.git; cd bkht-coder
 uv sync --extra dev
 uv run coder
 ```
