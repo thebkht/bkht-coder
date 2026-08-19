@@ -16,6 +16,118 @@ Slash commands: `/tools`, `/context`, `/clear`, `/undo`, `/diff`, `/review`,
 
 State lives in `~/.bkht-coder/sessions/`.
 
+## Requirements
+
+* **Python 3.12+**
+* **[uv](https://docs.astral.sh/uv/)** — used for the venv, the lockfile, and running the tests
+* **[Ollama](https://ollama.com/download)**, serving on `http://localhost:11434`
+* The model: `qwen2.5-coder:14b` (~9 GB on disk). About **16 GB of RAM** is
+  enough at the default `num_ctx` of 8192; on 8 GB use `qwen2.5-coder:7b`.
+
+## Install — Linux / macOS
+
+```sh
+# 1. uv
+curl -LsSf https://astral.sh/uv/install.sh | sh      # or: brew install uv
+
+# 2. Ollama
+curl -fsSL https://ollama.com/install.sh | sh        # Linux
+brew install ollama                                  # macOS
+
+# 3. Start the server and pull the model
+ollama serve &                                       # macOS app users: just launch Ollama
+ollama pull qwen2.5-coder:14b
+
+# 4. The agent
+git clone <this-repo> bkht-coder && cd bkht-coder
+uv sync --extra dev                                  # creates .venv from uv.lock
+uv run coder                                         # interactive REPL
+```
+
+To get `coder` on your `PATH` without the `uv run` prefix:
+
+```sh
+uv tool install --editable .        # then just: coder
+# or, inside the project venv:
+source .venv/bin/activate && coder
+```
+
+## Install — Windows
+
+Use **PowerShell**. Everything works natively; only `scripts/verify.sh` needs a
+bash (Git Bash or WSL).
+
+```powershell
+# 1. uv
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# 2. Ollama — download and run the installer from https://ollama.com/download
+#    It installs a background service; no `ollama serve` needed.
+ollama pull qwen2.5-coder:14b
+
+# 3. The agent
+git clone <this-repo> bkht-coder; cd bkht-coder
+uv sync --extra dev
+uv run coder
+```
+
+Same as above for a bare `coder` command:
+
+```powershell
+uv tool install --editable .        # then just: coder
+# or: .\.venv\Scripts\Activate.ps1 ; coder
+```
+
+On Windows, state lives in `%USERPROFILE%\.bkht-coder\sessions\`.
+
+Under WSL, Ollama running on the Windows host is not on WSL's `localhost` —
+point the agent at the host explicitly:
+
+```sh
+coder --host "http://$(ip route show default | awk '{print $3}'):11434"
+```
+
+## Configuration
+
+There is no config file; everything is a flag, and the defaults are the ones
+described above.
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--model` | `qwen2.5-coder:14b` | Ollama model tag |
+| `--host` | `http://localhost:11434` | Ollama server URL |
+| `--num-ctx` | `8192` | Context window requested from Ollama (values ≤ 4096 are refused) |
+| `--cwd` | `.` | Workspace root the tools are confined to |
+| `--max-iterations` | `25` | Cap on agent loop iterations per task |
+
+Two environment variables are read by the **tooling**, not the agent:
+
+| Variable | Used by | Default |
+|---|---|---|
+| `OLLAMA_HOST_URL` | `scripts/verify.sh` | `http://127.0.0.1:11434` |
+| `MODEL` | `scripts/verify.sh` (passed on as `pytest --model`) | `qwen2.5-coder:14b` |
+
+`OLLAMA_HOST` is Ollama's own variable — set it before `ollama serve` to change
+where the *server* listens (e.g. `OLLAMA_HOST=0.0.0.0:11434`), then pass the
+matching URL to `coder --host`.
+
+## Checking the install
+
+```sh
+ollama list                       # the model tag should appear
+uv run pytest -q -m "not live"    # no model needed
+./scripts/verify.sh               # full preflight + live suite (bash)
+```
+
+Common failures:
+
+* **`ollama not reachable`** — the server isn't running (`ollama serve`), or
+  it's bound to another address; check with `curl http://localhost:11434/api/tags`.
+* **Every turn takes minutes** — `num_ctx` is too large for available RAM; see
+  the table under *How it talks to the model*. Lower it or use the 7b model.
+* **The model ignores tools / replies with JSON text** — expected for this
+  class of model, and handled; see the same section.
+
 ## Code review
 
 ```sh
