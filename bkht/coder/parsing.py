@@ -14,16 +14,16 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-_OPENERS = {"{": "}", "[": "]"}
+OPENERS = {"{": "}", "[": "]"}
 
 
-def _scan_balanced(text: str, start: int) -> int | None:
+def scan_balanced(text: str, start: int) -> int | None:
     """Return the index just past the balanced value opening at ``start``.
 
     ``None`` if the value never closes. String contents and escapes are
     honoured so that braces inside strings do not affect the depth count.
     """
-    closer = _OPENERS[text[start]]
+    closer = OPENERS[text[start]]
     depth = 0
     in_string = False
     escaped = False
@@ -42,7 +42,7 @@ def _scan_balanced(text: str, start: int) -> int | None:
 
         if ch == '"':
             in_string = True
-        elif ch in _OPENERS:
+        elif ch in OPENERS:
             depth += 1
         elif ch in ("}", "]"):
             depth -= 1
@@ -65,11 +65,11 @@ def extract_json_values(text: str) -> list[Any]:
     values: list[Any] = []
     i = 0
     while i < len(text):
-        if text[i] not in _OPENERS:
+        if text[i] not in OPENERS:
             i += 1
             continue
 
-        end = _scan_balanced(text, i)
+        end = scan_balanced(text, i)
         if end is None:
             i += 1
             continue
@@ -171,8 +171,8 @@ def strip_json(text: str) -> str:
     out: list[str] = []
     i = 0
     while i < len(text):
-        if text[i] in _OPENERS:
-            end = _scan_balanced(text, i)
+        if text[i] in OPENERS:
+            end = scan_balanced(text, i)
             if end is not None:
                 try:
                     json.loads(text[i:end])
