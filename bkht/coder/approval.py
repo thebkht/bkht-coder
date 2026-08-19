@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import sys
 
+from .highlight import diff
 from .permissions import truncate
-from .terminal import CYAN, DIM, RESET, paint, read_key
+from .terminal import CYAN, DIM, paint, read_key
 
 HINT = "[y] yes  [n] no  [a] always  [d] full diff"
 
@@ -24,19 +25,22 @@ ALWAYS = {"a", "A"}
 DIFF = {"d", "D"}
 
 
-def ask_tty(question: str, body: str, keys=read_key, out=None) -> str:
+def ask_tty(question: str, body: str, keys=read_key, out=None, colour: bool | None = None) -> str:
     """Show the change, then take a single keypress. Returns y / n / a.
 
     Anything unrecognised -- Enter, Ctrl-C, a closed stream -- is a refusal,
     matching the [y/N] default that the typed prompt has always had. Silence
     must never mean yes.
     """
-    write = _writer(out)
+    stream = out or sys.stdout
+    write = _writer(stream)
+    if colour is None:
+        colour = getattr(stream, "isatty", bool)()
     expanded = False
 
     while True:
         if body:
-            write(body if expanded else truncate(body))
+            write(diff(body if expanded else truncate(body), colour=colour))
         write(paint(f"{question} ", CYAN) + paint(HINT, DIM))
 
         key = keys()
@@ -55,9 +59,7 @@ def _label(answer: str) -> str:
     return {"y": "yes", "a": "always", "n": "no"}[answer]
 
 
-def _writer(out):
-    stream = out or sys.stdout
-
+def _writer(stream):
     def write(text: str) -> None:
         print(text, file=stream, flush=True)
 

@@ -10,6 +10,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 
+from . import highlight
 from .instructions import load_instructions, render
 from .permissions import MODES
 from .provider import DEFAULT_NUM_CTX
@@ -177,8 +178,12 @@ class Repl:
 
         if completed.returncode != 0:
             self.out((completed.stderr or "git diff failed").strip())
+        elif completed.stdout.strip():
+            # The same renderer the approval preview uses, so a change looks
+            # the same whether it is being approved or reviewed after the fact.
+            self.out(highlight.diff(completed.stdout.rstrip(), colour=sys.stdout.isatty()))
         else:
-            self.out(completed.stdout.rstrip() or "No uncommitted changes.")
+            self.out("No uncommitted changes.")
         return Command()
 
     def do_review(self, argument: str) -> Command:

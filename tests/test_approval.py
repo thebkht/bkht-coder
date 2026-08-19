@@ -46,6 +46,20 @@ def test_the_answer_is_echoed_into_the_scrollback():
     assert "always" in out.getvalue()
 
 
+def test_the_diff_is_coloured_on_a_terminal_and_plain_off_one():
+    plain = io.StringIO()
+    ask_tty("Allow?", "-was here\n+is here", keys=keys("n"), out=plain)
+    assert "-was here\n+is here" in plain.getvalue(), "a pipe gets the diff untouched"
+
+    coloured = io.StringIO()
+    ask_tty("Allow?", "-was here\n+is here", keys=keys("n"), out=coloured, colour=True)
+    # Only the marker colour is asserted: syntax colouring may legitimately
+    # start immediately after it, so pinning the text as well is brittle.
+    shown = coloured.getvalue()
+    assert "\x1b[32m+" in shown, "an added line is green"
+    assert "\x1b[31m-" in shown, "a removed line is red"
+
+
 def test_the_question_and_hint_are_shown():
     out = io.StringIO()
     ask_tty("Allow bash?", "$ rm -rf /", keys=keys("n"), out=out)
