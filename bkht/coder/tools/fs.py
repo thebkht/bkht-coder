@@ -169,3 +169,111 @@ def walk(directory: Path, root: Path, depth: int, prefix: str = "") -> list[str]
         else:
             lines.append(f"{prefix}  {child.name}")
     return lines
+
+
+def register_write_tools(registry, workspace: Workspace, snapshots=None):
+    """Add the mutating filesystem tools to ``registry``.
+
+    ``snapshots`` records the previous contents of every file touched, so
+    ``/undo`` works without requiring the workspace to be a git repository.
+    """
+
+    def _snapshot(target: Path) -> None:
+        if snapshots is not None:
+            snapshots.capture(target)
+
+    def write_file(path: str, content: str) -> ToolResult:
+        target = workspace.resolve(path)
+        if target.is_dir():
+            raise ToolError(f"'{path}' is a directory")
+
+        _snapshot(target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        existed = target.exists()
+        target.write_text(content, encoding="utf-8")
+
+        verb = "Updated" if existed else "Created"
+        lines = len(content.splitlines())
+        return ToolResult.success(f"{verb} {workspace.relative(target)} ({lines} lines)")
+
+    registry.add(
+        Tool(
+            name="write_file",
+            description=(
+                "Write a file, replacing it entirely if it already exists. "
+                "Use edit_file to change part of an existing file."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path relative to the workspace root."},
+                    "content": {"type": "string", "description": "The complete new contents of the file."},
+                },
+                "required": ["path", "content"],
+            },
+            run=write_file,
+            mutating=True,
+        )
+    )
+
+    def edit_file(
+        path: str, old_string: str, new_string: str, replace_all: bool = False
+    ) -> ToolResult:
+        target = workspace.resolve(path)
+        text = read_text(target)
+
+        if not old_string:
+            raise ToolError("old_string must not be empty; use write_file for a new file")
+        if old_string == new_string:
+            raise ToolError("old_string and new_string are identical, so there is nothing to change")
+
+        count = text.count(old_string)
+
+        # Both failures are loud and distinguishable on purpose. Guessing which
+        # occurrence was meant is how an agent silently corrupts a file, and the
+        # error text has to say which case it was so the model can correct itself.
+        if count == 0:
+            raise ToolError(
+                f"old_string was not found in {workspace.relative(target)}. "
+                "It must match the file exactly, including indentation and line breaks. "
+                "Read the file again and copy the text you want to replace."
+            )
+        if count > 1 and not replace_all:
+            raise ToolError(
+                f"old_string appears {count} times in {workspace.relative(target)}, "
+                "so it is ambiguous. Include more surrounding lines to make it unique, "
+                "or pass replace_all: true to change every occurrence."
+            )
+
+        _snapshot(target)
+        updated = text.replace(old_string, new_string) if replace_all else text.replace(
+            old_string, new_string, 1
+        )
+        target.write_text(updated, encoding="utf-8")
+
+        where = f"{count} occurrences" if replace_all and count > 1 else "1 occurrence"
+        return ToolResult.success(f"Edited {workspace.relative(target)} ({where}).")
+
+    registry.add(
+        Tool(
+            name="edit_file",
+            description=(
+                "Replace an exact string in a file. old_string must match the file "
+                "exactly and appear only once, unless replace_all is true."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path relative to the workspace root."},
+                    "old_string": {"type": "string", "description": "Exact text to replace, copied from the file."},
+                    "new_string": {"type": "string", "description": "Text to put in its place."},
+                    "replace_all": {"type": "boolean", "description": "Replace every occurrence instead of requiring a unique match."},
+                },
+                "required": ["path", "old_string", "new_string"],
+            },
+            run=edit_file,
+            mutating=True,
+        )
+    )
+
+    return registry

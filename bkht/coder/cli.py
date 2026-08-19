@@ -8,9 +8,10 @@ from pathlib import Path
 
 from .agent import Agent
 from .parsing import ToolCall
+from .permissions import ASK, AUTO, PLAN, Permissions
 from .prompts import system_prompt
 from .provider import DEFAULT_HOST, DEFAULT_MODEL, DEFAULT_NUM_CTX, OllamaProvider
-from .session import Session
+from .session import Session, Snapshots
 from .tools import build_registry
 from .tools.base import ToolResult
 
@@ -91,24 +92,48 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default=DEFAULT_HOST, help="Ollama server URL.")
     parser.add_argument("--num-ctx", type=int, default=DEFAULT_NUM_CTX, help="Context window to request.")
     parser.add_argument("--cwd", default=".", help="Workspace root. Defaults to the current directory.")
+    parser.add_argument("--auto", action="store_true", help="Allow every tool call without prompting.")
+    parser.add_argument("--plan", action="store_true", help="Read-only: refuse every change to the workspace.")
     parser.add_argument("--verbose", action="store_true", help="Stream raw model output and tool results.")
     parser.add_argument("--max-iterations", type=int, default=25, help="Cap on loop iterations per task.")
     return parser
 
 
-def make_agent(args, listener=None) -> Agent:
-    """Wire up provider, tools, session, and agent from parsed arguments."""
+def resolve_mode(args) -> str:
+    if args.auto and args.plan:
+        raise SystemExit("--auto and --plan contradict each other; pick one.")
+    if args.auto:
+        return AUTO
+    if args.plan:
+        return PLAN
+    return ASK
+
+
+def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
+    """Wire up provider, tools, permissions, session, and agent."""
     root = Path(args.cwd).expanduser().resolve()
-    registry, workspace = build_registry(root, read_only=True)
+    mode = resolve_mode(args)
+    snapshots = Snapshots()
+
+    # In plan mode the mutating tools are left out of the registry entirely
+    # rather than denied at call time, so the model is never tempted by a tool
+    # it cannot use -- one fewer way for a small model to waste a turn.
+    registry, workspace = build_registry(
+        root, read_only=(mode == PLAN), snapshots=snapshots
+    )
+    permissions = Permissions(mode=mode, workspace=workspace)
     provider = OllamaProvider(model=args.model, host=args.host, num_ctx=args.num_ctx)
     session = Session(system=system_prompt(registry, str(workspace.root)))
-    return Agent(
+
+    agent = Agent(
         provider=provider,
         registry=registry,
         session=session,
         listener=listener,
+        permissions=permissions,
         max_iterations=args.max_iterations,
     )
+    return agent, snapshots
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -118,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
         print("Interactive mode is not built yet; pass a prompt.", file=sys.stderr)
         return 2
 
-    agent = make_agent(args, TerminalListener(verbose=args.verbose))
+    agent, _ = make_agent(args, TerminalListener(verbose=args.verbose))
     outcome = agent.run(" ".join(args.prompt))
 
     if outcome.answer:

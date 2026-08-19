@@ -166,3 +166,45 @@ def test_usage_is_recorded(loop):
     agent.run("hi")
     assert agent.session.prompt_tokens == 100
     assert agent.session.completion_tokens > 0
+
+
+# --- permissions inside the loop --------------------------------------------
+
+
+def test_denied_call_stops_the_loop_with_a_reason(project):
+    from bkht.coder.permissions import ASK, Permissions
+
+    registry, workspace = build_registry(project)
+    permissions = Permissions(mode=ASK, workspace=workspace, prompt=lambda q, b: "n")
+    provider = FakeProvider([call("write_file", path="a.py", content="x")])
+    session = Session(system="")
+    agent = Agent(provider, registry, session, permissions=permissions)
+
+    outcome = agent.run("write a file")
+    assert outcome.stopped == "denied"
+    assert not (project / "a.py").exists()
+
+
+def test_approved_call_writes_the_file(project):
+    from bkht.coder.permissions import ASK, Permissions
+
+    registry, workspace = build_registry(project)
+    permissions = Permissions(mode=ASK, workspace=workspace, prompt=lambda q, b: "y")
+    provider = FakeProvider([call("write_file", path="a.py", content="x = 1\n"), "done"])
+    agent = Agent(provider, registry, Session(system=""), permissions=permissions)
+
+    assert agent.run("write a file").answer == "done"
+    assert (project / "a.py").read_text() == "x = 1\n"
+
+
+def test_plan_mode_denial_is_fed_back_so_the_model_can_explain(project):
+    from bkht.coder.permissions import PLAN, Permissions
+
+    registry, workspace = build_registry(project)
+    permissions = Permissions(mode=PLAN, workspace=workspace)
+    provider = FakeProvider([call("write_file", path="a.py", content="x")])
+    agent = Agent(provider, registry, Session(system=""), permissions=permissions)
+
+    outcome = agent.run("write a file")
+    assert outcome.stopped == "denied"
+    assert "plan mode" in outcome.errors[-1]

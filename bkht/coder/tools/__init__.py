@@ -22,7 +22,9 @@ __all__ = [
 ]
 
 
-def build_registry(root: Path | str, read_only: bool = False) -> tuple[Registry, Workspace]:
+def build_registry(
+    root: Path | str, read_only: bool = False, snapshots=None
+) -> tuple[Registry, Workspace]:
     """Build the tool set for a workspace rooted at ``root``.
 
     ``read_only`` omits the mutating tools entirely rather than denying them at
@@ -40,7 +42,7 @@ def build_registry(root: Path | str, read_only: bool = False) -> tuple[Registry,
         from .fs import register_write_tools
         from .shell import register_shell_tools
 
-        register_write_tools(registry, workspace)
+        register_write_tools(registry, workspace, snapshots)
         register_shell_tools(registry, workspace)
 
     return registry, workspace
