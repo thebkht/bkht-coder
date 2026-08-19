@@ -68,8 +68,7 @@ def test_resolve_shell_prefers_bash(monkeypatch):
     from bkht.coder.tools import shell as shell_module
 
     monkeypatch.setattr(shell_module.shutil, "which", _which("bash", "sh", "pwsh"))
-    monkeypatch.setattr(shell_module.os, "name", "posix")
-    resolved = shell_module.resolve_shell()
+    resolved = shell_module.resolve_shell("posix")
     assert resolved.argv == ("bash", "-c")
     assert resolved.name == "bash"
 
@@ -77,16 +76,14 @@ def test_resolve_shell_prefers_bash(monkeypatch):
 def test_resolve_shell_falls_back_to_powershell_on_nt(monkeypatch):
     from bkht.coder.tools import shell as shell_module
 
-    monkeypatch.setattr(shell_module.os, "name", "nt")
-
     monkeypatch.setattr(shell_module.shutil, "which", _which("pwsh", "powershell"))
-    resolved = shell_module.resolve_shell()
+    resolved = shell_module.resolve_shell("nt")
     assert resolved.name == "powershell"
     assert resolved.argv == ("pwsh", "-NoProfile", "-Command")
 
     # pwsh is preferred, but Windows PowerShell is enough on a stock box.
     monkeypatch.setattr(shell_module.shutil, "which", _which("powershell"))
-    assert shell_module.resolve_shell().argv == (
+    assert shell_module.resolve_shell("nt").argv == (
         "powershell",
         "-NoProfile",
         "-Command",
@@ -97,8 +94,7 @@ def test_resolve_shell_falls_back_to_sh_on_posix(monkeypatch):
     from bkht.coder.tools import shell as shell_module
 
     monkeypatch.setattr(shell_module.shutil, "which", _which("sh"))
-    monkeypatch.setattr(shell_module.os, "name", "posix")
-    resolved = shell_module.resolve_shell()
+    resolved = shell_module.resolve_shell("posix")
     assert resolved.argv == ("sh", "-c")
     # The tool keeps its name so POSIX sessions and transcripts are unchanged.
     assert resolved.name == "bash"
@@ -118,8 +114,9 @@ def test_no_shell_is_an_actionable_tool_error(monkeypatch, project):
 def test_description_names_the_active_shell(monkeypatch, project):
     from bkht.coder.tools import shell as shell_module
 
-    monkeypatch.setattr(shell_module.os, "name", "nt")
     monkeypatch.setattr(shell_module.shutil, "which", _which("pwsh"))
+    windows = shell_module.resolve_shell("nt")
+    monkeypatch.setattr(shell_module, "resolve_shell", lambda *a: windows)
     registry, _ = build_registry(project)
 
     tool = registry.get("powershell")
