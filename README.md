@@ -18,13 +18,40 @@ State lives in `~/.bkht-coder/sessions/`.
 
 ## Requirements
 
-* **Python 3.12+**
-* **[uv](https://docs.astral.sh/uv/)** — used for the venv, the lockfile, and running the tests
-* **[Ollama](https://ollama.com/download)**, serving on `http://localhost:11434`
-* The model: `qwen2.5-coder:14b` (~9 GB on disk). About **16 GB of RAM** is
+- **Python 3.12+**
+- **[uv](https://docs.astral.sh/uv/)** — used for the venv, the lockfile, and running the tests
+- **[Ollama](https://ollama.com/download)**, serving on `http://localhost:11434`
+- The model: `qwen2.5-coder:14b` (~9 GB on disk). About **16 GB of RAM** is
   enough at the default `num_ctx` of 8192; on 8 GB use `qwen2.5-coder:7b`.
 
-## Install — Linux / macOS
+## Install
+
+```sh
+curl -fsSL https://thebkht.com/install | sh
+```
+
+The same script, straight from the repo, if you'd rather not trust a redirect:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/thebkht/bkht-coder/main/scripts/install.sh | sh
+```
+
+Installs uv, Ollama and the model if they are missing, then puts `coder` on
+your `PATH`. It lists what it is about to install and asks once before
+touching anything; re-running it upgrades an existing install. Linux and macOS
+only — on Windows use the manual steps below.
+
+Read it first if you'd rather not pipe a script into a shell — it is
+`scripts/install.sh`, and the manual steps it automates are right below.
+
+| Variable                | What it does                                            |
+| ----------------------- | ------------------------------------------------------- |
+| `MODEL`                 | Model tag to pull, overriding the RAM-based choice      |
+| `BKHT_CODER_NO_MODEL=1` | Skip the model pull; `ollama pull` it yourself later    |
+| `BKHT_CODER_REF`        | Install a branch or tag instead of the default          |
+| `BKHT_CODER_YES=1`      | Don't ask; required when there is no terminal to ask on |
+
+## Install manually — Linux / macOS
 
 ```sh
 # 1. uv
@@ -52,7 +79,7 @@ uv tool install --editable .        # then just: coder
 source .venv/bin/activate && coder
 ```
 
-## Install — Windows
+## Install manually — Windows
 
 Use **PowerShell**. Everything works natively; only `scripts/verify.sh` needs a
 bash (Git Bash or WSL).
@@ -97,24 +124,28 @@ coder --host "http://$(ip route show default | awk '{print $3}'):11434"
 There is no config file; everything is a flag, and the defaults are the ones
 described above.
 
-| Flag | Default | What it does |
-|---|---|---|
-| `--model` | `qwen2.5-coder:14b` | Ollama model tag |
-| `--host` | `http://localhost:11434` | Ollama server URL |
-| `--num-ctx` | `8192` | Context window requested from Ollama (values ≤ 4096 are refused) |
-| `--cwd` | `.` | Workspace root the tools are confined to |
-| `--max-iterations` | `25` | Cap on agent loop iterations per task |
-| `--no-instructions` | off | Ignore `AGENTS.md` / `CLAUDE.md` |
+| Flag                | Default                  | What it does                                                     |
+| ------------------- | ------------------------ | ---------------------------------------------------------------- |
+| `--model`           | `qwen2.5-coder:14b`      | Ollama model tag                                                 |
+| `--host`            | `http://localhost:11434` | Ollama server URL                                                |
+| `--num-ctx`         | `8192`                   | Context window requested from Ollama (values ≤ 4096 are refused) |
+| `--cwd`             | `.`                      | Workspace root the tools are confined to                         |
+| `--max-iterations`  | `25`                     | Cap on agent loop iterations per task                            |
+| `--no-instructions` | off                      | Ignore `AGENTS.md` / `CLAUDE.md`                                 |
 
-Two environment variables are read by the **tooling**, not the agent:
+A few environment variables are read by the **tooling**, not the agent:
 
-| Variable | Used by | Default |
-|---|---|---|
-| `OLLAMA_HOST_URL` | `scripts/verify.sh` | `http://127.0.0.1:11434` |
-| `MODEL` | `scripts/verify.sh` (passed on as `pytest --model`) | `qwen2.5-coder:14b` |
+| Variable                | Used by                                                                       | Default                  |
+| ----------------------- | ----------------------------------------------------------------------------- | ------------------------ |
+| `OLLAMA_HOST_URL`       | `scripts/verify.sh`, `scripts/install.sh`                                     | `http://127.0.0.1:11434` |
+| `MODEL`                 | `scripts/verify.sh` (as `pytest --model`), `scripts/install.sh` (tag to pull) | `qwen2.5-coder:14b`      |
+| `BKHT_CODER_NO_MODEL`   | `scripts/install.sh` — skip the model pull                                    | unset                    |
+| `BKHT_CODER_REF`        | `scripts/install.sh` — branch or tag to install                               | unset                    |
+| `BKHT_CODER_YES`        | `scripts/install.sh` — skip the confirmation prompt                           | unset                    |
+| `BKHT_CODER_ALLOW_ROOT` | `scripts/install.sh` — permit running as root                                 | unset                    |
 
 `OLLAMA_HOST` is Ollama's own variable — set it before `ollama serve` to change
-where the *server* listens (e.g. `OLLAMA_HOST=0.0.0.0:11434`), then pass the
+where the _server_ listens (e.g. `OLLAMA_HOST=0.0.0.0:11434`), then pass the
 matching URL to `coder --host`.
 
 ## Project instructions
@@ -155,12 +186,23 @@ uv run pytest -q -m "not live"    # no model needed
 
 Common failures:
 
-* **`ollama not reachable`** — the server isn't running (`ollama serve`), or
+- **`ollama not reachable`** — the server isn't running (`ollama serve`), or
   it's bound to another address; check with `curl http://localhost:11434/api/tags`.
-* **Every turn takes minutes** — `num_ctx` is too large for available RAM; see
-  the table under *How it talks to the model*. Lower it or use the 7b model.
-* **The model ignores tools / replies with JSON text** — expected for this
+- **Every turn takes minutes** — `num_ctx` is too large for available RAM; see
+  the table under _How it talks to the model_. Lower it or use the 7b model.
+- **The model ignores tools / replies with JSON text** — expected for this
   class of model, and handled; see the same section.
+
+## Uninstalling
+
+```sh
+uv tool uninstall bkht-coder     # removes the `coder` command
+rm -rf ~/.bkht-coder             # sessions and global AGENTS.md
+```
+
+uv, Ollama and the pulled model are left alone. The installer will use them if
+they are already there, so it doesn't assume it owns them — remove those the
+way you'd remove anything else you installed.
 
 ## Code review
 
@@ -200,11 +242,11 @@ The default is **8192**, not the model's native 32768, because the binding
 constraint is host RAM. Measured on a 16 GB machine with `qwen2.5-coder:14b`,
 one warm trivial completion:
 
-| `num_ctx` | Placement | Size | Warm turn |
-|---|---|---|---|
-| 8192 | 100% GPU | 10 GB | 0.9 s |
-| 16384 | 9% CPU / 91% GPU | 12 GB | 11.1 s |
-| 32768 | 27% CPU / 73% GPU | 15 GB | >300 s (timed out) |
+| `num_ctx` | Placement         | Size  | Warm turn          |
+| --------- | ----------------- | ----- | ------------------ |
+| 8192      | 100% GPU          | 10 GB | 0.9 s              |
+| 16384     | 9% CPU / 91% GPU  | 12 GB | 11.1 s             |
+| 32768     | 27% CPU / 73% GPU | 15 GB | >300 s (timed out) |
 
 Past 8192 the KV cache pushes the working set off the GPU and every turn pays
 for it. On a machine with more memory, raise it with `--num-ctx` — that is the
