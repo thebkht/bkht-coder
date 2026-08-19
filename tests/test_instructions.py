@@ -262,3 +262,8 @@ def test_reload_rebuilds_the_system_prompt(project, no_global):
     repl.dispatch("/instructions reload")
     assert "MARKER-GAMMA" in repl.agent.session.system
     assert any("Reloaded" in line for line in lines)
+
+
+def test_workspace_sources_are_named_relative_to_the_root(tmp_path, no_global):
+    (tmp_path / "CLAUDE.md").write_text("rule")
+    assert load_instructions(tmp_path)[0].source == "CLAUDE.md"

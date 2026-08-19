@@ -42,12 +42,19 @@ class Instruction:
     truncated: bool = False
 
 
-def _label(path: Path) -> str:
-    """How a source is named in the prompt: short, but unambiguous."""
-    try:
-        return f"~/{path.relative_to(Path.home())}"
-    except ValueError:
-        return str(path)
+def _label(path: Path, root: Path) -> str:
+    """How a source is named in the prompt: short, but unambiguous.
+
+    Workspace files are named relative to the root, the same way every other
+    path the model sees is, so a rule can be traced back to a file the model
+    can actually open.
+    """
+    for base, prefix in ((root, ""), (Path.home(), "~/")):
+        try:
+            return prefix + str(path.relative_to(base))
+        except ValueError:
+            continue
+    return str(path)
 
 
 def _read(path: Path) -> str | None:
@@ -104,7 +111,7 @@ def load_instructions(
             remaining = 0
         else:
             remaining -= len(text)
-        kept.append(Instruction(source=_label(path), text=text, truncated=truncated))
+        kept.append(Instruction(source=_label(path, root), text=text, truncated=truncated))
 
     kept.reverse()
     return kept
