@@ -222,3 +222,50 @@ def test_a_json_only_reply_that_is_not_a_call_is_a_final_answer(loop):
 def test_whitespace_only_reply_is_still_a_retry(loop):
     agent, provider = loop(["   \n  ", "done"])
     assert agent.run("hi").answer == "done"
+
+
+# --- the scout ---------------------------------------------------------------
+
+
+def scout_messages(payload: list[dict]) -> list[dict]:
+    return [m for m in payload if m.get("name") == "codebase_search"]
+
+
+def test_the_workspace_is_searched_before_the_model_is_asked(loop, project):
+    agent, provider = loop(["helper doubles its argument."], scout_root=project)
+    agent.run("what does helper do?")
+
+    found = scout_messages(provider.calls[0])
+    assert len(found) == 1
+    assert "src/util.py" in found[0]["content"]
+    # After the user message, so the model reads the request and then the
+    # search made for it.
+    assert provider.calls[0].index(found[0]) > provider.calls[0].index(
+        {"role": "user", "content": "what does helper do?"}
+    )
+
+
+def test_nothing_is_searched_without_a_scout_root(loop):
+    agent, provider = loop(["It is a demo project."])
+    agent.run("what does helper do?")
+    assert scout_messages(provider.calls[0]) == []
+
+
+def test_a_conversational_turn_is_not_searched(loop, project):
+    agent, provider = loop(["You're welcome."], scout_root=project)
+    agent.run("thanks!")
+    assert scout_messages(provider.calls[0]) == []
+
+
+def test_a_broken_scout_does_not_lose_the_turn(loop, project, monkeypatch):
+    from bkht.coder import agent as agent_module
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("index on fire")
+
+    monkeypatch.setattr(agent_module, "scout", explode)
+    agent, provider = loop(["helper doubles its argument."], scout_root=project)
+
+    outcome = agent.run("what does helper do?")
+    assert outcome.answer == "helper doubles its argument."
+    assert scout_messages(provider.calls[0]) == []

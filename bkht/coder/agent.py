@@ -14,12 +14,14 @@ between usable and infuriating.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Protocol
 
 from . import prompts
 from .context import compact, should_compact
 from .parsing import ToolCall
 from .provider import Provider, ProviderError, Reply, collect
+from .retrieval import scout, terms
 from .session import Session
 from .tools.base import Registry, ToolError, ToolResult, validate_arguments
 
@@ -75,6 +77,7 @@ class Agent:
         listener: Listener | None = None,
         permissions=None,
         max_iterations: int = MAX_ITERATIONS,
+        scout_root: Path | str | None = None,
     ) -> None:
         self.provider = provider
         self.registry = registry
@@ -82,11 +85,42 @@ class Agent:
         self.listener = listener or NullListener()
         self.permissions = permissions
         self.max_iterations = max_iterations
+        # None means no scouting. The review passes drive their own conversation
+        # from a diff they already have, so retrieval would only be noise there.
+        self.scout_root = Path(scout_root) if scout_root else None
 
     def run(self, user_message: str) -> Outcome:
         """Run the loop until the model answers, or a bound is hit."""
         self.session.add_user(user_message)
+        self._scout(user_message)
         return self.resume()
+
+    def _scout(self, user_message: str) -> None:
+        """Search the workspace for what the message is about, before asking.
+
+        The result is recorded as a `tool` message the model never called, which
+        is the point: it starts the turn already knowing where to look instead
+        of spending two or three of them finding out, or -- more often -- not
+        bothering. A failure here is not worth losing the turn over, so it
+        degrades to no search at all.
+        """
+        if self.scout_root is None:
+            return
+
+        try:
+            wanted = terms(user_message)
+            block = scout(self.scout_root, user_message) if wanted else ""
+        except Exception:
+            return
+        if not block:
+            return
+
+        # Reported through the ordinary tool events so every listener renders it
+        # without needing to know it exists.
+        call = ToolCall(name="codebase_search", arguments={"terms": ", ".join(wanted)})
+        self.listener.on_tool_call(call)
+        self.listener.on_tool_result(call, ToolResult.success(block))
+        self.session.add_tool_result(call.name, block)
 
     def resume(self) -> Outcome:
         """Continue from the current history without adding a user message."""
