@@ -12,7 +12,7 @@ coder --model qwen2.5-coder:7b
 ```
 
 Slash commands: `/tools`, `/context`, `/clear`, `/undo`, `/diff`, `/review`,
-`/model`, `/mode`, `/help`, `/exit`. `!cmd` shells out.
+`/instructions`, `/model`, `/mode`, `/help`, `/exit`. `!cmd` shells out.
 
 State lives in `~/.bkht-coder/sessions/`.
 
