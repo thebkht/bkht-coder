@@ -74,7 +74,7 @@ Root: {root}
 All paths are relative to that root. You cannot read or write outside it.
 
 {tree}
-
+{instructions}
 # Tools
 
 {tools}
@@ -82,12 +82,38 @@ All paths are relative to that root. You cannot read or write outside it.
 {protocol}"""
 
 
-def system_prompt(registry, root: str, tree: str = "") -> str:
-    """Assemble the system prompt for a session."""
+INSTRUCTIONS_HEADER = """\
+# Project instructions
+
+These are the user's standing instructions for this workspace. Follow them.
+Where they conflict with the general guidance above, they win. They do not
+change the format for calling tools, which is fixed and described below.
+"""
+
+
+def instructions_block(instructions: str) -> str:
+    """The project-instructions section, or nothing when there are none.
+
+    Concatenated rather than formatted: instruction files are user prose and
+    routinely contain braces, which ``str.format`` would try to interpret.
+    """
+    if not instructions.strip():
+        return ""
+    return "\n" + INSTRUCTIONS_HEADER + "\n" + instructions.strip() + "\n"
+
+
+def system_prompt(registry, root: str, tree: str = "", instructions: str = "") -> str:
+    """Assemble the system prompt for a session.
+
+    Project instructions sit above the tool section, never below it: the tool
+    protocol has to be the last thing the model reads, because drifting away
+    from the emission format is this model's characteristic failure.
+    """
     tree_block = f"Files:\n{tree}" if tree else ""
     return SYSTEM.format(
         root=root,
         tree=tree_block,
+        instructions=instructions_block(instructions),
         tools=describe_tools(registry),
         protocol=TOOL_PROTOCOL,
     )

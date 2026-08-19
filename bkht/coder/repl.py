@@ -10,6 +10,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 
+from .instructions import load_instructions, render
 from .permissions import MODES
 from .provider import DEFAULT_NUM_CTX
 
@@ -20,6 +21,7 @@ Commands
   /clear              forget the conversation, keep the workspace
   /undo               restore the file changed by the last mutating call
   /diff               show uncommitted changes in the workspace
+  /instructions [reload]  show the project instructions, or re-read them
   /review [base]      review uncommitted changes, or this branch against base
   /model [name]       show or switch the Ollama model
   /mode [ask|auto|plan]   show or switch the permission mode
@@ -41,12 +43,16 @@ class Command:
 class Repl:
     """Handles everything typed at the prompt that is not a task."""
 
-    def __init__(self, agent, snapshots, permissions, workspace, out=print) -> None:
+    def __init__(
+        self, agent, snapshots, permissions, workspace, out=print,
+        use_instructions: bool = True,
+    ) -> None:
         self.agent = agent
         self.snapshots = snapshots
         self.permissions = permissions
         self.workspace = workspace
         self.out = out
+        self.use_instructions = use_instructions
 
     def dispatch(self, line: str) -> Command:
         """Route one input line: slash command, shell escape, or a task."""
@@ -83,6 +89,41 @@ class Repl:
         for tool in self.agent.registry:
             marker = " (needs permission)" if tool.mutating else ""
             self.out(f"  {tool.name}{marker}\n      {tool.description}")
+        return Command()
+
+    def do_instructions(self, argument: str) -> Command:
+        """Show the project instructions, or re-read them from disk.
+
+        Reload exists because editing CLAUDE.md mid-session is the common case,
+        and without it the only way to apply the edit is to restart and lose
+        the conversation.
+        """
+        if not self.use_instructions:
+            self.out("Instructions are disabled for this session (--no-instructions).")
+            return Command()
+
+        loaded = load_instructions(self.workspace.root)
+        if not loaded:
+            self.out("No AGENTS.md or CLAUDE.md found for this workspace.")
+            return Command()
+
+        if argument.strip() == "reload":
+            from .context import file_tree
+            from .prompts import system_prompt
+
+            self.agent.session.system = system_prompt(
+                self.agent.registry,
+                str(self.workspace.root),
+                file_tree(self.workspace.root),
+                render(loaded),
+            )
+            self.out(f"Reloaded {len(loaded)} instruction file(s).")
+
+        for instruction in loaded:
+            marker = " (truncated)" if instruction.truncated else ""
+            self.out(f"  {instruction.source}{marker}")
+            for line in instruction.text.splitlines():
+                self.out(f"      {line}")
         return Command()
 
     def do_context(self, argument: str) -> Command:

@@ -155,3 +155,110 @@ def test_render_names_every_source(tmp_path, no_global):
 def test_summarize_marks_truncation():
     assert summarize([Instruction("a.md", "x")]) == "instructions: a.md"
     assert "truncated" in summarize([Instruction("a.md", "x", truncated=True)])
+
+
+# --- wiring -----------------------------------------------------------------
+
+
+def _repl(project, use_instructions=True):
+    from bkht.coder.agent import Agent
+    from bkht.coder.permissions import ASK, Permissions
+    from bkht.coder.repl import Repl
+    from bkht.coder.session import Session, Snapshots
+    from bkht.coder.tools import build_registry
+
+    from fakes import FakeProvider
+
+    snapshots = Snapshots()
+    registry, workspace = build_registry(project, snapshots=snapshots)
+    permissions = Permissions(mode=ASK, workspace=workspace, prompt=lambda q, b: "n")
+    session = Session(system="sys", cwd=str(project), model="fake")
+    agent = Agent(FakeProvider([]), registry, session, permissions=permissions)
+
+    lines = []
+    repl = Repl(
+        agent, snapshots, permissions, workspace,
+        out=lines.append, use_instructions=use_instructions,
+    )
+    return repl, lines
+
+
+def test_system_prompt_omits_the_section_when_there_is_nothing_to_say(project):
+    from bkht.coder.prompts import system_prompt
+    from bkht.coder.tools import build_registry
+
+    registry, workspace = build_registry(project)
+    assert "Project instructions" not in system_prompt(registry, str(project))
+
+
+def test_system_prompt_carries_instructions_and_survives_braces(project):
+    from bkht.coder.prompts import system_prompt
+    from bkht.coder.tools import build_registry
+
+    registry, workspace = build_registry(project)
+    # Instruction files are prose and routinely contain braces; formatting them
+    # would raise or, worse, silently substitute.
+    prompt = system_prompt(registry, str(project), "", "Prefer f'{x}' over format().")
+    assert "Prefer f'{x}' over format()." in prompt
+
+    # The tool protocol has to stay last: drifting off the emission format is
+    # this model's characteristic failure.
+    assert prompt.index("Project instructions") < prompt.index("# Calling a tool")
+
+
+def test_make_agent_loads_workspace_instructions(project, monkeypatch, tmp_path, no_global):
+    from bkht.coder import session as session_module
+    from bkht.coder.cli import build_parser, make_agent
+
+    monkeypatch.setattr(session_module, "STATE_DIR", tmp_path / "state")
+    (project / "CLAUDE.md").write_text("MARKER-ALPHA")
+
+    args = build_parser().parse_args(["--cwd", str(project)])
+    agent, *_ = make_agent(args)
+    assert "MARKER-ALPHA" in agent.session.system
+
+
+def test_make_agent_honours_no_instructions(project, monkeypatch, tmp_path, no_global):
+    from bkht.coder import session as session_module
+    from bkht.coder.cli import build_parser, make_agent
+
+    monkeypatch.setattr(session_module, "STATE_DIR", tmp_path / "state")
+    (project / "CLAUDE.md").write_text("MARKER-ALPHA")
+
+    args = build_parser().parse_args(["--cwd", str(project), "--no-instructions"])
+    agent, *_ = make_agent(args)
+    assert "MARKER-ALPHA" not in agent.session.system
+
+
+def test_instructions_command_reports_nothing_found(project, no_global):
+    repl, lines = _repl(project)
+    repl.dispatch("/instructions")
+    assert "No AGENTS.md or CLAUDE.md found" in lines[0]
+
+
+def test_instructions_command_lists_sources(project, no_global):
+    (project / "CLAUDE.md").write_text("MARKER-BETA")
+    repl, lines = _repl(project)
+    repl.dispatch("/instructions")
+    assert any("CLAUDE.md" in line for line in lines)
+    assert any("MARKER-BETA" in line for line in lines)
+
+
+def test_instructions_command_says_when_disabled(project, no_global):
+    (project / "CLAUDE.md").write_text("MARKER-BETA")
+    repl, lines = _repl(project, use_instructions=False)
+    repl.dispatch("/instructions")
+    assert "disabled" in lines[0]
+    assert not any("MARKER-BETA" in line for line in lines)
+
+
+def test_reload_rebuilds_the_system_prompt(project, no_global):
+    repl, lines = _repl(project)
+    assert "MARKER-GAMMA" not in repl.agent.session.system
+
+    # The file appears after the session started, which is the case reload
+    # exists for: editing the rules without losing the conversation.
+    (project / "CLAUDE.md").write_text("MARKER-GAMMA")
+    repl.dispatch("/instructions reload")
+    assert "MARKER-GAMMA" in repl.agent.session.system
+    assert any("Reloaded" in line for line in lines)

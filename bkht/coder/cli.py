@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .agent import Agent
 from .context import file_tree
+from .instructions import load_instructions, render, summarize as summarize_instructions
 from .parsing import ToolCall
 from .permissions import ASK, AUTO, PLAN, Permissions
 from .prompts import system_prompt
@@ -92,6 +93,7 @@ def add_common_arguments(parser) -> None:
     parser.add_argument("--num-ctx", type=int, default=DEFAULT_NUM_CTX, help="Context window to request.")
     parser.add_argument("--cwd", default=".", help="Workspace root. Defaults to the current directory.")
     parser.add_argument("--auto", action="store_true", help="Allow every tool call without prompting.")
+    parser.add_argument("--no-instructions", action="store_true", help="Ignore AGENTS.md and CLAUDE.md.")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -139,7 +141,16 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
     )
     permissions = Permissions(mode=mode, workspace=workspace)
     provider = OllamaProvider(model=args.model, host=args.host, num_ctx=args.num_ctx)
-    system = system_prompt(registry, str(workspace.root), file_tree(workspace.root))
+
+    # Announced rather than applied silently: instructions shape every answer
+    # the model gives, and a rule the user has forgotten writing is worse than
+    # no rule at all.
+    loaded = [] if getattr(args, "no_instructions", False) else load_instructions(workspace.root)
+    if loaded:
+        print(paint(summarize_instructions(loaded), DIM))
+    system = system_prompt(
+        registry, str(workspace.root), file_tree(workspace.root), render(loaded)
+    )
 
     # The system prompt is rebuilt rather than reloaded, so a resumed session
     # picks up the current tool set instead of whatever it was told last time.
@@ -182,9 +193,9 @@ def report(outcome) -> int:
     return 0
 
 
-def interactive(agent, snapshots, permissions, workspace, listener) -> int:
+def interactive(agent, snapshots, permissions, workspace, listener, use_instructions=True) -> int:
     """The REPL. Ctrl-C abandons the current line; Ctrl-D leaves."""
-    repl = Repl(agent, snapshots, permissions, workspace)
+    repl = Repl(agent, snapshots, permissions, workspace, use_instructions=use_instructions)
     print(paint(f"coder · {agent.provider.model} · {permissions.mode} · {workspace.root}", DIM))
     print(paint("/help for commands, /exit to leave.", DIM))
 
@@ -223,7 +234,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.prompt:
         return report(agent.run(" ".join(args.prompt)))
-    return interactive(agent, snapshots, permissions, workspace, listener)
+    return interactive(
+        agent, snapshots, permissions, workspace, listener,
+        use_instructions=not args.no_instructions,
+    )
 
 
 if __name__ == "__main__":
