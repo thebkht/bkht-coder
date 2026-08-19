@@ -8,6 +8,7 @@ coder "add a --verbose flag"   # one-shot
 coder --resume                 # continue the last session here
 coder --auto                   # no permission prompts
 coder --plan                   # read-only
+coder --no-scout               # don't search the workspace before each task
 coder --model qwen2.5-coder:7b
 ```
 
@@ -191,6 +192,30 @@ In a session, `/instructions` shows what is loaded and `/instructions reload`
 re-reads it, so editing the rules doesn't cost the conversation. `--resume`
 picks up edits on its own, because the system prompt is rebuilt rather than
 replayed.
+
+## Searching before it answers
+
+Every task is preceded by a keyword search of the workspace, made from the
+words in the request itself, and the result is handed to the model as a tool
+result it never had to ask for.
+
+It exists because the model has `grep` and `glob`, is told to use them, and
+often does not — it answers, or edits, from the flat file list in the system
+prompt. That list is built once at startup and has nothing to do with what was
+asked.
+
+Terms come out of the message: quoted spans, paths, identifiers, and their
+camelCase and snake_case parts, minus a stopword set. Files are then ranked by
+where the terms land — a hit in the path, a line that looks like a definition,
+and up to three mentions each — with a bonus for every term after the first, so
+breadth of match beats one common word repeated. The top few files and their
+best lines are rendered as `path:line: text`, the same shape `grep` returns,
+inside a 2000-character budget.
+
+A message with nothing to search for — "thanks", "yes go ahead" — is not
+searched, and a search that fails is dropped rather than costing the turn. The
+block says what it is, so the model treats it as a starting point rather than
+the answer, and `--no-scout` turns it off. `/context` shows which it is.
 
 ## Checking the install
 
