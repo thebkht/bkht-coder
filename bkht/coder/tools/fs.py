@@ -161,7 +161,9 @@ def walk(directory: Path, root: Path, depth: int, prefix: str = "") -> list[str]
 
     lines: list[str] = []
     for child in children:
-        if child.name in IGNORED_DIRS or child.name.startswith(".") and child.is_dir():
+        if child.name in IGNORED_DIRS:
+            continue
+        if child.name.startswith(".") and child.is_dir():
             continue
         if child.is_dir():
             lines.append(f"{prefix}  {child.name}/")

@@ -217,3 +217,40 @@ def test_hunks_from_one_file_stay_together_in_a_unit():
 
 def test_an_empty_diff_yields_no_units():
     assert chunk([]) == []
+
+
+def test_a_changed_line_starting_with_dashes_is_not_a_file_header():
+    # "-- x" removed renders as "--- x"; treating it as a header would drop
+    # the rest of the real file silently.
+    text = """\
+diff --git a/notes.md b/notes.md
+--- a/notes.md
++++ b/notes.md
+@@ -1,3 +1,3 @@
+ title
+--- old rule
++++ new rule
+ tail
+"""
+    [file] = parse_diff(text)
+    assert file.path == "notes.md"
+    assert [c.kind for c in file.hunks[0].changes] == [" ", "-", "+", " "]
+    assert [c.text for c in file.hunks[0].changes if c.kind == "+"] == ["++ new rule"]
+
+
+def test_a_second_file_is_still_found_after_such_a_line():
+    text = """\
+diff --git a/a.md b/a.md
+--- a/a.md
++++ b/a.md
+@@ -1,2 +1,2 @@
+--- gone
++++ added
+diff --git a/b.py b/b.py
+--- a/b.py
++++ b/b.py
+@@ -1,1 +1,2 @@
+ x = 1
++y = 2
+"""
+    assert [f.path for f in parse_diff(text)] == ["a.md", "b.py"]

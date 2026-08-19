@@ -135,11 +135,15 @@ def parse_diff(text: str) -> list[FileDiff]:
             current, hunk, pending_added = None, None, False
             continue
 
-        if raw.startswith("--- "):
+        # File headers are only recognised outside a hunk. Inside one, a
+        # removed line reading "-- x" renders as "--- x" and an added "++ x"
+        # as "+++ x", which would otherwise be mistaken for a new file and
+        # silently drop the rest of the real one.
+        if hunk is None and raw.startswith("--- "):
             pending_added = raw[4:].strip() == "/dev/null"
             continue
 
-        if raw.startswith("+++ "):
+        if hunk is None and raw.startswith("+++ "):
             path = raw[4:].strip()
             if path == "/dev/null":
                 current = None  # a deletion has nothing to review
