@@ -13,6 +13,7 @@ from .permissions import ASK, AUTO, PLAN, Permissions
 from .prompts import system_prompt
 from .provider import DEFAULT_HOST, DEFAULT_MODEL, DEFAULT_NUM_CTX, OllamaProvider
 from .repl import Repl
+from .review import cli as review_cli
 from .session import Session, Snapshots
 from .tools import build_registry
 from .tools.base import ToolResult
@@ -84,21 +85,33 @@ class TerminalListener:
         print(paint("  · retrying (malformed reply)", YELLOW))
 
 
+def add_common_arguments(parser) -> None:
+    """Flags shared by the agent and by `coder review`."""
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="Ollama model to use.")
+    parser.add_argument("--host", default=DEFAULT_HOST, help="Ollama server URL.")
+    parser.add_argument("--num-ctx", type=int, default=DEFAULT_NUM_CTX, help="Context window to request.")
+    parser.add_argument("--cwd", default=".", help="Workspace root. Defaults to the current directory.")
+    parser.add_argument("--auto", action="store_true", help="Allow every tool call without prompting.")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="coder",
         description="A coding agent running against a local Ollama server.",
     )
+    subparsers = parser.add_subparsers(dest="command")
+    reviewer = subparsers.add_parser(
+        "review", help="Review uncommitted changes, a branch, or a commit range."
+    )
+    add_common_arguments(reviewer)
+    review_cli.add_arguments(reviewer)
+
     parser.add_argument("prompt", nargs="*", help="Task to run. Omit for an interactive session.")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help="Ollama model to use.")
-    parser.add_argument("--host", default=DEFAULT_HOST, help="Ollama server URL.")
-    parser.add_argument("--num-ctx", type=int, default=DEFAULT_NUM_CTX, help="Context window to request.")
-    parser.add_argument("--cwd", default=".", help="Workspace root. Defaults to the current directory.")
     parser.add_argument("--resume", action="store_true", help="Continue the most recent session for this directory.")
-    parser.add_argument("--auto", action="store_true", help="Allow every tool call without prompting.")
     parser.add_argument("--plan", action="store_true", help="Read-only: refuse every change to the workspace.")
     parser.add_argument("--verbose", action="store_true", help="Stream raw model output and tool results.")
     parser.add_argument("--max-iterations", type=int, default=25, help="Cap on loop iterations per task.")
+    add_common_arguments(parser)
     return parser
 
 
@@ -201,6 +214,10 @@ def interactive(agent, snapshots, permissions, workspace, listener) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+
+    if args.command == "review":
+        return review_cli.run(args)
+
     listener = TerminalListener(verbose=args.verbose)
     agent, snapshots, permissions, workspace = make_agent(args, listener)
 

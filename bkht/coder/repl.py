@@ -20,6 +20,7 @@ Commands
   /clear              forget the conversation, keep the workspace
   /undo               restore the file changed by the last mutating call
   /diff               show uncommitted changes in the workspace
+  /review [base]      review uncommitted changes, or this branch against base
   /model [name]       show or switch the Ollama model
   /mode [ask|auto|plan]   show or switch the permission mode
   /help               this list
@@ -126,6 +127,29 @@ class Repl:
             self.out((completed.stderr or "git diff failed").strip())
         else:
             self.out(completed.stdout.rstrip() or "No uncommitted changes.")
+        return Command()
+
+    def do_review(self, argument: str) -> Command:
+        """Review the working tree, or this branch against a base branch."""
+        from .review import render
+        from .review.cli import Progress
+        from .review.diff import GitError, collect_diff
+        from .review.reviewer import Reviewer
+
+        try:
+            files = collect_diff(self.workspace.root, base=argument or None)
+        except GitError as exc:
+            self.out(str(exc))
+            return Command()
+
+        if not files:
+            self.out("Nothing to review: no changes were found.")
+            return Command()
+
+        reviewer = Reviewer(
+            self.agent.provider, self.workspace.root, listener=Progress()
+        )
+        self.out(render.terminal(reviewer.review(files), colour=False))
         return Command()
 
     def do_model(self, argument: str) -> Command:

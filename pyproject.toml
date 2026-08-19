@@ -23,6 +23,7 @@ packages = ["bkht"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests"]
 markers = [
     "live: requires a reachable Ollama server",
 ]
