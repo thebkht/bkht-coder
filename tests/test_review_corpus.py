@@ -19,8 +19,18 @@ from corpus import BUGGY, CASES, CLEAN, Case
 
 # Floors, not targets. They record what this prompt set achieves on a 14b
 # model; raise them when a change earns it, and treat a drop as a failure.
-MIN_RECALL = 0.5
-MIN_PRECISION = 0.6
+#
+# Measured on qwen2.5-coder:14b at temperature 0, two consecutive runs, both
+# 4/4 recall and 3/3 precision. The floors sit one case below each: sampling
+# here is not fully deterministic -- Ollama pins no seed, and a case has been
+# seen to flip between runs -- so a floor at the measured maximum would fail on
+# noise rather than on a regression.
+#
+# Before the verify pass was asked a positive question, the same corpus scored
+# recall 0.25 with precision 1.00: the find pass located all four bugs and
+# verification refuted every one of them.
+MIN_RECALL = 0.75
+MIN_PRECISION = 0.67
 LINE_TOLERANCE = 3
 
 
