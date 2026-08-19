@@ -27,7 +27,7 @@ State lives in `~/.bkht-coder/sessions/`.
 ## Install
 
 ```sh
-curl -fsSL https://thebkht.com/install | sh
+curl -fsSL https://thebkht.com/install.sh | sh
 ```
 
 The same script, straight from the repo, if you'd rather not trust a redirect:
@@ -36,10 +36,25 @@ The same script, straight from the repo, if you'd rather not trust a redirect:
 curl -fsSL https://raw.githubusercontent.com/thebkht/bkht-coder/main/scripts/install.sh | sh
 ```
 
+On Windows, in PowerShell:
+
+```powershell
+irm https://thebkht.com/install.sh.ps1 | iex
+```
+
 Installs uv, Ollama and the model if they are missing, then puts `coder` on
 your `PATH`. It lists what it is about to install and asks once before
-touching anything; re-running it upgrades an existing install. Linux and macOS
-only — on Windows use the manual steps below.
+touching anything; re-running it upgrades an existing install.
+
+If an Ollama server is already answering — including one on another machine,
+via `OLLAMA_HOST_URL` — the installer uses it and installs no second copy. That
+is the WSL case: point it at the Windows host and the Linux side gets nothing
+but `coder`.
+
+```sh
+OLLAMA_HOST_URL="http://$(ip route show default | awk '{print $3}'):11434" \
+  curl -fsSL https://thebkht.com/install.sh | sh
+```
 
 Read it first if you'd rather not pipe a script into a shell — it is
 `scripts/install.sh`, and the manual steps it automates are right below.
@@ -81,6 +96,7 @@ source .venv/bin/activate && coder
 
 ## Install manually — Windows
 
+The steps `scripts/install.ps1` automates, if you'd rather run them yourself.
 Use **PowerShell**. Everything works natively; only `scripts/verify.sh` needs a
 bash (Git Bash or WSL).
 

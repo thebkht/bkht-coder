@@ -2,7 +2,7 @@
 #
 # One-line installer for bkht-coder.
 #
-#   curl -fsSL https://thebkht.com/install | sh
+#   curl -fsSL https://thebkht.com/install.sh | sh
 #
 # Installs uv, Ollama and the model if they are missing, then puts `coder` on
 # PATH. Every step is skipped when it is already satisfied, so re-running this
@@ -205,7 +205,9 @@ pull_model_api() {
     -d "{\"model\":\"$MODEL_TAG\"}" \
   | awk '
       match($0, /"status":"[^"]*"/) {
-        s = substr($0, RSTART + 11, RLENGTH - 12)
+        # RSTART is the opening quote of "status"; skip the 10-char
+        # prefix and drop the value'"'"'s own closing quote.
+        s = substr($0, RSTART + 10, RLENGTH - 11)
         if (s != last) { print "    " s; fflush(); last = s }
         if (s == "success") ok = 1
       }
@@ -274,9 +276,12 @@ cat <<EOF
 
 Done. Try:
 
-  coder$HOST_FLAG                          # interactive REPL in the current directory
-  coder$HOST_FLAG "add a --verbose flag"   # one-shot
-  coder --help                   # every flag
+  coder$HOST_FLAG
+      an interactive session in the current directory
+  coder$HOST_FLAG "add a --verbose flag"
+      one task, then exit
+  coder --help
+      every flag
 
 Model:   $MODEL_TAG
 Server:  $HOST
