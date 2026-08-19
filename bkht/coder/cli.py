@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from .agent import Agent
+from .context import file_tree
 from .parsing import ToolCall
 from .permissions import ASK, AUTO, PLAN, Permissions
 from .prompts import system_prompt
@@ -125,7 +126,7 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
     )
     permissions = Permissions(mode=mode, workspace=workspace)
     provider = OllamaProvider(model=args.model, host=args.host, num_ctx=args.num_ctx)
-    system = system_prompt(registry, str(workspace.root))
+    system = system_prompt(registry, str(workspace.root), file_tree(workspace.root))
 
     # The system prompt is rebuilt rather than reloaded, so a resumed session
     # picks up the current tool set instead of whatever it was told last time.

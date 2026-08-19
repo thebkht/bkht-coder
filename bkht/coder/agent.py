@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from . import prompts
+from .context import compact, should_compact
 from .parsing import ToolCall
 from .provider import Provider, ProviderError, Reply, collect
 from .session import Session
@@ -153,6 +154,7 @@ class Agent:
 
     def _ask(self) -> Reply:
         """One streamed round trip, with tokens forwarded to the listener."""
+        self._compact_if_needed()
 
         def stream():
             for chunk in self.provider.chat(
@@ -163,6 +165,14 @@ class Agent:
                 yield chunk
 
         return collect(stream())
+
+    def _compact_if_needed(self) -> None:
+        """Summarize the oldest turns once the window is close to full."""
+        num_ctx = getattr(self.provider, "num_ctx", 0)
+        if not should_compact(self.session, num_ctx):
+            return
+        if compact(self.session, self.provider) is not None:
+            self.listener.on_retry("compacted earlier turns to free context")
 
     def _execute(self, call: ToolCall) -> ToolResult:
         """Validate, authorize, and run one tool call.

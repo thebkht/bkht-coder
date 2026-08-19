@@ -15,9 +15,10 @@ class FakeProvider:
     reassembly path the real stream uses.
     """
 
-    def __init__(self, script: list, model: str = "fake") -> None:
+    def __init__(self, script: list, model: str = "fake", num_ctx: int = 32768) -> None:
         self.script = list(script)
         self.model = model
+        self.num_ctx = num_ctx
         self.calls: list[list[dict]] = []
 
     def chat(self, messages: list[dict], tools: list[dict] | None = None) -> Iterator[Chunk]:
