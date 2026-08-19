@@ -208,3 +208,17 @@ def test_plan_mode_denial_is_fed_back_so_the_model_can_explain(project):
     outcome = agent.run("write a file")
     assert outcome.stopped == "denied"
     assert "plan mode" in outcome.errors[-1]
+
+
+def test_a_json_only_reply_that_is_not_a_call_is_a_final_answer(loop):
+    # The review passes answer with a bare JSON array; stripping it would leave
+    # nothing and send the loop into a pointless retry.
+    agent, _ = loop(['[{"file": "a.py", "line": 3, "summary": "off by one"}]'])
+    outcome = agent.run("review it")
+    assert outcome.stopped == "answered"
+    assert "off by one" in outcome.raw
+
+
+def test_whitespace_only_reply_is_still_a_retry(loop):
+    agent, provider = loop(["   \n  ", "done"])
+    assert agent.run("hi").answer == "done"

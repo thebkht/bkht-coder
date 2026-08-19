@@ -57,6 +57,7 @@ class Outcome:
     """What one :meth:`Agent.run` produced."""
 
     answer: str = ""
+    raw: str = ""  # the final reply before tool-call JSON was stripped
     iterations: int = 0
     tool_calls: int = 0
     stopped: str = "answered"  # answered | iteration-cap | retry-cap | denied
@@ -106,9 +107,13 @@ class Agent:
             self.session.add_assistant(reply.content)
 
             if not reply.tool_calls:
-                answer = reply.prose
+                # Prose first, but fall back to the raw content: a reply that is
+                # only JSON and is not a tool call is a legitimate final answer,
+                # which is exactly the shape the review passes return.
+                answer = reply.prose or reply.content.strip()
                 if answer:
                     outcome.answer = answer
+                    outcome.raw = reply.content
                     outcome.stopped = "answered"
                     return outcome
 
