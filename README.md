@@ -80,6 +80,11 @@ uv tool install --editable .        # then just: coder
 
 On Windows, state lives in `%USERPROFILE%\.bkht-coder\sessions\`.
 
+The shell tool works out of the box: with no `bash` on `PATH` the agent runs
+commands through PowerShell and is told to write PowerShell syntax. Installing
+[Git for Windows](https://git-scm.com/download/win) upgrades it to bash, which
+the model writes more reliably — worth doing if you have the choice.
+
 Under WSL, Ollama running on the Windows host is not on WSL's `localhost` —
 point the agent at the host explicitly:
 
