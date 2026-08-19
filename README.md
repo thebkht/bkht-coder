@@ -99,6 +99,7 @@ described above.
 | `--num-ctx` | `8192` | Context window requested from Ollama (values ≤ 4096 are refused) |
 | `--cwd` | `.` | Workspace root the tools are confined to |
 | `--max-iterations` | `25` | Cap on agent loop iterations per task |
+| `--no-instructions` | off | Ignore `AGENTS.md` / `CLAUDE.md` |
 
 Two environment variables are read by the **tooling**, not the agent:
 
@@ -110,6 +111,34 @@ Two environment variables are read by the **tooling**, not the agent:
 `OLLAMA_HOST` is Ollama's own variable — set it before `ollama serve` to change
 where the *server* listens (e.g. `OLLAMA_HOST=0.0.0.0:11434`), then pass the
 matching URL to `coder --host`.
+
+## Project instructions
+
+Standing rules for a workspace go in a file, so they don't have to be repeated
+in every prompt. Three are read, in this order, later ones winning:
+
+1. `~/.bkht-coder/AGENTS.md` — applies everywhere
+2. `<workspace>/AGENTS.md`
+3. `<workspace>/CLAUDE.md`
+
+Workspace root only: no parent-directory walk and no per-directory nesting.
+Both cost context, and this model has little to spare.
+
+```sh
+echo "Use pytest, never unittest. Never edit files under generated/." > AGENTS.md
+```
+
+The text is inserted into the system prompt above the tool section, and the
+model is told it overrides the general guidance but not the tool-call format.
+Loaded files are named on startup — instructions that shape every answer
+silently are worse than none. A total of 4000 characters is kept (2000 per
+file); anything beyond that is cut, and the cut is announced in the prompt
+rather than hidden.
+
+In a session, `/instructions` shows what is loaded and `/instructions reload`
+re-reads it, so editing the rules doesn't cost the conversation. `--resume`
+picks up edits on its own, because the system prompt is rebuilt rather than
+replayed.
 
 ## Checking the install
 
