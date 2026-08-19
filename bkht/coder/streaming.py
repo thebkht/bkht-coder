@@ -68,13 +68,18 @@ class Gate:
         self.seen += text
         self._flush(visible(self.seen, final=False))
 
-    def finish(self) -> str:
-        """Release anything still held, and report what was shown in total."""
+    def finish(self) -> None:
+        """Release anything still held, and reset for the next turn.
+
+        One gate serves every turn of a session, so everything per-turn has to
+        be cleared here -- including ``wrote``, or the second turn keeps the
+        first one's opinion that prose has already started and stops trimming
+        the blank space before a leading tool call.
+        """
         self._flush(visible(self.seen, final=True))
-        shown = self.seen and visible(self.seen, final=True)[: self.shown]
         self.seen = ""
         self.shown = 0
-        return shown or ""
+        self.wrote = False
 
     def _flush(self, settled: str) -> None:
         # Leading whitespace before the first real character is swallowed, so a

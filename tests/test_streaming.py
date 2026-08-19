@@ -89,3 +89,25 @@ def test_leading_blank_space_before_a_call_is_swallowed():
 def test_visible_matches_strip_json_on_every_reply():
     for reply in REPLIES:
         assert visible(reply, final=True).strip() == strip_json(reply)
+
+
+def test_a_reused_gate_trims_every_turn_not_just_the_first():
+    # One gate serves a whole session. If finish() left `wrote` set, the second
+    # turn would open with the blank line the first one learned to trim.
+    out: list[str] = []
+    gate = Gate(out.append)
+    for _ in range(2):
+        gate.feed(f"\n\n{CALL}")
+        gate.finish()
+    assert "".join(out) == ""
+
+
+def test_a_reused_gate_holds_nothing_over_between_turns():
+    out: list[str] = []
+    gate = Gate(out.append)
+    gate.feed('leftover {"a": 1')
+    gate.finish()
+    out.clear()
+    gate.feed("second turn")
+    gate.finish()
+    assert "".join(out) == "second turn"
