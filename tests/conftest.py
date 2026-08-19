@@ -28,3 +28,11 @@ def project(tmp_path: Path) -> Path:
     (tmp_path / "node_modules").mkdir()
     (tmp_path / "node_modules" / "junk.js").write_text("module.exports = {}\n")
     return tmp_path
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--model",
+        default=None,
+        help="Ollama model for the live tests. Defaults to the provider default.",
+    )

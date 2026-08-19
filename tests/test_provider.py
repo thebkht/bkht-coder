@@ -105,3 +105,34 @@ def test_live_streaming_completion():
     reply = collect(provider.chat([{"role": "user", "content": "Say OK and nothing else."}]))
     assert reply.content.strip()
     assert reply.prompt_tokens
+
+
+# --- hardening --------------------------------------------------------------
+
+
+def test_a_too_small_num_ctx_is_refused_at_construction():
+    # Ollama's 2048 default truncates silently; accepting it hides the failure.
+    with pytest.raises(ValueError, match="too small to be useful"):
+        OllamaProvider(num_ctx=2048)
+
+
+def test_connect_timeout_is_much_shorter_than_read():
+    # A dead server must fail in seconds; a loaded 14b legitimately takes
+    # minutes to produce its first token.
+    provider = OllamaProvider()
+    assert provider.timeout.connect <= 10
+    assert provider.timeout.read >= 60
+
+
+def test_an_unreachable_host_fails_fast_with_a_useful_message():
+    import time
+
+    provider = OllamaProvider(host="http://127.0.0.1:9")
+    started = time.time()
+    with pytest.raises(ProviderError, match="cannot reach Ollama"):
+        list(provider.chat([{"role": "user", "content": "hi"}]))
+    assert time.time() - started < 15
+
+
+def test_available_is_false_for_a_dead_host():
+    assert OllamaProvider(host="http://127.0.0.1:9").available() is False

@@ -27,6 +27,15 @@ DEFAULT_HOST = "http://localhost:11434"
 DEFAULT_MODEL = "qwen2.5-coder:14b"
 DEFAULT_NUM_CTX = 32768
 
+# Ollama's own default is 2048, which silently truncates instead of erroring.
+# Anything at or below it is a misconfiguration rather than a small window.
+MIN_USEFUL_NUM_CTX = 4096
+
+# A dead server must fail in seconds; a loaded 14b legitimately takes minutes to
+# produce its first token, so connect and read are bounded separately.
+CONNECT_TIMEOUT = 5.0
+READ_TIMEOUT = 300.0
+
 
 class ProviderError(RuntimeError):
     """The model could not be reached or returned an unusable response."""
@@ -121,12 +130,20 @@ class OllamaProvider:
         model: str = DEFAULT_MODEL,
         host: str = DEFAULT_HOST,
         num_ctx: int = DEFAULT_NUM_CTX,
-        timeout: float = 300.0,
+        timeout: float = READ_TIMEOUT,
     ) -> None:
+        if num_ctx < MIN_USEFUL_NUM_CTX:
+            raise ValueError(
+                f"num_ctx of {num_ctx} is too small to be useful; Ollama's own "
+                f"default of 2048 silently truncates the prompt. Use at least "
+                f"{MIN_USEFUL_NUM_CTX}."
+            )
         self.model = model
         self.host = host.rstrip("/")
         self.num_ctx = num_ctx
-        self.timeout = timeout
+        self.timeout = httpx.Timeout(
+            timeout, connect=CONNECT_TIMEOUT, write=CONNECT_TIMEOUT
+        )
 
     def chat(
         self, messages: list[dict], tools: list[dict] | None = None
