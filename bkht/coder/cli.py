@@ -11,6 +11,7 @@ from .parsing import ToolCall
 from .permissions import ASK, AUTO, PLAN, Permissions
 from .prompts import system_prompt
 from .provider import DEFAULT_HOST, DEFAULT_MODEL, DEFAULT_NUM_CTX, OllamaProvider
+from .repl import Repl
 from .session import Session, Snapshots
 from .tools import build_registry
 from .tools.base import ToolResult
@@ -92,6 +93,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default=DEFAULT_HOST, help="Ollama server URL.")
     parser.add_argument("--num-ctx", type=int, default=DEFAULT_NUM_CTX, help="Context window to request.")
     parser.add_argument("--cwd", default=".", help="Workspace root. Defaults to the current directory.")
+    parser.add_argument("--resume", action="store_true", help="Continue the most recent session for this directory.")
     parser.add_argument("--auto", action="store_true", help="Allow every tool call without prompting.")
     parser.add_argument("--plan", action="store_true", help="Read-only: refuse every change to the workspace.")
     parser.add_argument("--verbose", action="store_true", help="Stream raw model output and tool results.")
@@ -123,7 +125,22 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
     )
     permissions = Permissions(mode=mode, workspace=workspace)
     provider = OllamaProvider(model=args.model, host=args.host, num_ctx=args.num_ctx)
-    session = Session(system=system_prompt(registry, str(workspace.root)))
+    system = system_prompt(registry, str(workspace.root))
+
+    # The system prompt is rebuilt rather than reloaded, so a resumed session
+    # picks up the current tool set instead of whatever it was told last time.
+    session = None
+    if getattr(args, "resume", False):
+        previous = Session.latest_for(str(workspace.root))
+        if previous is None:
+            print(paint("No previous session for this directory; starting a new one.", YELLOW, sys.stderr), file=sys.stderr)
+        else:
+            session = Session.load(previous, system=system)
+            print(paint(f"Resumed {previous.name} ({len(session.messages)} messages).", DIM))
+
+    if session is None:
+        session = Session(system=system, cwd=str(workspace.root), model=args.model)
+        session.start_file()
 
     agent = Agent(
         provider=provider,
@@ -133,19 +150,11 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
         permissions=permissions,
         max_iterations=args.max_iterations,
     )
-    return agent, snapshots
+    return agent, snapshots, permissions, workspace
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-
-    if not args.prompt:
-        print("Interactive mode is not built yet; pass a prompt.", file=sys.stderr)
-        return 2
-
-    agent, _ = make_agent(args, TerminalListener(verbose=args.verbose))
-    outcome = agent.run(" ".join(args.prompt))
-
+def report(outcome) -> int:
+    """Print an outcome and return the process exit status."""
     if outcome.answer:
         print(outcome.answer)
 
@@ -157,6 +166,46 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
     return 0
+
+
+def interactive(agent, snapshots, permissions, workspace, listener) -> int:
+    """The REPL. Ctrl-C abandons the current line; Ctrl-D leaves."""
+    repl = Repl(agent, snapshots, permissions, workspace)
+    print(paint(f"coder · {agent.provider.model} · {permissions.mode} · {workspace.root}", DIM))
+    print(paint("/help for commands, /exit to leave.", DIM))
+
+    while True:
+        try:
+            line = input(paint("> ", BOLD))
+        except EOFError:
+            print()
+            return 0
+        except KeyboardInterrupt:
+            print()
+            continue
+
+        command = repl.dispatch(line)
+        if command.quit:
+            return 0
+        if command.handled:
+            continue
+
+        try:
+            report(agent.run(command.task))
+        except KeyboardInterrupt:
+            # Abandon this task but keep the session; a long local turn is
+            # exactly the thing a user needs to be able to interrupt.
+            print(paint("\n[interrupted]", YELLOW))
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    listener = TerminalListener(verbose=args.verbose)
+    agent, snapshots, permissions, workspace = make_agent(args, listener)
+
+    if args.prompt:
+        return report(agent.run(" ".join(args.prompt)))
+    return interactive(agent, snapshots, permissions, workspace, listener)
 
 
 if __name__ == "__main__":
