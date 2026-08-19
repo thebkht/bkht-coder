@@ -139,6 +139,20 @@ def test_shell_escape_runs_without_the_model(repl, project):
     assert (project / "made-by-hand.txt").exists()
 
 
+def test_shell_escape_uses_the_resolved_shell_not_the_platform_default(repl, monkeypatch):
+    # `shell=True` means cmd.exe on Windows, which would disagree with the
+    # shell the model was told about.
+    import bkht.coder.repl as repl_module
+
+    seen = {}
+    monkeypatch.setattr(
+        repl_module.subprocess, "run", lambda argv, **kw: seen.update(argv=argv)
+    )
+    r, _ = repl
+    r.dispatch("!echo hi")
+    assert seen["argv"] == [*repl_module.resolve_shell().argv, "echo hi"]
+
+
 def test_bare_bang_explains_itself(repl):
     r, lines = repl
     r.dispatch("!")

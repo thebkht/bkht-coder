@@ -101,7 +101,12 @@ def run_git(args: list[str], root: Path) -> str:
     """Run a git command in ``root``, raising :class:`GitError` on failure."""
     try:
         completed = subprocess.run(
-            ["git", *args], cwd=root, capture_output=True, text=True, timeout=60
+            ["git", *args],
+            cwd=root,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise GitError(f"could not run git: {exc}") from None

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from .instructions import load_instructions, render
 from .permissions import MODES
 from .provider import DEFAULT_NUM_CTX
+from .tools.shell import NO_SHELL, resolve_shell
 
 HELP = """\
 Commands
@@ -157,7 +158,8 @@ class Repl:
                 ["git", "diff"],
                 cwd=self.workspace.root,
                 capture_output=True,
-                text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=30,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
@@ -226,7 +228,13 @@ class Repl:
         if not command:
             self.out("Usage: !<command>")
             return
+        # `shell=True` would run through COMSPEC -- cmd.exe -- on Windows, so
+        # `!cmd` and the model's shell tool would disagree about the syntax.
+        shell = resolve_shell()
+        if shell is None:
+            self.out(f"Could not run command: {NO_SHELL}")
+            return
         try:
-            subprocess.run(command, shell=True, cwd=self.workspace.root)
+            subprocess.run([*shell.argv, command], cwd=self.workspace.root)
         except OSError as exc:
             self.out(f"Could not run command: {exc}")
