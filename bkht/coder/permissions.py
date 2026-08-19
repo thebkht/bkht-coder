@@ -77,16 +77,26 @@ def preview(tool, arguments: dict, workspace) -> str:
     )
     if not diff:
         return f"{label} (no change)"
-    if len(diff) > MAX_PREVIEW_LINES:
-        dropped = len(diff) - MAX_PREVIEW_LINES
-        diff = diff[:MAX_PREVIEW_LINES] + [f"[{dropped} more diff lines]"]
     return "\n".join(diff)
+
+
+def truncate(body: str, limit: int = MAX_PREVIEW_LINES) -> str:
+    """Bound a preview for display.
+
+    Kept out of :func:`preview` because how much fits on a screen is a property
+    of the screen, not of the change -- and a prompt that can expand the diff
+    on a keypress needs the whole thing to expand to.
+    """
+    lines = body.splitlines()
+    if len(lines) <= limit:
+        return body
+    return "\n".join(lines[:limit] + [f"[{len(lines) - limit} more diff lines]"])
 
 
 def ask_terminal(question: str, body: str) -> str:
     """Default prompt: show the change, then ask. Returns y / n / a."""
     if body:
-        print(body)
+        print(truncate(body))
     try:
         return input(f"{question} [y/N/a=always] ").strip().lower()
     except (EOFError, KeyboardInterrupt):

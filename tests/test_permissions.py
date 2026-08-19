@@ -2,7 +2,7 @@
 
 import pytest
 
-from bkht.coder.permissions import ASK, AUTO, PLAN, Permissions, preview
+from bkht.coder.permissions import ASK, AUTO, PLAN, Permissions, preview, truncate
 from bkht.coder.session import Snapshots
 from bkht.coder.tools import build_registry
 
@@ -129,12 +129,16 @@ def test_preview_of_a_no_op_says_so(parts):
     assert "no change" in body
 
 
-def test_huge_diff_preview_is_bounded(parts):
+def test_huge_diff_preview_is_bounded_for_display(parts):
+    # preview() now returns the whole diff -- the prompt is what bounds it, so
+    # that a keypress can expand it -- but what reaches a screen is still small.
     registry, workspace = parts
-    body = preview(
-        registry.get("write_file"),
-        {"path": "big.py", "content": "\n".join(str(i) for i in range(500))},
-        workspace,
+    body = truncate(
+        preview(
+            registry.get("write_file"),
+            {"path": "big.py", "content": "\n".join(str(i) for i in range(500))},
+            workspace,
+        )
     )
     assert "more diff lines" in body
     assert len(body.splitlines()) < 50
