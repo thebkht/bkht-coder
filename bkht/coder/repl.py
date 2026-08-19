@@ -146,8 +146,10 @@ class Repl:
             self.out("Nothing to review: no changes were found.")
             return Command()
 
+        from .provider import for_review
+
         reviewer = Reviewer(
-            self.agent.provider, self.workspace.root, listener=Progress()
+            for_review(self.agent.provider), self.workspace.root, listener=Progress()
         )
         self.out(render.terminal(reviewer.review(files), colour=False))
         return Command()

@@ -143,6 +143,7 @@ class OllamaProvider:
         host: str = DEFAULT_HOST,
         num_ctx: int = DEFAULT_NUM_CTX,
         timeout: float = READ_TIMEOUT,
+        temperature: float | None = None,
     ) -> None:
         if num_ctx < MIN_USEFUL_NUM_CTX:
             raise ValueError(
@@ -153,6 +154,7 @@ class OllamaProvider:
         self.model = model
         self.host = host.rstrip("/")
         self.num_ctx = num_ctx
+        self.temperature = temperature
         self.timeout = httpx.Timeout(
             timeout, connect=CONNECT_TIMEOUT, write=CONNECT_TIMEOUT
         )
@@ -160,11 +162,15 @@ class OllamaProvider:
     def chat(
         self, messages: list[dict], tools: list[dict] | None = None
     ) -> Iterator[Chunk]:
+        options: dict[str, Any] = {"num_ctx": self.num_ctx}
+        if self.temperature is not None:
+            options["temperature"] = self.temperature
+
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "stream": True,
-            "options": {"num_ctx": self.num_ctx},
+            "options": options,
         }
         if tools:
             payload["tools"] = tools
@@ -217,3 +223,22 @@ class OllamaProvider:
         except httpx.HTTPError:
             return False
         return True
+
+
+def for_review(provider: Provider) -> Provider:
+    """A copy of ``provider`` that samples deterministically.
+
+    Review is a measurement, not a conversation. At the default temperature the
+    same diff yields findings on one run and an empty array on the next, which
+    makes recall and precision unusable as a metric -- a prompt change and a
+    dice roll look identical. Anything that is not an OllamaProvider is
+    returned unchanged, so fakes and future backends still work.
+    """
+    if not isinstance(provider, OllamaProvider):
+        return provider
+    return OllamaProvider(
+        model=provider.model,
+        host=provider.host,
+        num_ctx=provider.num_ctx,
+        temperature=0.0,
+    )

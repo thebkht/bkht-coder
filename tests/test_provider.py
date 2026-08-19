@@ -136,3 +136,27 @@ def test_an_unreachable_host_fails_fast_with_a_useful_message():
 
 def test_available_is_false_for_a_dead_host():
     assert OllamaProvider(host="http://127.0.0.1:9").available() is False
+
+
+def test_temperature_is_omitted_unless_set():
+    assert OllamaProvider().temperature is None
+
+
+def test_for_review_pins_temperature_to_zero():
+    from bkht.coder.provider import for_review
+
+    original = OllamaProvider(model="m", num_ctx=8192)
+    review = for_review(original)
+    assert review.temperature == 0.0
+    assert review.model == "m" and review.num_ctx == 8192
+    assert original.temperature is None, "the original must not be mutated"
+
+
+def test_for_review_leaves_other_providers_alone():
+    from bkht.coder.provider import for_review
+
+    class Other:
+        model = "x"
+
+    other = Other()
+    assert for_review(other) is other

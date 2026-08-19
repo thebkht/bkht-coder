@@ -14,7 +14,7 @@ from ..agent import Agent
 from ..context import file_tree
 from ..permissions import ASK, AUTO, Permissions, ask_terminal
 from ..prompts import system_prompt
-from ..provider import OllamaProvider
+from ..provider import OllamaProvider, for_review
 from ..session import Session, Snapshots
 from ..tools import build_registry
 from . import render
@@ -160,7 +160,9 @@ def run(args) -> int:
         print("Nothing to review: no changes were found.", file=sys.stderr)
         return 0
 
-    provider = OllamaProvider(model=args.model, host=args.host, num_ctx=args.num_ctx)
+    provider = for_review(
+        OllamaProvider(model=args.model, host=args.host, num_ctx=args.num_ctx)
+    )
     listener = ReviewListener() if (args.quiet or args.json) else Progress()
     reviewer = Reviewer(
         provider,

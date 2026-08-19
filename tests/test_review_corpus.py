@@ -11,7 +11,7 @@ import subprocess
 
 import pytest
 
-from bkht.coder.provider import OllamaProvider
+from bkht.coder.provider import OllamaProvider, for_review
 from bkht.coder.review.diff import collect_diff
 from bkht.coder.review.reviewer import Reviewer
 
@@ -79,7 +79,8 @@ def provider(pytestconfig):
     provider = OllamaProvider(model=pytestconfig.getoption("--model") or DEFAULT_MODEL)
     if not provider.available():
         pytest.skip("Ollama is not reachable")
-    return provider
+    # Deterministic sampling, or the measurement is noise.
+    return for_review(provider)
 
 
 def review_case(provider, root, case: Case):
