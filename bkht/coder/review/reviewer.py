@@ -272,22 +272,33 @@ class Reviewer:
 
         verdicts = [
             obj for obj in extract_json_objects(outcome.raw or outcome.answer or "")
-            if "refuted" in obj
+            if "real" in obj or "refuted" in obj
         ]
         if not verdicts:
             self.listener.on_verdict(finding, False, "verifier gave no verdict")
             return True
 
         verdict = verdicts[-1]
-        refuted = bool(verdict.get("refuted"))
+        certain = bool(verdict.get("certain"))
+        # The verdict is asked for as a positive ("is this real?"). The earlier
+        # negative form asked the model whether to *refute*, and measured on the
+        # corpus it answered "refuted" for all four correctly-found bugs while
+        # its own stated reason described the defect happening -- the negation
+        # flipped the field without touching the reasoning. ``refuted`` is still
+        # accepted, because a small model will sometimes answer the question it
+        # remembers rather than the one it was asked.
+        real = bool(verdict.get("real")) if "real" in verdict else not bool(verdict.get("refuted"))
         reason = str(verdict.get("reason") or "").strip()
-        self.listener.on_verdict(finding, refuted, reason)
+        self.listener.on_verdict(finding, not real, reason)
 
-        if refuted:
+        # Only a confident contradiction removes a finding. Dropping a real one
+        # is the more expensive error: a missed bug reads as a clean bill of
+        # health, where a doubtful one merely reads as doubtful.
+        if not real and certain:
             result.refuted += 1
             return False
 
-        finding.verdict = CONFIRMED if verdict.get("certain") else PLAUSIBLE
+        finding.verdict = CONFIRMED if real and certain else PLAUSIBLE
         return True
 
     # --- driver -------------------------------------------------------------

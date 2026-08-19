@@ -221,7 +221,44 @@ def test_each_dimension_gets_its_own_prompt(repo):
     assert "security" in second
 
 
-def test_the_verifier_is_told_to_refute(repo):
+def test_the_verifier_is_asked_a_positive_question(repo):
+    """The verdict is asked for as "is this real?", never as "refute this".
+
+    Measured on the corpus, the negative form made the model answer "refuted"
+    for all four correctly-found bugs while its own stated reason described the
+    defect happening. The negation flipped the field without touching the
+    reasoning, so the question is now framed positively.
+    """
     provider = FakeProvider([finding_json(), verdict()])
     Reviewer(provider, repo, dimensions=("correctness",)).review(parse_diff(DIFF))
-    assert "REFUTE" in provider.calls[-1][0]["content"]
+    prompt = provider.calls[-1][0]["content"]
+    assert "REFUTE" not in prompt
+    assert '"real"' in prompt
+
+
+def test_a_real_verdict_keeps_the_finding(repo):
+    result = review(repo, [finding_json(), json.dumps(
+        {"real": True, "certain": True, "reason": "read it"})])
+    assert len(result.findings) == 1 and result.refuted == 0
+
+
+def test_a_certain_contradiction_removes_the_finding(repo):
+    result = review(repo, [finding_json(), json.dumps(
+        {"real": False, "certain": True, "reason": "guarded at util.py:4"})])
+    assert result.findings == [] and result.refuted == 1
+
+
+def test_an_unsure_contradiction_keeps_the_finding_as_plausible(repo):
+    # Dropping a real finding is the more expensive error: a missed bug reads
+    # as a clean bill of health.
+    result = review(repo, [finding_json(), json.dumps(
+        {"real": False, "certain": False, "reason": "not sure"})])
+    assert len(result.findings) == 1
+    assert result.findings[0].verdict == "plausible"
+
+
+def test_the_old_refuted_field_is_still_understood(repo):
+    # A small model will sometimes answer the question it remembers rather
+    # than the one it was asked.
+    result = review(repo, [finding_json(), verdict(refuted=True, certain=True)])
+    assert result.findings == [] and result.refuted == 1

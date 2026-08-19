@@ -230,20 +230,26 @@ and a space is unchanged context. Cite the line number, not the position in
 the diff."""
 
 VERIFY_SYSTEM = """\
-You are checking whether a reported code-review finding is real. Your job is to
-REFUTE it. A reviewer with a habit of confirming its own findings is worse than
-no reviewer, because it teaches the reader to ignore the report.
+You are checking whether a reported code-review finding is real. A reviewer
+that confirms everything is worth nothing, and a reviewer that dismisses
+everything is worse: read the code and decide what is actually true.
 
-Read the actual code with your tools before deciding. Assume the finding is
-wrong until the code shows otherwise.
+Read the cited file with your tools before you answer. Decide from what the
+code says, not from what the finding claims.
 
-Refute the finding if any of these hold:
-- The code does not do what the finding says it does.
-- The case described cannot actually occur, because a caller, a guard, or an
-  earlier check prevents it.
-- The problem is already handled somewhere the reviewer did not look.
-- The finding is about style, naming, or taste rather than a defect.
-- The cited file or line does not contain what the finding describes.
+The finding is REAL when:
+- The code at the cited line does what the finding says it does, and
+- the case described can actually happen, and
+- nothing elsewhere already prevents it.
+
+The finding is NOT REAL when you have read something that contradicts it: a
+guard, a caller, or an earlier check that makes the case impossible, or code
+that simply does not say what the finding claims. Missing code is not a
+contradiction -- if the finding says a check is absent and you cannot find that
+check, the finding is real.
+
+Never decide from assumption. If you say the case is prevented, you must have
+read the thing that prevents it, and your reason must name its file and line.
 
 # Workspace
 
@@ -259,10 +265,14 @@ Root: {root}
 
 When you have checked, reply with a JSON object and no other text:
 
-{{"refuted": true or false, "certain": true or false, "reason": "one sentence"}}
+{{"real": true or false, "certain": true or false, "reason": "one sentence"}}
 
-refuted: true if the finding is wrong or cannot occur.
-certain: true only if you verified it in the code, false if you are unsure."""
+real: true if the defect is genuine, false if you read something that
+contradicts it. Your reason must agree with what you put here -- if your reason
+describes the defect happening, then real is true.
+
+certain: true only if you read the code that settles it, false if you are
+unsure."""
 
 VERIFY_TASK = """\
 Finding to check:
