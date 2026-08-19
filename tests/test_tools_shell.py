@@ -54,3 +54,74 @@ def test_huge_output_is_truncated_with_a_marker(registry):
     result = bash(registry, "seq 1 100000")
     assert "[truncated" in result.content
     assert len(result.content.splitlines()) < 500
+
+
+# --- shell resolution -------------------------------------------------------
+
+
+def _which(*found):
+    """A ``shutil.which`` stand-in that only knows about ``found``."""
+    return lambda exe: f"/usr/bin/{exe}" if exe in found else None
+
+
+def test_resolve_shell_prefers_bash(monkeypatch):
+    from bkht.coder.tools import shell as shell_module
+
+    monkeypatch.setattr(shell_module.shutil, "which", _which("bash", "sh", "pwsh"))
+    monkeypatch.setattr(shell_module.os, "name", "posix")
+    resolved = shell_module.resolve_shell()
+    assert resolved.argv == ("bash", "-c")
+    assert resolved.name == "bash"
+
+
+def test_resolve_shell_falls_back_to_powershell_on_nt(monkeypatch):
+    from bkht.coder.tools import shell as shell_module
+
+    monkeypatch.setattr(shell_module.os, "name", "nt")
+
+    monkeypatch.setattr(shell_module.shutil, "which", _which("pwsh", "powershell"))
+    resolved = shell_module.resolve_shell()
+    assert resolved.name == "powershell"
+    assert resolved.argv == ("pwsh", "-NoProfile", "-Command")
+
+    # pwsh is preferred, but Windows PowerShell is enough on a stock box.
+    monkeypatch.setattr(shell_module.shutil, "which", _which("powershell"))
+    assert shell_module.resolve_shell().argv == (
+        "powershell",
+        "-NoProfile",
+        "-Command",
+    )
+
+
+def test_resolve_shell_falls_back_to_sh_on_posix(monkeypatch):
+    from bkht.coder.tools import shell as shell_module
+
+    monkeypatch.setattr(shell_module.shutil, "which", _which("sh"))
+    monkeypatch.setattr(shell_module.os, "name", "posix")
+    resolved = shell_module.resolve_shell()
+    assert resolved.argv == ("sh", "-c")
+    # The tool keeps its name so POSIX sessions and transcripts are unchanged.
+    assert resolved.name == "bash"
+
+
+def test_no_shell_is_an_actionable_tool_error(monkeypatch, project):
+    from bkht.coder.tools import shell as shell_module
+
+    monkeypatch.setattr(shell_module, "resolve_shell", lambda: None)
+    registry, _ = build_registry(project)
+    with pytest.raises(ToolError, match="Git for Windows"):
+        bash(registry, "echo hi")
+    with pytest.raises(ToolError, match="WSL"):
+        bash(registry, "echo hi")
+
+
+def test_description_names_the_active_shell(monkeypatch, project):
+    from bkht.coder.tools import shell as shell_module
+
+    monkeypatch.setattr(shell_module.os, "name", "nt")
+    monkeypatch.setattr(shell_module.shutil, "which", _which("pwsh"))
+    registry, _ = build_registry(project)
+
+    tool = registry.get("powershell")
+    assert "PowerShell" in tool.description
+    assert registry.get("bash") is None
