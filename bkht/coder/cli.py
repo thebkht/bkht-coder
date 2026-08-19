@@ -102,6 +102,7 @@ def add_agent_arguments(parser) -> None:
     parser.add_argument("--resume", action="store_true", help="Continue the most recent session for this directory.")
     parser.add_argument("--plan", action="store_true", help="Read-only: refuse every change to the workspace.")
     parser.add_argument("--verbose", action="store_true", help="Stream raw model output and tool results.")
+    parser.add_argument("--no-scout", action="store_true", help="Do not search the workspace before each task.")
     parser.add_argument("--max-iterations", type=int, default=25, help="Cap on loop iterations per task.")
     add_common_arguments(parser)
 
@@ -195,6 +196,7 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
         listener=listener,
         permissions=permissions,
         max_iterations=args.max_iterations,
+        scout_root=None if getattr(args, "no_scout", False) else workspace.root,
     )
     return agent, snapshots, permissions, workspace
 

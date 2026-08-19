@@ -140,6 +140,7 @@ class Repl:
         self.out(f"  generated  {session.completion_tokens} tokens")
         self.out(f"  session    {session.path or 'not saved'}")
         self.out(f"  undo depth {len(self.snapshots)}")
+        self.out(f"  scout      {'on' if self.agent.scout_root else 'off'}")
         return Command()
 
     def do_clear(self, argument: str) -> Command:

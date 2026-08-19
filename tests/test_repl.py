@@ -69,6 +69,17 @@ def test_context_reports_usage_and_mode(repl):
     assert "ask" in text
 
 
+def test_context_reports_whether_the_scout_is_on(repl, project):
+    r, lines = repl
+    r.dispatch("/context")
+    assert "scout      off" in "\n".join(lines)
+
+    r.agent.scout_root = project
+    lines.clear()
+    r.dispatch("/context")
+    assert "scout      on" in "\n".join(lines)
+
+
 def test_clear_drops_history_but_not_the_workspace(repl, project):
     r, lines = repl
     r.agent.session.add_user("hello")
