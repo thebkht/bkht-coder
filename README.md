@@ -1,4 +1,4 @@
-# bkht-coder
+# bkht.coder
 
 A coding agent built from scratch, running against a local Ollama server.
 
@@ -13,9 +13,19 @@ coder --model qwen2.5-coder:7b
 ```
 
 Slash commands: `/tools`, `/context`, `/clear`, `/undo`, `/diff`, `/review`,
-`/instructions`, `/model`, `/mode`, `/help`, `/exit`. `!cmd` shells out.
+`/instructions`, `/model`, `/mode`, `/help`, `/exit`. `!cmd` shells out, and
+`exit` on its own leaves.
 
-State lives in `~/.bkht-coder/sessions/`.
+On a terminal the session streams: prose appears as the model writes it, a
+status line shows elapsed time and tokens while it is quiet, and each tool call
+is announced in words above the call itself. Approvals take a single key --
+`y`, `n`, `a` for always, or `d` to see the whole diff rather than the first
+forty lines. Arrow keys recall earlier prompts, and Tab completes slash
+commands. Redirect the output and all of that goes away: piped runs print the
+same plain transcript they always did.
+
+State lives in `~/.bkht-coder/`: sessions under `sessions/`, prompt
+history in `history`.
 
 ## Requirements
 
@@ -227,7 +237,7 @@ uv run pytest -q -m "not live"    # no model needed
 
 Common failures:
 
-- **`ollama not reachable`** — the server isn't running (`ollama serve`), or
+- `ollama not reachable` — the server isn't running (`ollama serve`), or
   it's bound to another address; check with `curl http://localhost:11434/api/tags`.
 - **Every turn takes minutes** — `num_ctx` is too large for available RAM; see
   the table under _How it talks to the model_. Lower it or use the 7b model.
