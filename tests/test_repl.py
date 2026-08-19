@@ -143,3 +143,22 @@ def test_bare_bang_explains_itself(repl):
     r, lines = repl
     r.dispatch("!")
     assert "Usage: !<command>" in lines[-1]
+
+
+# --- argument routing -------------------------------------------------------
+
+
+def test_a_free_text_prompt_is_not_mistaken_for_a_subcommand():
+    from bkht.coder.cli import build_agent_parser
+
+    # `coder "add a --verbose flag"` used to fail as an invalid subcommand
+    # choice, which broke the documented one-shot form.
+    args = build_agent_parser().parse_args(["what does calc.py do?"])
+    assert args.prompt == ["what does calc.py do?"]
+
+
+def test_review_still_reaches_its_subparser():
+    from bkht.coder.cli import build_parser
+
+    args = build_parser().parse_args(["review", "--staged"])
+    assert args.command == "review" and args.staged

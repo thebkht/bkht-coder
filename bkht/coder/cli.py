@@ -96,6 +96,16 @@ def add_common_arguments(parser) -> None:
     parser.add_argument("--no-instructions", action="store_true", help="Ignore AGENTS.md and CLAUDE.md.")
 
 
+def add_agent_arguments(parser) -> None:
+    """Flags for running a task, as opposed to a subcommand."""
+    parser.add_argument("prompt", nargs="*", help="Task to run. Omit for an interactive session.")
+    parser.add_argument("--resume", action="store_true", help="Continue the most recent session for this directory.")
+    parser.add_argument("--plan", action="store_true", help="Read-only: refuse every change to the workspace.")
+    parser.add_argument("--verbose", action="store_true", help="Stream raw model output and tool results.")
+    parser.add_argument("--max-iterations", type=int, default=25, help="Cap on loop iterations per task.")
+    add_common_arguments(parser)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="coder",
@@ -107,13 +117,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_common_arguments(reviewer)
     review_cli.add_arguments(reviewer)
+    add_agent_arguments(parser)
+    return parser
 
-    parser.add_argument("prompt", nargs="*", help="Task to run. Omit for an interactive session.")
-    parser.add_argument("--resume", action="store_true", help="Continue the most recent session for this directory.")
-    parser.add_argument("--plan", action="store_true", help="Read-only: refuse every change to the workspace.")
-    parser.add_argument("--verbose", action="store_true", help="Stream raw model output and tool results.")
-    parser.add_argument("--max-iterations", type=int, default=25, help="Cap on loop iterations per task.")
-    add_common_arguments(parser)
+
+def build_agent_parser() -> argparse.ArgumentParser:
+    """The parser used when the first argument is not a subcommand.
+
+    A parser carrying both a subcommand and a free-text positional cannot tell
+    them apart: argparse matches the first positional against the subcommand
+    list, so `coder "add a --verbose flag"` failed as an invalid choice. The
+    two are therefore chosen between before parsing, not during it.
+    """
+    parser = argparse.ArgumentParser(
+        prog="coder",
+        description="A coding agent running against a local Ollama server.",
+        epilog="Run `coder review --help` for the code-review subcommand.",
+    )
+    add_agent_arguments(parser)
     return parser
 
 
@@ -224,11 +245,12 @@ def interactive(agent, snapshots, permissions, workspace, listener, use_instruct
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    argv = list(sys.argv[1:] if argv is None else argv)
 
-    if args.command == "review":
-        return review_cli.run(args)
+    if argv[:1] == ["review"]:
+        return review_cli.run(build_parser().parse_args(argv))
 
+    args = build_agent_parser().parse_args(argv)
     listener = TerminalListener(verbose=args.verbose)
     agent, snapshots, permissions, workspace = make_agent(args, listener)
 
