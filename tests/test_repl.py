@@ -40,6 +40,20 @@ def test_unknown_command_says_so(repl):
     assert "Unknown command /nope" in lines[0]
 
 
+def test_bare_exit_and_quit_leave_without_the_slash(repl):
+    r, _ = repl
+    for line in ("exit", "quit", "EXIT", "  exit  "):
+        assert r.dispatch(line).quit, f"{line!r} should leave"
+
+
+def test_exit_inside_a_sentence_is_still_a_task(repl):
+    # "exit" alone leaves; a request that merely mentions it is work.
+    r, _ = repl
+    command = r.dispatch("add an exit command")
+    assert not command.quit
+    assert command.task == "add an exit command"
+
+
 def test_exit_quits(repl):
     r, _ = repl
     assert r.dispatch("/exit").quit

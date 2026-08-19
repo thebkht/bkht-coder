@@ -27,7 +27,7 @@ Commands
   /model [name]       show or switch the Ollama model
   /mode [ask|auto|plan]   show or switch the permission mode
   /help               this list
-  /exit               leave
+  /exit               leave (or just `exit`)
 
   !<command>          run a shell command yourself, without the model"""
 
@@ -55,11 +55,19 @@ class Repl:
         self.out = out
         self.use_instructions = use_instructions
 
+    LEAVE = ("exit", "quit")
+
     def dispatch(self, line: str) -> Command:
         """Route one input line: slash command, shell escape, or a task."""
         line = line.strip()
         if not line:
             return Command()
+
+        # Typed bare, without the slash, because that is what leaves every
+        # other prompt -- and sending it to the model instead is a slow,
+        # confusing way to not quit.
+        if line.lower() in self.LEAVE:
+            return Command(quit=True)
 
         if line.startswith("!"):
             self.shell(line[1:].strip())
