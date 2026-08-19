@@ -199,6 +199,17 @@ def search(root: Path, wanted: list[str]) -> list[Hit]:
         # sheer repetition of one common word.
         hit.score += COVERAGE_SCORE * max(0, covered - 1)
 
+        # A file named after the search term but never mentioning it is still
+        # the answer -- ".gitignore" says "gitignore" nowhere inside itself --
+        # so it is shown by its opening lines rather than dropped for having no
+        # matching line.
+        if hit.score and not hit.lines:
+            hit.lines = [
+                (number, line.strip()[:200], False)
+                for number, line in enumerate(content.splitlines(), start=1)
+                if line.strip()
+            ][:MAX_LINES_PER_FILE]
+
         if hit.score and hit.lines:
             hits.append(hit)
 

@@ -90,3 +90,13 @@ def test_the_block_stays_within_its_budget(project):
 
 def test_a_message_with_no_terms_is_not_searched(project):
     assert scout(project, "thanks!") == ""
+
+
+def test_a_file_named_after_the_term_is_shown_even_if_it_never_says_it(project):
+    # ".gitignore" is the answer to "what does .gitignore exclude?" and the word
+    # appears nowhere inside it.
+    (project / ".gitignore").write_text("__pycache__/\n*.pyc\n.venv/\n")
+
+    hits = search(project, terms("what does .gitignore exclude?"))
+    assert hits and hits[0].path == ".gitignore"
+    assert hits[0].best_lines()[0] == (1, "__pycache__/")
