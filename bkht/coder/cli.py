@@ -8,7 +8,7 @@ import sys
 from functools import partial
 from pathlib import Path
 
-from . import narrate, terminal
+from . import banner, narrate, terminal
 from .agent import Agent
 from .approval import ask_tty
 from .context import file_tree
@@ -285,22 +285,71 @@ def run_turn(agent, listener, task: str) -> int:
     return report(outcome, streamed=listener.streamed)
 
 
-def header(agent, permissions, workspace) -> str:
+def version() -> str:
+    """The installed version, or nothing.
+
+    A checkout run straight from source has no distribution metadata, and a
+    greeting is not worth failing to start over.
+    """
+    try:
+        from importlib.metadata import PackageNotFoundError, version as installed
+    except ImportError:  # pragma: no cover - stdlib since 3.8
+        return ""
+    try:
+        return installed("bkht-coder")
+    except PackageNotFoundError:
+        return ""
+
+
+def facts(agent, permissions) -> str:
+    """Model, mode and context: the three things that change what a turn does."""
     num_ctx = getattr(agent.provider, "num_ctx", DEFAULT_NUM_CTX)
     used = agent.session.prompt_tokens
     context = f"{used:,}/{num_ctx:,} ctx" if num_ctx else f"{used:,} tokens"
-    return (
-        f"coder · {agent.provider.model} · {permissions.mode} · "
-        f"{context} · {workspace.root}"
-    )
+    return f"{agent.provider.model} · {permissions.mode} · {context}"
+
+
+def header(agent, permissions, workspace) -> str:
+    return f"coder · {facts(agent, permissions)} · {workspace.root}"
+
+
+HINT = "/help for commands, /exit to leave."
+TAGLINE = "A coding agent, on your own machine."
+
+
+def greeting(agent, permissions, workspace, stream=None) -> str:
+    """What the session opens with.
+
+    The banner is chrome, and chrome that reaches a pipe is noise -- worse,
+    noise that something downstream is already parsing. Off a terminal, in a
+    window too narrow to hold the art, or in a locale that cannot draw it, this
+    is exactly the two lines it has always been.
+    """
+    stream = sys.stdout if stream is None else stream
+    plain = f"{header(agent, permissions, workspace)}\n{HINT}"
+    if not terminal.interactive(stream):
+        return plain
+    if terminal.width() < banner.MIN_WIDTH or not banner.drawable(stream):
+        return plain
+
+    name = " ".join(filter(None, ("bkht.coder", version())))
+    return banner.render([
+        None,
+        name,
+        TAGLINE,
+        None,
+        facts(agent, permissions),
+        str(workspace.root),
+        None,
+        HINT,
+    ])
 
 
 def interactive(agent, snapshots, permissions, workspace, listener, use_instructions=True) -> int:
     """The REPL. Ctrl-C abandons the current line; Ctrl-D leaves."""
     repl = Repl(agent, snapshots, permissions, workspace, use_instructions=use_instructions)
     reader = Reader(repl, enabled=terminal.interactive())
-    print(paint(header(agent, permissions, workspace), DIM))
-    print(paint("/help for commands, /exit to leave.", DIM))
+    print(paint(greeting(agent, permissions, workspace), DIM))
 
     while True:
         try:

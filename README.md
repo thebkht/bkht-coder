@@ -5,9 +5,11 @@
 ⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿
 ⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿     curl -fsSL https://thebkht.com/install.sh | sh
 ⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿
-⣿⣿⣿⣿⣶⣶⣶⣶⣶⣶⣶⣶⡎⠉⠉⠉     Python 3.12+ · uv · Ollama · Apache-2.0
+⣿⣿⣿⣿⣶⣶⣶⣶⣶⣶⣶⣶⡎⠉⠉⠉     Python 3.12+ · uv · Ollama · nothing leaves the machine
 ⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⠀⠀⠀
 ```
+
+A coding agent built from scratch, running against a local Ollama server.
 
 ```sh
 coder                          # interactive REPL in the current directory

@@ -94,6 +94,37 @@ def test_answers_a_question_by_reading_the_code(provider, repo):
     assert "average" in outcome.answer.lower() or "mean" in outcome.answer.lower()
 
 
+def test_a_greeting_is_answered_without_running_anything(provider, repo):
+    # A 14b model reads a prompt full of tools as an instruction to use one, and
+    # will shell out to `echo hello` rather than say hello back. The prompt has
+    # to say that a conversational message is not a task.
+    agent, _ = build(provider, repo)
+    outcome = agent.run("hello")
+    assert outcome.tool_calls == 0, f"the model called a tool to greet: {outcome.errors}"
+    assert outcome.stopped == "answered"
+    assert outcome.answer.strip()
+
+
+def test_answers_in_the_language_it_was_asked_in(provider, repo):
+    # Russian rather than Uzbek only because the script makes the assertion
+    # exact: Cyrillic in the reply cannot be anything but an answer in Russian.
+    agent, _ = build(provider, repo)
+    outcome = agent.run("что делает функция в buggy.py?")
+    assert outcome.stopped == "answered"
+    cyrillic = sum("\u0400" <= c <= "\u04ff" for c in outcome.answer)
+    assert cyrillic > 10, f"answered a Russian question in another language: {outcome.answer}"
+
+
+def test_reads_the_file_instead_of_asking_for_it(provider, repo):
+    # The flip side of "not every message is a task": told to lean on prose, the
+    # model starts replying "paste the file and I will look" to questions it has
+    # a read_file tool for.
+    agent, _ = build(provider, repo)
+    outcome = agent.run("what does buggy.py do?")
+    assert outcome.tool_calls >= 1, f"asked instead of reading: {outcome.answer}"
+    assert "average" in outcome.answer.lower() or "mean" in outcome.answer.lower()
+
+
 def test_fixes_a_real_bug_and_the_fixed_code_runs(provider, repo):
     agent, snapshots = build(provider, repo)
     outcome = agent.run(
