@@ -23,7 +23,7 @@ from .review import cli as review_cli
 from .session import Session, Snapshots
 from .status import Status
 from .streaming import Gate
-from .terminal import BOLD, CYAN, DIM, RED, RESET, YELLOW, paint
+from .terminal import BOLD, CYAN, DIM, RED, YELLOW, paint
 from .tools import build_registry
 from .tools.base import ToolResult
 
