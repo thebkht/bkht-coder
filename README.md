@@ -5,8 +5,6 @@
 ⣿⣿⣿⣿⣿⣿⡏⠉     Python 3.12+ · uv · Ollama · nothing leaves the machine
 ```
 
-A coding agent built from scratch, running against a local Ollama server.
-
 ```sh
 coder                          # interactive REPL in the current directory
 coder doctor                   # check this install can actually run a turn
@@ -232,7 +230,7 @@ background(action="list")
 
 Output goes to a file under `~/.bkht-coder/jobs/`, not into the conversation. A
 server that logs a line a second would otherwise fill an 8K window while nobody
-was reading it — and when the model does ask, it gets the *end* of the log,
+was reading it — and when the model does ask, it gets the _end_ of the log,
 because for a server the last thing it said is the only thing worth reading.
 
 Four actions on one tool rather than four tools. The tool set is the scarce

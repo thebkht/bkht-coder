@@ -24,11 +24,13 @@ from .provider import DEFAULT_HOST, DEFAULT_MODEL, DEFAULT_NUM_CTX, OllamaProvid
 from .repl import Repl
 from .review import cli as review_cli
 from .session import Session, Snapshots
+from . import sessions as saved
 from .skills import Discovery, discover as discover_skills, render as render_skills
 from .skills import summarize as summarize_skills
 from .status import Status
 from .streaming import Gate
 from .terminal import BOLD, CYAN, DIM, RED, YELLOW, paint
+from . import usage
 from .tools import build_registry
 from .tools.background import Jobs
 from .tools.base import ToolResult
@@ -156,7 +158,12 @@ def add_common_arguments(parser) -> None:
 def add_agent_arguments(parser) -> None:
     """Flags for running a task, as opposed to a subcommand."""
     parser.add_argument("prompt", nargs="*", help="Task to run. Omit for an interactive session.")
-    parser.add_argument("--resume", action="store_true", help="Continue the most recent session for this directory.")
+    # An optional value rather than a switch: `--resume` still means "the newest
+    # session here", and `--resume <id>` reaches any of the others.
+    parser.add_argument(
+        "--resume", nargs="?", const=saved.LAST, default=None, metavar="last|ID",
+        help="Continue a saved session. Defaults to the newest for this directory.",
+    )
     parser.add_argument("--plan", action="store_true", help="Read-only: refuse every change to the workspace.")
     parser.add_argument("--verbose", action="store_true", help="Stream raw model output and tool results.")
     parser.add_argument("--no-scout", action="store_true", help="Do not search the workspace before each task.")
@@ -175,26 +182,50 @@ def version_line() -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = usage.Parser(
         prog="coder",
         description="A coding agent running against a local Ollama server.",
+        page=usage.HELP,
     )
-    parser.add_argument("--version", action="version", version=version_line())
-    subparsers = parser.add_subparsers(dest="command")
+    parser.add_argument("-v", "--version", action="version", version=version_line())
+    subparsers = parser.add_subparsers(dest="command", parser_class=usage.Parser)
     reviewer = subparsers.add_parser(
-        "review", help="Review uncommitted changes, a branch, or a commit range."
+        "review", help="Review uncommitted changes, a branch, or a commit range.",
+        page=usage.REVIEW_HELP,
     )
     add_common_arguments(reviewer)
     review_cli.add_arguments(reviewer)
 
     checker = subparsers.add_parser(
-        "doctor", help="Check that this install can actually run a turn."
+        "doctor", help="Check that this install can actually run a turn.",
+        page=usage.DOCTOR_HELP,
     )
     add_common_arguments(checker)
     doctor.add_arguments(checker)
 
+    lister = subparsers.add_parser(
+        "sessions", help="List saved sessions for this workspace.",
+        page=usage.SESSIONS_HELP,
+    )
+    saved_cli_arguments(lister)
+
+    opener = subparsers.add_parser(
+        "session", help="Show or resume one saved session.",
+        page=usage.SESSION_HELP,
+    )
+    opener.add_argument("target", nargs="?", default=saved.LAST, help="`last`, or a session id.")
+    opener.add_argument("--json", action="store_true", help="Emit the session as JSON.")
+    opener.add_argument("--cwd", default=".", help="Workspace root. Defaults to the current directory.")
+
     add_agent_arguments(parser)
     return parser
+
+
+def saved_cli_arguments(parser) -> None:
+    """Flags for `coder sessions`, which needs a workspace and nothing else."""
+    parser.add_argument("--all", action="store_true", help="Every workspace, not just this one.")
+    parser.add_argument("--json", action="store_true", help="Emit the listing as JSON.")
+    parser.add_argument("--cwd", default=".", help="Workspace root. Defaults to the current directory.")
 
 
 def build_agent_parser() -> argparse.ArgumentParser:
@@ -205,12 +236,12 @@ def build_agent_parser() -> argparse.ArgumentParser:
     list, so `coder "add a --verbose flag"` failed as an invalid choice. The
     two are therefore chosen between before parsing, not during it.
     """
-    parser = argparse.ArgumentParser(
+    parser = usage.Parser(
         prog="coder",
         description="A coding agent running against a local Ollama server.",
-        epilog="Run `coder review --help` for the code-review subcommand.",
+        page=usage.HELP,
     )
-    parser.add_argument("--version", action="version", version=version_line())
+    parser.add_argument("-v", "--version", action="version", version=version_line())
     add_agent_arguments(parser)
     return parser
 
@@ -285,10 +316,14 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
     # The system prompt is rebuilt rather than reloaded, so a resumed session
     # picks up the current tool set instead of whatever it was told last time.
     session = None
-    if getattr(args, "resume", False):
-        previous = Session.latest_for(str(workspace.root))
+    target = getattr(args, "resume", None)
+    if target:
+        previous = saved.resolve(workspace.root, target)
         if previous is None:
-            print(paint("No previous session for this directory; starting a new one.", YELLOW, sys.stderr), file=sys.stderr)
+            # Named ids and `last` fail differently: one is a directory with no
+            # history yet, the other is a typo, and starting fresh is only the
+            # obvious thing to do about the first.
+            print(paint(f"{saved.missing(workspace.root, target)} Starting a new one.", YELLOW, sys.stderr), file=sys.stderr)
         else:
             session = Session.load(previous, system=system)
             print(paint(f"Resumed {previous.name} ({len(session.messages)} messages).", DIM))
@@ -350,7 +385,7 @@ def header(agent, permissions, workspace) -> str:
 
 
 HINT = "/help for commands, /exit to leave."
-TAGLINE = "A coding agent, on your own machine."
+TAGLINE = usage.TAGLINE
 
 
 def greeting(agent, permissions, workspace, stream=None) -> str:
@@ -413,11 +448,46 @@ def interactive(agent, snapshots, permissions, workspace, listener,
             print(paint("\n[interrupted]", YELLOW))
 
 
+def resume_argv(rest: list[str]) -> list[str]:
+    """`session resume [id] [flags]` as the agent parser's own arguments.
+
+    A bare `resume`, or one whose next word is a flag, means the newest session
+    for this directory -- the same thing `--resume` has always meant.
+    """
+    named = bool(rest[:1]) and not rest[0].startswith("-")
+    return ["--resume", rest[0] if named else saved.LAST, *rest[1 if named else 0:]]
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
     if argv[:1] == ["review"]:
         return review_cli.run(build_parser().parse_args(argv))
+
+    if argv[:1] == ["help"] or argv[:1] == ["--help"] or argv[:1] == ["-h"]:
+        print(usage.HELP)
+        return 0
+
+    if argv[:1] == ["sessions"]:
+        args = build_parser().parse_args(argv)
+        return saved.report(
+            Path(args.cwd).expanduser().resolve(),
+            as_json=args.json, everywhere=args.all,
+        )
+
+    if argv[:1] == ["session"]:
+        # `resume` re-enters the ordinary agent path rather than reimplementing
+        # it, so a resumed session gets the current tools, instructions and
+        # permission mode like any other.
+        rest = argv[1:]
+        if rest[:1] == ["resume"]:
+            argv = resume_argv(rest[1:])
+        else:
+            args = build_parser().parse_args(argv)
+            return saved.show(
+                Path(args.cwd).expanduser().resolve(),
+                args.target, as_json=args.json,
+            )
 
     if argv[:1] == ["doctor"]:
         args = build_parser().parse_args(argv)

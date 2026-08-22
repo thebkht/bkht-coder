@@ -155,3 +155,30 @@ def test_show_reports_an_id_that_is_not_there(store, tmp_path, monkeypatch, caps
     assert sessions.show(tmp_path, "nope", out=out) == 1
     assert "No session matches 'nope'" in capsys.readouterr().err
     assert lines == []
+
+
+def test_resolve_takes_last_or_an_id(store, tmp_path, monkeypatch):
+    monkeypatch.setattr("bkht.coder.session.SESSION_DIR", store)
+    write(store, "20260101-000000-aaa", str(tmp_path))
+    write(store, "20260102-000000-bbb", str(tmp_path))
+
+    assert sessions.resolve(tmp_path, "last").name == "20260102-000000-bbb.jsonl"
+    assert sessions.resolve(tmp_path, "").name == "20260102-000000-bbb.jsonl"
+    assert sessions.resolve(tmp_path, "20260101").name == "20260101-000000-aaa.jsonl"
+    assert sessions.resolve(tmp_path, "nope") is None
+
+
+def test_an_id_resolves_from_any_directory(store, tmp_path, monkeypatch):
+    # `last` is scoped to the workspace; an id is already unambiguous, so
+    # refusing it because it was recorded elsewhere would just be a second
+    # thing to explain.
+    monkeypatch.setattr("bkht.coder.session.SESSION_DIR", store)
+    write(store, "20260101-000000-aaa", str(tmp_path / "elsewhere"))
+
+    assert sessions.resolve(tmp_path, "last") is None
+    assert sessions.resolve(tmp_path, "20260101-000000-aaa") is not None
+
+
+def test_the_two_ways_of_finding_nothing_read_differently(tmp_path):
+    assert sessions.missing(tmp_path, "last") == f"No saved sessions for {tmp_path}."
+    assert "No session matches 'x'" in sessions.missing(tmp_path, "x")
