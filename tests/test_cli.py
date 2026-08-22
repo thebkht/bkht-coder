@@ -166,3 +166,58 @@ def test_a_turn_with_no_answer_gets_no_footer():
     listen, stream = listener(live=True)
     listen.footer(type("O", (), {"answer": "", "seconds": 1.0, "sent": 1, "received": 1})())
     assert visible_text(stream) == ""
+
+
+# --- the rhythm of a turn ---------------------------------------------------
+
+
+def blocks(stream) -> list[str]:
+    """What the turn drew, split on the blank lines between its blocks."""
+    return visible_text(stream).split("\n\n")
+
+
+def test_every_block_of_a_turn_is_given_a_line_of_its_own():
+    # Grouping here is done by proximity, and everything arriving flush leaves
+    # nothing for the eye to group by.
+    listen, stream = listener(live=True)
+    with listen.turn():
+        listen.on_tool_result(
+            ToolCall("read_file", {"path": "a.py"}), ToolResult.success("x")
+        )
+        listen.on_tool_result(
+            ToolCall("grep", {"pattern": "def"}), ToolResult.success("y")
+        )
+        listen.on_token("Here is the answer.")
+    listen.footer(
+        type("O", (), {"answer": "x", "seconds": 2.0, "sent": 10, "received": 5})()
+    )
+
+    assert blocks(stream) == [
+        "● read_file(a.py)",
+        "● grep(def)",
+        "Here is the answer.",
+        "2s (↑10 ↓5)",
+    ]
+
+
+def test_a_failure_stays_against_the_call_it_belongs_to():
+    # Proximity is the grouping: a gap here would offer the error as its own
+    # event rather than as what that call did.
+    listen, stream = listener(live=True)
+    with listen.turn():
+        listen.on_tool_result(
+            ToolCall("read_file", {"path": "a.py"}), ToolResult.failure("no such file")
+        )
+    assert blocks(stream) == ["● read_file(a.py)\n  ! no such file"]
+
+
+def test_a_pipe_gets_no_gaps_because_they_are_chrome():
+    listen, stream = listener(live=False)
+    with listen.turn():
+        listen.on_tool_result(
+            ToolCall("read_file", {"path": "a.py"}), ToolResult.success("x")
+        )
+        listen.on_tool_result(
+            ToolCall("grep", {"pattern": "def"}), ToolResult.success("y")
+        )
+    assert stream.getvalue() == "● read_file(a.py)\n● grep(def)\n"

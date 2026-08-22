@@ -97,6 +97,7 @@ class TerminalListener:
         self.gate = Gate(self.markdown.feed) if self.rich else None
         self.streamed = False
         self._streaming = False
+        self._blocks = 0
 
     # --- turn boundary ------------------------------------------------------
 
@@ -104,6 +105,7 @@ class TerminalListener:
     def turn(self):
         """Bracket one agent.run(), so the spinner and the gate are bounded."""
         self.streamed = False
+        self._blocks = 0
         self.status.start("thinking")
         try:
             yield self
@@ -125,9 +127,32 @@ class TerminalListener:
         """
         if not self.rich or not outcome.answer:
             return
+        self._gap()
         self._say(paint(cost(outcome), DIM, self.stream))
 
+    def _gap(self) -> None:
+        """A blank line above the next block, so the turn has a rhythm.
+
+        Grouping is done by proximity here, and everything in a turn arriving
+        flush against everything else leaves nothing for the eye to group by:
+        the question, each call, the answer and its cost are four things, not
+        one paragraph.
+
+        Chrome, so it stops at the edge of a terminal. A pipe gets the lines it
+        always got, because something downstream is parsing them.
+        """
+        if not self.rich:
+            return
+        self._blocks += 1
+        with self.status.pause():
+            self._newline()
+            print("", file=self.stream, flush=True)
+
     def _emit(self, text: str) -> None:
+        # The first prose of a turn opens a block of its own, whether or not a
+        # tool call came before it.
+        if not self.streamed:
+            self._gap()
         with self.status.pause():
             self.stream.write(text)
             self.stream.flush()
@@ -170,6 +195,7 @@ class TerminalListener:
         self.status.note(narrate.intent(call))
 
     def on_tool_result(self, call: ToolCall, result: ToolResult) -> None:
+        self._gap()
         mark = paint(DOT, GREEN if result.ok else RED, self.stream)
         name = paint(call.name, ORANGE, self.stream)
         self._say(f"{mark} {name}({summarize(call.arguments)})")
@@ -181,6 +207,7 @@ class TerminalListener:
         self.status.note("thinking")
 
     def on_retry(self, reason: str) -> None:
+        self._gap()
         self._say(paint(f"{DOT} retrying (malformed reply)", YELLOW, self.stream))
 
 
@@ -526,7 +553,11 @@ def chrome() -> str:
     under it would mean owning key handling -- a different program.
     """
     rule = divider()
-    return f"{paint(HINT, DIM)}\n{rule}" if rule else ""
+    if not rule:
+        return ""
+    # Opens with a blank line: the rule closes the exchange above it, and a
+    # rule pressed against the last line of that exchange reads as part of it.
+    return f"\n{paint(HINT, DIM)}\n{rule}"
 
 
 def interactive(agent, snapshots, permissions, workspace, listener,

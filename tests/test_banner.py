@@ -159,7 +159,10 @@ def test_the_hint_rides_above_the_rule(monkeypatch):
     # mean owning key handling.
     monkeypatch.setattr(terminal, "interactive", lambda *a, **k: True)
     monkeypatch.setattr(terminal, "width", lambda *a, **k: 72)
-    hint, rule = bare(cli.chrome()).splitlines()
+    gap, hint, rule = bare(cli.chrome()).splitlines()
+    # The gap closes the exchange above: a rule pressed against the last line
+    # of an answer reads as part of that answer.
+    assert gap == ""
     assert hint == cli.HINT
     assert rule == banner.RULE * 72
 
