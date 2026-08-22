@@ -8,6 +8,7 @@ would think to look for.
 
 from __future__ import annotations
 
+import re
 import shutil
 import sys
 
@@ -19,6 +20,9 @@ YELLOW = "\033[33m"
 BLUE = "\033[34m"
 MAGENTA = "\033[35m"
 CYAN = "\033[36m"
+#: The mark's own orange, for borders and headings. 256-colour rather than one
+#: of the eight above: none of them is the colour of the logo.
+ORANGE = "\033[38;5;209m"
 RESET = "\033[0m"
 
 CLEAR_LINE = "\r\033[2K"
@@ -49,6 +53,37 @@ def paint(text: str, colour: str, stream=None) -> str:
     except (AttributeError, ValueError):
         tty = False
     return f"{colour}{text}{RESET}" if tty else text
+
+
+#: Every SGR sequence ``paint`` can emit. Colour is invisible to the terminal's
+#: column count, and to anything padding a column by hand.
+SGR = re.compile(r"\033\[[0-9;]*m")
+
+
+def visible(text: str) -> int:
+    """How many columns ``text`` takes up once the colour is stripped.
+
+    ``len`` is the wrong answer for anything ``paint`` has touched: a coloured
+    word carries a dozen bytes the terminal never draws, and padding by ``len``
+    puts every column after it out by that much.
+    """
+    return len(SGR.sub("", text))
+
+
+def fit(text: str, limit: int) -> str:
+    """``text`` cut to ``limit`` columns, with an ellipsis where it was cut.
+
+    Cutting, not wrapping: a line that runs past its column in a boxed layout
+    has nowhere to wrap to, and a second row would push the border out of
+    square. Text with colour in it is returned whole rather than cut mid-escape
+    -- the callers that truncate are the ones building their own columns, and
+    they colour the result afterwards.
+    """
+    if limit <= 0:
+        return ""
+    if visible(text) <= limit or SGR.search(text):
+        return text
+    return text[: limit - 1].rstrip() + "…" if limit > 1 else "…"
 
 
 def width(default: int = 80) -> int:
