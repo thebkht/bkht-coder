@@ -35,11 +35,14 @@ def preview(tool, arguments: dict, workspace) -> str:
     Showing the actual diff rather than the tool name is the point: approving
     'edit_file' blind is not meaningfully different from running in --auto.
     """
+    command = arguments.get("command", "")
     if tool.name == "background":
-        return f"$ {arguments.get('command', '')} &"
+        # `output`, `stop` and `list` carry no command and change nothing that
+        # can be previewed; the action itself is all there is to show.
+        return f"$ {command} &" if command else f"background {arguments.get('action', '')}"
 
-    if "command" in arguments:
-        return f"$ {arguments.get('command', '')}"
+    if command:
+        return f"$ {command}"
 
     path = arguments.get("path")
     if path is None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import contextlib
 import sys
 from functools import partial
@@ -27,6 +28,7 @@ from .status import Status
 from .streaming import Gate
 from .terminal import BOLD, CYAN, DIM, RED, YELLOW, paint
 from .tools import build_registry
+from .tools.background import Jobs
 from .tools.base import ToolResult
 
 
@@ -203,10 +205,14 @@ def resolve_mode(args) -> str:
 
 
 def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
-    """Wire up provider, tools, permissions, session, and agent."""
+    """Wire up provider, tools, permissions, session, jobs, and agent."""
     root = Path(args.cwd).expanduser().resolve()
     mode = resolve_mode(args)
     snapshots = Snapshots()
+    jobs = Jobs()
+    # Registered before anything can start a process, and unconditionally: a
+    # session that dies on an exception must not leave a server behind either.
+    atexit.register(jobs.stop_all)
 
     # Discovered before the registry is built: whether the `skill` tool exists
     # at all depends on whether there is anything for it to fetch.
@@ -218,7 +224,8 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
     # rather than denied at call time, so the model is never tempted by a tool
     # it cannot use -- one fewer way for a small model to waste a turn.
     registry, workspace = build_registry(
-        root, read_only=(mode == PLAN), snapshots=snapshots, skills=found_skills
+        root, read_only=(mode == PLAN), snapshots=snapshots, skills=found_skills,
+        jobs=jobs,
     )
     # The prompt pauses the status line for the whole exchange: without it the
     # spinner repaints over the diff being approved.
@@ -278,7 +285,7 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
         max_iterations=args.max_iterations,
         scout_root=None if getattr(args, "no_scout", False) else workspace.root,
     )
-    return agent, snapshots, permissions, workspace
+    return agent, snapshots, permissions, workspace, jobs
 
 
 def report(outcome, streamed: bool = False) -> int:
@@ -369,9 +376,13 @@ def greeting(agent, permissions, workspace, stream=None) -> str:
     ])
 
 
-def interactive(agent, snapshots, permissions, workspace, listener, use_instructions=True) -> int:
+def interactive(agent, snapshots, permissions, workspace, listener,
+                use_instructions=True, jobs=None) -> int:
     """The REPL. Ctrl-C abandons the current line; Ctrl-D leaves."""
-    repl = Repl(agent, snapshots, permissions, workspace, use_instructions=use_instructions)
+    repl = Repl(
+        agent, snapshots, permissions, workspace,
+        use_instructions=use_instructions, jobs=jobs,
+    )
     reader = Reader(repl, enabled=terminal.interactive())
     print(paint(greeting(agent, permissions, workspace), DIM))
 
@@ -407,14 +418,19 @@ def main(argv: list[str] | None = None) -> int:
 
     args = build_agent_parser().parse_args(argv)
     listener = TerminalListener(verbose=args.verbose)
-    agent, snapshots, permissions, workspace = make_agent(args, listener)
+    agent, snapshots, permissions, workspace, jobs = make_agent(args, listener)
 
-    if args.prompt:
-        return run_turn(agent, listener, " ".join(args.prompt))
-    return interactive(
-        agent, snapshots, permissions, workspace, listener,
-        use_instructions=not args.no_instructions,
-    )
+    try:
+        if args.prompt:
+            return run_turn(agent, listener, " ".join(args.prompt))
+        return interactive(
+            agent, snapshots, permissions, workspace, listener,
+            use_instructions=not args.no_instructions, jobs=jobs,
+        )
+    finally:
+        # The user started nothing here and can see nothing here: a server left
+        # running after the session ends is one they have no way to find again.
+        jobs.stop_all()
 
 
 if __name__ == "__main__":

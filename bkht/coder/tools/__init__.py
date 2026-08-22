@@ -23,7 +23,7 @@ __all__ = [
 
 
 def build_registry(
-    root: Path | str, read_only: bool = False, snapshots=None, skills=None
+    root: Path | str, read_only: bool = False, snapshots=None, skills=None, jobs=None
 ) -> tuple[Registry, Workspace]:
     """Build the tool set for a workspace rooted at ``root``.
 
@@ -52,5 +52,10 @@ def build_registry(
 
         register_write_tools(registry, workspace, snapshots)
         register_shell_tools(registry, workspace)
+
+        if jobs is not None:
+            from .background import register_background_tools
+
+            register_background_tools(registry, workspace, jobs)
 
     return registry, workspace

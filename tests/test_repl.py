@@ -293,3 +293,39 @@ def test_skills_names_what_it_skipped(repl, project):
     lines.clear()
     r.dispatch("/skills")
     assert "skipped" in lines[0] and "broken" in lines[0]
+
+
+def test_jobs_with_none_running_says_so(project):
+    from bkht.coder.tools.background import Jobs
+
+    r, lines = _repl_with_jobs(project, Jobs())
+    r.dispatch("/jobs")
+    assert "no background jobs" in lines[0]
+
+
+def test_jobs_stop_reports_an_unknown_id(project):
+    from bkht.coder.tools.background import Jobs
+
+    r, lines = _repl_with_jobs(project, Jobs())
+    r.dispatch("/jobs stop 7")
+    assert "no background job with id" in lines[0]
+
+
+def test_jobs_rejects_a_verb_it_does_not_know(project):
+    from bkht.coder.tools.background import Jobs
+
+    r, lines = _repl_with_jobs(project, Jobs())
+    r.dispatch("/jobs restart 1")
+    assert "Usage: /jobs" in lines[0]
+
+
+def _repl_with_jobs(project, jobs):
+    """A REPL wired to a job store, which the default fixture has no need of."""
+    snapshots = Snapshots()
+    registry, workspace = build_registry(project, snapshots=snapshots, jobs=jobs)
+    permissions = Permissions(mode=ASK, workspace=workspace, prompt=lambda q, b: "n")
+    session = Session(system="sys", cwd=str(project), model="fake")
+    agent = Agent(FakeProvider([]), registry, session, permissions=permissions)
+
+    lines = []
+    return Repl(agent, snapshots, permissions, workspace, out=lines.append, jobs=jobs), lines

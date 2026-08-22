@@ -22,8 +22,8 @@ coder --model qwen2.5-coder:7b
 ```
 
 Slash commands: `/tools`, `/context`, `/clear`, `/undo`, `/diff`, `/review`,
-`/instructions`, `/skills`, `/permissions`, `/model`, `/mode`, `/help`,
-`/exit`. `!cmd` shells out, and `exit` on its own leaves.
+`/instructions`, `/skills`, `/jobs`, `/permissions`, `/model`, `/mode`,
+`/help`, `/exit`. `!cmd` shells out, and `exit` on its own leaves.
 
 On a terminal the session streams: prose appears as the model writes it, a
 status line shows elapsed time and tokens while it is quiet, and each tool call
@@ -35,7 +35,7 @@ same plain transcript they always did.
 
 State lives in `~/.bkht-coder/`: sessions under `sessions/`, prompt
 history in `history`, remembered approvals in `permissions.json`, skills that
-apply everywhere under `skills/`.
+apply everywhere under `skills/`, background job logs under `jobs/`.
 
 ## Requirements
 
@@ -213,6 +213,37 @@ In a session, `/instructions` shows what is loaded and `/instructions reload`
 re-reads it, so editing the rules doesn't cost the conversation. `--resume`
 picks up edits on its own, because the system prompt is rebuilt rather than
 replayed.
+
+## Long-running commands
+
+The shell tool waits, and gives up at sixty seconds. That is right for the
+commands an agent mostly runs — a test suite, a build, a `git log` — and useless
+for the ones that are not supposed to finish. A dev server started through it
+either ends the turn or is ended by it.
+
+Those go through `background` instead, which returns as soon as the process is
+up and hands back an id:
+
+```
+background(action="start", command="npm run dev")   -> started job 1
+background(action="output", job_id="1")             -> the last 200 lines
+background(action="stop", job_id="1")
+background(action="list")
+```
+
+Output goes to a file under `~/.bkht-coder/jobs/`, not into the conversation. A
+server that logs a line a second would otherwise fill an 8K window while nobody
+was reading it — and when the model does ask, it gets the *end* of the log,
+because for a server the last thing it said is the only thing worth reading.
+
+Four actions on one tool rather than four tools. The tool set is the scarce
+resource on a 14b model, and one schema costs far less selection accuracy than
+four names competing for it.
+
+Jobs belong to the session and do not outlive it. Quitting stops them, and so
+does crashing; a process the agent started, that the user never saw and cannot
+easily find, is not something to leave running on their machine. `/jobs` lists
+them and `/jobs stop <id>` ends one by hand.
 
 ## Remembered approvals
 

@@ -29,6 +29,7 @@ Commands
   /diff               show uncommitted changes in the workspace
   /instructions [reload]  show the project instructions, or re-read them
   /skills             list the skills the model can open
+  /jobs [stop <id>]   background processes this session started
   /review [base]      review uncommitted changes, or this branch against base
   /model [name]       show or switch the Ollama model
   /mode [ask|auto|plan]   show or switch the permission mode
@@ -53,7 +54,7 @@ class Repl:
 
     def __init__(
         self, agent, snapshots, permissions, workspace, out=print,
-        use_instructions: bool = True,
+        use_instructions: bool = True, jobs=None,
     ) -> None:
         self.agent = agent
         self.snapshots = snapshots
@@ -61,6 +62,7 @@ class Repl:
         self.workspace = workspace
         self.out = out
         self.use_instructions = use_instructions
+        self.jobs = jobs
 
     LEAVE = ("exit", "quit")
 
@@ -166,6 +168,30 @@ class Repl:
             self.out(f"  skipped: {problem}")
         return Command()
 
+    def do_jobs(self, argument: str) -> Command:
+        """List background processes, or stop one.
+
+        Visible to the user, not just to the model: a process the agent started
+        and the user cannot see is one they cannot decide about.
+        """
+        if self.jobs is None:
+            self.out("Background jobs are not available in this session.")
+            return Command()
+
+        verb, _, identifier = argument.partition(" ")
+        if not verb:
+            self.out(self.jobs.summary())
+            return Command()
+        if verb != "stop" or not identifier.strip():
+            self.out("Usage: /jobs\n       /jobs stop <id>")
+            return Command()
+
+        try:
+            self.out(self.jobs.stop(identifier.strip()))
+        except ToolError as exc:
+            self.out(str(exc))
+        return Command()
+
     def do_context(self, argument: str) -> Command:
         session = self.agent.session
         num_ctx = getattr(self.agent.provider, "num_ctx", DEFAULT_NUM_CTX)
@@ -181,6 +207,8 @@ class Repl:
         self.out(f"  undo depth {len(self.snapshots)}")
         self.out(f"  scout      {'on' if self.agent.scout_root else 'off'}")
         self.out(f"  skills     {len(discover_skills(self.workspace.root))} available")
+        if self.jobs is not None:
+            self.out(f"  jobs       {len(self.jobs.running())} running")
         rules = getattr(self.permissions, "rules", None)
         if rules is not None:
             self.out(f"  remembered {len(rules.listing())} permission rule(s)")
