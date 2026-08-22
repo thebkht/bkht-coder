@@ -15,6 +15,8 @@ from bkht.coder.doctor import (
     check_model,
     check_server,
     check_state_dir,
+    check_version,
+    check_workspace,
     check_skills,
     render,
     report,
@@ -89,6 +91,46 @@ def test_a_tiny_machine_is_told_to_change_model_not_context():
 
 def test_unknown_memory_is_not_reported_as_a_problem():
     assert check_context(8192, None).status == OK
+
+
+# --- which copy, and where it was pointed ---------------------------------
+
+
+def _checkout(root):
+    (root / "pyproject.toml").write_text('[project]\nname = "bkht-coder"\n')
+    return root
+
+
+def test_running_the_checkout_you_are_in_passes(project):
+    assert check_version(_checkout(project), origin=project).status == OK
+
+
+def test_a_separately_installed_copy_is_flagged(project, tmp_path):
+    # The exact confusion this check exists for: a feature is in the source and
+    # not in the program, because the program is a copy installed elsewhere.
+    check = check_version(_checkout(project), origin=tmp_path / "tools" / "bkht-coder")
+    assert check.status == WARN
+    assert "--editable" in check.fix
+
+
+def test_a_workspace_that_is_not_coder_itself_is_not_flagged(project, tmp_path):
+    # Everywhere else, an installed copy is exactly what should be running.
+    assert check_version(project, origin=tmp_path / "elsewhere").status == OK
+
+
+def test_the_version_check_names_where_it_ran_from(project):
+    assert str(project) in check_version(project, origin=project).detail
+
+
+def test_the_home_directory_is_a_poor_workspace(monkeypatch, tmp_path):
+    # Not broken, just unusable: every search walks the whole of it.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    check = check_workspace(tmp_path)
+    assert check.status == WARN and "home directory" in check.detail
+
+
+def test_an_ordinary_workspace_passes(project):
+    assert check_workspace(project).status == OK
 
 
 # --- the rest -------------------------------------------------------------

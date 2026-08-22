@@ -14,6 +14,10 @@ from .provider import ProviderError, collect
 COMPACT_AT = 0.75
 KEEP_RECENT = 6
 MAX_TREE_ENTRIES = 200
+# The walk is bounded separately from the listing: a monorepo can hold hundreds
+# of thousands of files, and counting them all to report an exact remainder is
+# not worth the seconds it costs on every startup.
+MAX_TREE_SCAN = 20_000
 
 SUMMARY_INSTRUCTION = """\
 Summarise the conversation so far so that it can replace the original messages.
@@ -35,31 +39,62 @@ def estimate_tokens(text: str) -> int:
 
 
 def file_tree(root: Path, max_entries: int = MAX_TREE_ENTRIES) -> str:
-    """A flat, sorted list of the workspace's files.
+    """A flat list of the workspace's files, shallowest first.
 
     Flat rather than indented on purpose: the model uses these as arguments to
     ``read_file``, and a full relative path is directly usable where a tree
     drawing has to be reassembled first.
-    """
-    from .tools.fs import is_ignored
 
+    Which files get the budget is the part that matters. Taken in alphabetical
+    order, the first 200 paths of a monorepo are whatever sorts earliest --
+    caches, vendored checkouts, a worktree full of somebody else's SDK -- and
+    the model is left to guess where the project actually keeps its code. It
+    guesses badly, then reads files that do not exist. Shallowest first spends
+    the budget where the answer to "what is this project" lives: the README,
+    the manifests, the top of each package.
+    """
     root = Path(root)
-    paths = []
-    for path in sorted(root.rglob("*")):
-        if not path.is_file() or is_ignored(path, root):
-            continue
-        if path.name.startswith("."):
-            continue
-        paths.append(str(path.relative_to(root)))
-        if len(paths) > max_entries:
+    paths: list[Path] = []
+    scanned = 0
+    complete = True
+
+    for path in _walk(root):
+        scanned += 1
+        if scanned > MAX_TREE_SCAN:
+            complete = False
             break
+        paths.append(path.relative_to(root))
 
     if not paths:
         return "(no files)"
-    if len(paths) > max_entries:
-        extra = len(paths) - max_entries
-        paths = paths[:max_entries] + [f"... and {extra} more files"]
-    return "\n".join(paths)
+
+    kept = sorted(paths, key=lambda p: (len(p.parts), p.parts))[:max_entries]
+    listing = sorted(str(p) for p in kept)
+
+    omitted = len(paths) - len(kept)
+    if omitted or not complete:
+        # "at least" when the walk was cut short: an exact count would be a
+        # claim about files we never looked at.
+        count = f"at least {omitted}" if not complete else str(omitted)
+        listing.append(f"... and {count} more files, not listed. Use `glob` to find them.")
+    return "\n".join(listing)
+
+
+def _walk(root: Path):
+    """Every file worth showing, ignored and hidden directories skipped.
+
+    Hidden directories are skipped by every part of the path, not just the
+    file's own name: `.aider.tags.cache.v4/07/15/b5e4.val` is not a dotfile by
+    its basename, and a listing that fills up with cache entries is worse than
+    no listing at all.
+    """
+    from .tools.search import iter_files
+
+    for path in iter_files(root, root):
+        relative = path.relative_to(root)
+        if any(part.startswith(".") for part in relative.parts):
+            continue
+        yield path
 
 
 def usage_ratio(session, num_ctx: int) -> float:

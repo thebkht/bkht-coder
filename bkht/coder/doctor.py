@@ -62,6 +62,57 @@ class Check:
         return record
 
 
+def version() -> str:
+    """The installed version, or nothing.
+
+    A checkout run straight from source has no distribution metadata, and a
+    greeting is not worth failing to start over.
+    """
+    try:
+        from importlib.metadata import PackageNotFoundError, version as installed
+    except ImportError:  # pragma: no cover - stdlib since 3.8
+        return ""
+    try:
+        return installed("bkht-coder")
+    except PackageNotFoundError:
+        return ""
+
+
+def running_from() -> Path:
+    """The directory the code executing right now was imported from."""
+    return Path(__file__).resolve().parents[2]
+
+
+def _is_this_project(root: Path) -> bool:
+    """Whether ``root`` is a checkout of bkht-coder itself."""
+    try:
+        return 'name = "bkht-coder"' in (root / "pyproject.toml").read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+
+def check_version(root: Path, origin: Path | None = None) -> Check:
+    """Which copy of coder is running, and whether it is the one being edited.
+
+    `uv tool install` copies the package into an environment of its own, so the
+    command on PATH keeps working while the checkout moves on without it. The
+    symptom is a feature that exists in the source and not in the program, and
+    nothing else in this report would explain it.
+    """
+    origin = Path(origin) if origin is not None else running_from()
+    label = f"{version() or 'unknown version'} from {origin}"
+
+    if _is_this_project(root) and root.resolve() != origin:
+        return Check(
+            "version", WARN,
+            f"{label} -- not the checkout you are standing in ({root})",
+            "That copy was installed separately and does not change when you edit here. "
+            "Run `uv tool install --force --editable .` to point it at this checkout, "
+            "or prefix commands with `uv run`.",
+        )
+    return Check("version", OK, label)
+
+
 def _tags(host: str) -> tuple[list[str] | None, str]:
     """Model tags the server knows about, or why we could not ask."""
     try:
@@ -222,6 +273,24 @@ def check_skills(root: Path) -> Check:
     return Check("skills", OK, ", ".join(skill.name for skill in found.skills))
 
 
+def check_workspace(root: Path) -> Check:
+    """Where the agent has been pointed, when that is somewhere too big.
+
+    Started in a home directory, every search walks decades of files and every
+    `.claude/skills` directory in it loads at once. Nothing here is broken, so
+    the user is left with a working install that simply never answers.
+    """
+    root = Path(root).resolve()
+    if root == Path.home().resolve():
+        return Check(
+            "workspace", WARN,
+            f"{root} is your home directory",
+            "Searches walk everything under the root, so start coder in the project "
+            "you mean to work on instead.",
+        )
+    return Check("workspace", OK, str(root))
+
+
 def run_checks(
     root: Path,
     model: str = DEFAULT_MODEL,
@@ -230,10 +299,14 @@ def run_checks(
 ) -> list[Check]:
     """Every check, in the order a failing install should be read in.
 
-    The server first, because nothing below it means anything if it is down.
+    Which copy is running and where it was pointed come first: both can make
+    every check below them describe a program the user is not actually running.
+    Then the server, because nothing under it means anything if it is down.
     """
     tags, problem = _tags(host)
     return [
+        check_version(root),
+        check_workspace(root),
         check_server(host, tags, problem),
         check_model(model, tags),
         check_context(num_ctx, total_ram_gb()),

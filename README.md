@@ -172,6 +172,7 @@ described above.
 | `--max-iterations`  | `25`                     | Cap on agent loop iterations per task                            |
 | `--no-instructions` | off                      | Ignore `AGENTS.md` / `CLAUDE.md`                                 |
 | `--no-skills`       | off                      | Ignore skills, and omit the `skill` tool                         |
+| `--version`         | —                        | Print the version, and which copy of coder is running            |
 
 A few environment variables are read by the **tooling**, not the agent:
 
@@ -363,11 +364,28 @@ coder doctor                      # every check below, with the fix for each
 coder doctor --json               # machine-readable; exits 1 if a check failed
 ```
 
-It asks the questions this list used to ask by hand: is the server answering,
-is the model pulled, does `num_ctx` fit this machine's memory, is there a shell
-and a git, is `~/.bkht-coder/` writable, and which instructions and skills
-loaded. Every failure carries the command that fixes it — a check that reports
-a problem without naming the fix has only moved the search, not ended it.
+It asks the questions this list used to ask by hand: which copy of coder is
+running and where it was pointed, is the server answering, is the model pulled,
+does `num_ctx` fit this machine's memory, is there a shell and a git, is
+`~/.bkht-coder/` writable, and which instructions and skills loaded. Every
+failure carries the command that fixes it — a check that reports a problem
+without naming the fix has only moved the search, not ended it.
+
+The first two checks answer the failures that do not look like failures.
+`uv tool install` copies the package into an environment of its own, so the
+`coder` on your `PATH` keeps running the version it was installed at while the
+checkout moves on without it — the symptom is a feature that plainly exists in
+the source and is missing from the program, and nothing else in the report
+would explain it. `coder --version` prints the same thing on one line:
+
+```sh
+coder --version                   # coder 0.1.0 (/path/it/is/running/from)
+uv tool install --force --editable .   # make the installed copy follow a checkout
+```
+
+The workspace check catches the other one: started in a home directory rather
+than a project, nothing is broken, but every search has the whole of it to walk
+and every `.claude/skills` directory under it loads at once.
 
 The `num_ctx` check is the one worth having. It is fitted to the measured table
 under _How it talks to the model_, and it warns when the context asked for

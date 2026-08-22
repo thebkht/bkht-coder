@@ -13,6 +13,7 @@ from . import banner, narrate, terminal
 from .agent import Agent
 from .approval import ask_tty
 from . import doctor
+from .doctor import running_from, version
 from .context import file_tree
 from .instructions import load_instructions, render, summarize as summarize_instructions
 from .parsing import ToolCall
@@ -163,11 +164,22 @@ def add_agent_arguments(parser) -> None:
     add_common_arguments(parser)
 
 
+def version_line() -> str:
+    """What `--version` prints: the version, and which copy printed it.
+
+    The path is not decoration. A `uv tool install` puts a second copy of coder
+    on PATH, and when the two disagree the only question worth answering first
+    is which one just ran.
+    """
+    return " ".join(filter(None, ("coder", version(), f"({running_from()})")))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="coder",
         description="A coding agent running against a local Ollama server.",
     )
+    parser.add_argument("--version", action="version", version=version_line())
     subparsers = parser.add_subparsers(dest="command")
     reviewer = subparsers.add_parser(
         "review", help="Review uncommitted changes, a branch, or a commit range."
@@ -198,6 +210,7 @@ def build_agent_parser() -> argparse.ArgumentParser:
         description="A coding agent running against a local Ollama server.",
         epilog="Run `coder review --help` for the code-review subcommand.",
     )
+    parser.add_argument("--version", action="version", version=version_line())
     add_agent_arguments(parser)
     return parser
 
@@ -322,22 +335,6 @@ def run_turn(agent, listener, task: str) -> int:
     with listener.turn():
         outcome = agent.run(task)
     return report(outcome, streamed=listener.streamed)
-
-
-def version() -> str:
-    """The installed version, or nothing.
-
-    A checkout run straight from source has no distribution metadata, and a
-    greeting is not worth failing to start over.
-    """
-    try:
-        from importlib.metadata import PackageNotFoundError, version as installed
-    except ImportError:  # pragma: no cover - stdlib since 3.8
-        return ""
-    try:
-        return installed("bkht-coder")
-    except PackageNotFoundError:
-        return ""
 
 
 def facts(agent, permissions) -> str:
