@@ -13,6 +13,7 @@ A coding agent built from scratch, running against a local Ollama server.
 
 ```sh
 coder                          # interactive REPL in the current directory
+coder doctor                   # check this install can actually run a turn
 coder "add a --verbose flag"   # one-shot
 coder --resume                 # continue the last session here
 coder --auto                   # no permission prompts
@@ -23,7 +24,7 @@ coder --model qwen2.5-coder:7b
 
 Slash commands: `/tools`, `/context`, `/clear`, `/undo`, `/diff`, `/review`,
 `/instructions`, `/skills`, `/jobs`, `/permissions`, `/model`, `/mode`,
-`/help`, `/exit`. `!cmd` shells out, and `exit` on its own leaves.
+`/doctor`, `/help`, `/exit`. `!cmd` shells out, and `exit` on its own leaves.
 
 On a terminal the session streams: prose appears as the model writes it, a
 status line shows elapsed time and tokens while it is quiet, and each tool call
@@ -35,7 +36,8 @@ same plain transcript they always did.
 
 State lives in `~/.bkht-coder/`: sessions under `sessions/`, prompt
 history in `history`, remembered approvals in `permissions.json`, skills that
-apply everywhere under `skills/`, background job logs under `jobs/`.
+apply everywhere under `skills/`, background job logs under `jobs/`, slash
+commands under `commands/`.
 
 ## Requirements
 
@@ -357,19 +359,62 @@ the answer, and `--no-scout` turns it off. `/context` shows which it is.
 ## Checking the install
 
 ```sh
+coder doctor                      # every check below, with the fix for each
+coder doctor --json               # machine-readable; exits 1 if a check failed
+```
+
+It asks the questions this list used to ask by hand: is the server answering,
+is the model pulled, does `num_ctx` fit this machine's memory, is there a shell
+and a git, is `~/.bkht-coder/` writable, and which instructions and skills
+loaded. Every failure carries the command that fixes it — a check that reports
+a problem without naming the fix has only moved the search, not ended it.
+
+The `num_ctx` check is the one worth having. It is fitted to the measured table
+under _How it talks to the model_, and it warns when the context asked for
+would push the KV cache off the GPU, which is what is actually happening when
+every turn suddenly takes minutes. It names a size that fits rather than
+telling you to experiment.
+
+The rest of the suite:
+
+```sh
 ollama list                       # the model tag should appear
 uv run pytest -q -m "not live"    # no model needed
 ./scripts/verify.sh               # full preflight + live suite (bash)
 ```
 
-Common failures:
+One failure `doctor` deliberately does not check for: **the model ignores tools
+and replies with JSON text**. That is expected for this class of model, and it
+is handled; see _How it talks to the model_.
 
-- `ollama not reachable` — the server isn't running (`ollama serve`), or
-  it's bound to another address; check with `curl http://localhost:11434/api/tags`.
-- **Every turn takes minutes** — `num_ctx` is too large for available RAM; see
-  the table under _How it talks to the model_. Lower it or use the 7b model.
-- **The model ignores tools / replies with JSON text** — expected for this
-  class of model, and handled; see the same section.
+## Your own slash commands
+
+A prompt retyped every day belongs in a file. Drop a Markdown file in
+`.bkht-coder/commands/` and its name becomes a command:
+
+```
+.bkht-coder/commands/audit.md   ->  /audit provider.py
+```
+
+```markdown
+---
+description: Look for swallowed errors.
+---
+
+Audit the error handling in $ARGUMENTS. Report only silent failures.
+```
+
+The body becomes the task. `$ARGUMENTS` is substituted where the file asks for
+it and appended where it does not, so a file written without a placeholder
+still takes arguments rather than discarding them. Frontmatter is optional and
+only its `description` is read, which is what `/help` lists them with.
+
+Files in `~/.bkht-coder/commands/` apply everywhere, and a workspace can shadow
+one with its own. Nothing here can shadow a built-in: `/undo` has to keep
+meaning `/undo`, and file lookup happens only after the built-in table has been
+checked. Nor is any of it executable — the body is prose sent to the model, and
+a slash command that could run something would be a permission gate with a back
+door in it.
 
 ## Uninstalling
 

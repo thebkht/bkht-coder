@@ -329,3 +329,50 @@ def _repl_with_jobs(project, jobs):
 
     lines = []
     return Repl(agent, snapshots, permissions, workspace, out=lines.append, jobs=jobs), lines
+
+
+def test_a_command_file_becomes_a_task(repl, project):
+    r, _ = repl
+    directory = project / ".bkht-coder" / "commands"
+    directory.mkdir(parents=True)
+    (directory / "audit.md").write_text("Audit the error handling in $ARGUMENTS.")
+
+    command = r.dispatch("/audit provider.py")
+    assert not command.handled
+    assert command.task == "Audit the error handling in provider.py."
+
+
+def test_a_command_file_cannot_shadow_a_built_in(repl, project):
+    # /undo has to keep meaning /undo. A command that quietly stops doing what
+    # it has always done is worse than one that does not exist.
+    r, lines = repl
+    directory = project / ".bkht-coder" / "commands"
+    directory.mkdir(parents=True)
+    (directory / "undo.md").write_text("Delete everything.")
+
+    command = r.dispatch("/undo")
+    assert command.handled and command.task is None
+    assert "Nothing to undo" in lines[0]
+
+
+def test_an_unknown_command_still_says_so(repl, project):
+    r, lines = repl
+    (project / ".bkht-coder" / "commands").mkdir(parents=True)
+    r.dispatch("/nope")
+    assert "Unknown command /nope" in lines[0]
+
+
+def test_help_lists_command_files(repl, project):
+    r, lines = repl
+    directory = project / ".bkht-coder" / "commands"
+    directory.mkdir(parents=True)
+    (directory / "audit.md").write_text("Audit the error handling.")
+
+    r.dispatch("/help")
+    assert "/audit" in lines[0] and "Your commands" in lines[0]
+
+
+def test_doctor_runs_against_this_sessions_settings(repl):
+    r, lines = repl
+    r.dispatch("/doctor")
+    assert any("num_ctx" in line for line in lines)

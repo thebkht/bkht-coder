@@ -42,12 +42,14 @@ def pytest_addoption(parser):
 def isolated_state(tmp_path, monkeypatch):
     """Keep the suite out of the developer's real ``~/.bkht-coder``.
 
-    Autouse because both stores load themselves: ``Permissions`` reads the rule
-    file whenever it is given a workspace, and discovery reads the global skill
-    directory on every scan. Either would otherwise pick up -- and in the rules'
-    case, write -- whatever is on the machine running the tests.
+    Autouse because these stores load themselves: ``Permissions`` reads the rule
+    file whenever it is given a workspace, and skill and command discovery read
+    their global directories on every scan. Any of them would otherwise pick up
+    -- and in the rules' case, write -- whatever is on the machine running the
+    tests.
     """
-    from bkht.coder import rules, skills
+    from bkht.coder import commands, rules, skills
 
     monkeypatch.setattr(rules, "RULES_PATH", tmp_path / "permissions.json")
     monkeypatch.setattr(skills, "GLOBAL_ROOT", tmp_path / "global-skills")
+    monkeypatch.setattr(commands, "GLOBAL_ROOT", tmp_path / "global-commands")

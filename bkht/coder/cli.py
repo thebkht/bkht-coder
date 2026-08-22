@@ -12,6 +12,7 @@ from pathlib import Path
 from . import banner, narrate, terminal
 from .agent import Agent
 from .approval import ask_tty
+from . import doctor
 from .context import file_tree
 from .instructions import load_instructions, render, summarize as summarize_instructions
 from .parsing import ToolCall
@@ -173,6 +174,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_common_arguments(reviewer)
     review_cli.add_arguments(reviewer)
+
+    checker = subparsers.add_parser(
+        "doctor", help="Check that this install can actually run a turn."
+    )
+    add_common_arguments(checker)
+    doctor.add_arguments(checker)
+
     add_agent_arguments(parser)
     return parser
 
@@ -415,6 +423,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if argv[:1] == ["review"]:
         return review_cli.run(build_parser().parse_args(argv))
+
+    if argv[:1] == ["doctor"]:
+        args = build_parser().parse_args(argv)
+        return doctor.report(
+            Path(args.cwd).expanduser().resolve(),
+            model=args.model, host=args.host, num_ctx=args.num_ctx,
+            as_json=args.json,
+        )
 
     args = build_agent_parser().parse_args(argv)
     listener = TerminalListener(verbose=args.verbose)

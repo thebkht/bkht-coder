@@ -12,6 +12,7 @@ import sys
 from dataclasses import dataclass
 
 from . import highlight
+from .commands import discover as user_commands, summarize as summarize_commands
 from .instructions import load_instructions, render
 from .permissions import MODES
 from .provider import DEFAULT_NUM_CTX
@@ -34,6 +35,7 @@ Commands
   /model [name]       show or switch the Ollama model
   /mode [ask|auto|plan]   show or switch the permission mode
   /permissions        list remembered decisions, or `remember`/`revoke` one
+  /doctor             check that this install can run a turn
   /help               this list
   /exit               leave (or just `exit`)
 
@@ -87,15 +89,23 @@ class Repl:
 
         name, _, argument = line[1:].partition(" ")
         handler = getattr(self, f"do_{name}", None)
-        if handler is None:
-            self.out(f"Unknown command /{name}. Try /help.")
-            return Command()
-        return handler(argument.strip()) or Command()
+        if handler is not None:
+            return handler(argument.strip()) or Command()
+
+        # Looked up only after the built-ins, so a file on disk can never
+        # shadow /undo or /mode -- a command that quietly stops meaning what it
+        # has always meant is worse than one that does not exist.
+        written = user_commands(self.workspace.root).get(name.lower())
+        if written is not None:
+            return Command(handled=False, task=written.expand(argument))
+
+        self.out(f"Unknown command /{name}. Try /help.")
+        return Command()
 
     # --- commands -----------------------------------------------------------
 
     def do_help(self, argument: str) -> Command:
-        self.out(HELP)
+        self.out(HELP + summarize_commands(user_commands(self.workspace.root)))
         return Command()
 
     def do_exit(self, argument: str) -> Command:
@@ -166,6 +176,20 @@ class Repl:
             self.out(f"  {skill.name}{available}\n      {skill.description}\n      {skill.source}")
         for problem in found.problems:
             self.out(f"  skipped: {problem}")
+        return Command()
+
+    def do_doctor(self, argument: str) -> Command:
+        """The same checks as `coder doctor`, against this session's settings."""
+        from . import doctor
+
+        provider = self.agent.provider
+        doctor.report(
+            self.workspace.root,
+            model=provider.model,
+            host=getattr(provider, "host", ""),
+            num_ctx=getattr(provider, "num_ctx", DEFAULT_NUM_CTX),
+            out=self.out,
+        )
         return Command()
 
     def do_jobs(self, argument: str) -> Command:
