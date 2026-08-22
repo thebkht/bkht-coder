@@ -159,21 +159,97 @@ class Session:
     @staticmethod
     def latest_for(cwd: str, directory: Path | None = None) -> Path | None:
         """The most recent session file recorded for ``cwd``, if any."""
-        directory = Path(directory) if directory else SESSION_DIR
-        if not directory.is_dir():
-            return None
-
-        target = os.path.realpath(cwd)
-        # Ids are timestamp-prefixed, so newest-first is a reverse name sort.
-        for path in sorted(directory.glob("*.jsonl"), reverse=True):
-            try:
-                with path.open(encoding="utf-8") as handle:
-                    header = json.loads(handle.readline() or "{}")
-            except (OSError, json.JSONDecodeError):
-                continue
-            if header.get("type") == "session" and header.get("cwd") == target:
-                return path
+        for path, _ in headers(cwd, directory):
+            return path
         return None
+
+
+@dataclass(frozen=True)
+class Info:
+    """One saved session, as it appears in a listing."""
+
+    id: str
+    path: Path
+    cwd: str
+    model: str
+    created: float
+    messages: int
+
+
+def headers(cwd: str | None = None, directory: Path | None = None):
+    """Every saved session as ``(path, header)``, newest first.
+
+    Only the first line of each file is read, which is what makes listing
+    cheap: the header carries the directory, the model and the creation time,
+    and a session that is still being appended to answers just as fast as one
+    that finished last week. ``cwd`` of None means every workspace.
+
+    Files that cannot be read, or whose first line is not a header, are
+    skipped: the directory is the user's, and a stray file in it is not a
+    reason to refuse to list the real ones.
+    """
+    directory = Path(directory) if directory else SESSION_DIR
+    if not directory.is_dir():
+        return
+
+    target = os.path.realpath(cwd) if cwd is not None else None
+    # Ids are timestamp-prefixed, so newest-first is a reverse name sort.
+    for path in sorted(directory.glob("*.jsonl"), reverse=True):
+        try:
+            with path.open(encoding="utf-8") as handle:
+                header = json.loads(handle.readline() or "{}")
+        except (OSError, json.JSONDecodeError):
+            continue
+        if header.get("type") != "session":
+            continue
+        if target is not None and header.get("cwd") != target:
+            continue
+        yield path, header
+
+
+def sessions_for(cwd: str | None = None, directory: Path | None = None) -> list[Info]:
+    """Saved sessions, newest first, with their message counts.
+
+    Counting means reading each file, so this is the expensive listing and
+    :func:`headers` is the cheap one. It is worth it: a list of ids and times
+    with no sense of how much was said in each is a list you have to open one
+    by one to use.
+    """
+    found = []
+    for path, header in headers(cwd, directory):
+        try:
+            messages = len(Session.load(path).messages)
+        except OSError:
+            continue
+        found.append(
+            Info(
+                id=header.get("id", path.stem),
+                path=path,
+                cwd=header.get("cwd", ""),
+                model=header.get("model", ""),
+                created=header.get("created", 0.0),
+                messages=messages,
+            )
+        )
+    return found
+
+
+def find(session_id: str, directory: Path | None = None) -> Path | None:
+    """The file for ``session_id``: an exact id, or an unambiguous prefix.
+
+    Prefixes exist because the ids are long and timestamped, and the first
+    eight characters are already a date. An ambiguous prefix returns None
+    rather than the newest match -- resuming the wrong conversation is worse
+    than being asked to type more of the id.
+    """
+    matches = []
+    for path, header in headers(None, directory):
+        identifier = header.get("id", path.stem)
+        if identifier == session_id:
+            return path
+        if identifier.startswith(session_id):
+            matches.append(path)
+    return matches[0] if len(matches) == 1 else None
 
 
 @dataclass
