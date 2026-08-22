@@ -35,7 +35,7 @@ def session(**kwargs):
 def test_the_logo_is_braille_and_nothing_else():
     # A stray space or block character would misalign every row beside it, and
     # only on the terminals that render the two at different widths.
-    assert len(banner.LOGO) == 8
+    assert len(banner.LOGO) == 4
     for row in banner.LOGO:
         assert len(row) == banner.WIDTH
         assert all(0x2800 <= ord(dot) <= 0x28FF for dot in row)
@@ -46,6 +46,12 @@ def test_side_text_lands_on_the_rows_it_was_given():
     assert rows[1].endswith("name")
     assert rows[3].endswith("tagline")
     assert rows[0] == banner.LOGO[0]
+
+
+def test_side_text_past_the_last_row_carries_on_below_the_art():
+    rows = banner.render([None, None, None, None, "after"]).splitlines()
+    assert len(rows) == 5
+    assert rows[4] == " " * (banner.WIDTH + banner.GUTTER) + "after"
 
 
 def test_a_row_without_side_text_has_no_trailing_space():

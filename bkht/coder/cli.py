@@ -370,10 +370,8 @@ def greeting(agent, permissions, workspace, stream=None) -> str:
 
     name = " ".join(filter(None, ("bkht.coder", version())))
     return banner.render([
-        None,
         name,
         TAGLINE,
-        None,
         facts(agent, permissions),
         str(workspace.root),
         None,

@@ -1,12 +1,8 @@
 ```
-⠀⠀⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿
-⣀⣀⣀⡸⠿⠿⠿⠿⠿⠿⠿⠿⣿⣿⣿⣿     bkht.coder
-⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿     A coding agent on a local Ollama.
-⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿
-⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿     curl -fsSL https://thebkht.com/install.sh | sh
-⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿
-⣿⣿⣿⣿⣶⣶⣶⣶⣶⣶⣶⣶⡎⠉⠉⠉     Python 3.12+ · uv · Ollama · nothing leaves the machine
-⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⠀⠀⠀
+⣀⣸⣿⣿⣿⣿⣿⣿     bkht.coder
+⣿⣿⠀⠀⠀⠀⣿⣿     A coding agent on a local Ollama.
+⣿⣿⠀⠀⠀⠀⣿⣿     curl -fsSL https://thebkht.com/install.sh | sh
+⣿⣿⣿⣿⣿⣿⡏⠉     Python 3.12+ · uv · Ollama · nothing leaves the machine
 ```
 
 A coding agent built from scratch, running against a local Ollama server.

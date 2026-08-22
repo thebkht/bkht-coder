@@ -1,9 +1,13 @@
 """The mark, drawn once, in braille.
 
-The logo is a 32x32 square frame with two opposite corners cut away. A braille
+The logo is a 16x16 square frame with two opposite corners cut away. A braille
 cell holds 2 dots across and 4 down, so at one dot per unit the whole mark fits
-in sixteen columns and eight rows and its edges land mid-cell, which is what
-gives the partial glyphs their shape.
+in eight columns and four rows and its edges land mid-cell, which is what gives
+the partial glyphs their shape.
+
+Eight columns rather than sixteen: the greeting is chrome above the first
+prompt, and chrome that takes a third of the screen is chrome that gets in the
+way of the thing it introduces.
 
 It lives here as a literal rather than as geometry rasterised at startup: the
 art never changes, and a banner is not worth a loop that runs before the first
@@ -18,21 +22,17 @@ from collections.abc import Sequence
 BLANK = "⠀"
 
 LOGO: tuple[str, ...] = (
-    "⠀⠀⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿",
-    "⣀⣀⣀⡸⠿⠿⠿⠿⠿⠿⠿⠿⣿⣿⣿⣿",
-    "⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿",
-    "⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿",
-    "⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿",
-    "⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿",
-    "⣿⣿⣿⣿⣶⣶⣶⣶⣶⣶⣶⣶⡎⠉⠉⠉",
-    "⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⠀⠀⠀",
+    "⣀⣸⣿⣿⣿⣿⣿⣿",
+    "⣿⣿⠀⠀⠀⠀⣿⣿",
+    "⣿⣿⠀⠀⠀⠀⣿⣿",
+    "⣿⣿⣿⣿⣿⣿⡏⠉",
 )
 
-WIDTH = 16
+WIDTH = 8
 GUTTER = 5
 
 #: Art, gutter, and enough room for the longest line printed beside it.
-MIN_WIDTH = 62
+MIN_WIDTH = 54
 
 
 def render(lines: Sequence[str | None]) -> str:
@@ -41,12 +41,20 @@ def render(lines: Sequence[str | None]) -> str:
     ``None`` -- or running out of entries -- leaves that row bare, and a bare
     row keeps no trailing whitespace, so the block can be pasted anywhere
     without a ragged right edge.
+
+    More entries than the art has rows is not an error: the extra ones carry on
+    below it, indented to the same left edge. The art is four rows now, and a
+    greeting with more to say than that should not have to split itself across
+    two calls to line up.
     """
     out = []
-    for index, art in enumerate(LOGO):
-        art = art.ljust(WIDTH, BLANK)
+    for index in range(max(len(LOGO), len(lines))):
+        art = LOGO[index].ljust(WIDTH, BLANK) if index < len(LOGO) else " " * WIDTH
         text = lines[index] if index < len(lines) else None
-        out.append(f"{art}{' ' * GUTTER}{text}" if text else art)
+        if text:
+            out.append(f"{art}{' ' * GUTTER}{text}")
+        else:
+            out.append(art.rstrip())
     return "\n".join(out)
 
 
