@@ -99,3 +99,44 @@ def test_an_unwritable_file_does_not_take_the_session_down(store):
     session.add_user("hello")  # must not raise
     assert session.path is None
     assert session.messages[-1]["content"] == "hello"
+
+
+# --- the language reminder --------------------------------------------------
+
+
+def test_no_reminder_without_a_language():
+    session = Session(system="sys")
+    session.add_user("hello")
+    assert session.payload() == [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "hello"},
+    ]
+
+
+def test_no_reminder_for_english():
+    session = Session(system="sys", language="English")
+    session.add_user("hello")
+    assert len(session.payload()) == 2
+
+
+def test_reminder_is_last_and_names_the_language():
+    session = Session(system="sys", language="Uzbek")
+    session.add_user("salom")
+    last = session.payload()[-1]
+    assert last["role"] == "system"
+    assert "Uzbek" in last["content"]
+
+
+def test_reminder_is_never_stored_or_persisted(store):
+    session = Session(system="sys", language="Uzbek", cwd="/work")
+    session.start_file(store)
+    session.add_user("salom")
+    session.payload()
+    session.payload()
+
+    assert [m["content"] for m in session.messages] == ["salom"]
+    reloaded = Session.load(session.path, system="sys")
+    assert [m["content"] for m in reloaded.messages] == ["salom"]
+    # A reloaded session has not been spoken to yet, so it has no language.
+    assert reloaded.language is None
+    assert len(reloaded.payload()) == 2

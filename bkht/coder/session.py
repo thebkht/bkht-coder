@@ -15,6 +15,9 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import prompts
+from .language import ENGLISH
+
 STATE_DIR = Path("~/.bkht-coder").expanduser()
 SESSION_DIR = STATE_DIR / "sessions"
 
@@ -36,13 +39,33 @@ class Session:
     cwd: str = ""
     model: str = ""
     path: Path | None = None
+    # The language the user is writing in, carried between turns because a
+    # follow-up is often too short to identify on its own. Derived state, not
+    # transcript: it is never written to the file.
+    language: str | None = None
 
     # --- history ------------------------------------------------------------
 
     def payload(self) -> list[dict]:
-        """The full message list to send, system prompt first."""
+        """The full message list to send, system prompt first.
+
+        When the user is not writing in English the list ends with a reminder
+        naming their language. It is built here, on every request, and never
+        appended to ``messages``: a reminder in the history would pile up one
+        copy per turn, survive into a resumed session, and be swept into the
+        next summary. Regenerating it keeps exactly one, always last.
+        """
         head = [{"role": "system", "content": self.system}] if self.system else []
-        return head + self.messages
+        return head + self.messages + self._reminders()
+
+    def _reminders(self) -> list[dict]:
+        """The ephemeral messages appended to the end of every request."""
+        # English needs no reminder: the prompt is already written in it, and
+        # that is the common case, so the common case costs nothing.
+        if not self.language or self.language == ENGLISH:
+            return []
+        content = prompts.language_reminder(self.language)
+        return [{"role": "system", "content": content}]
 
     def add_user(self, content: str) -> None:
         self._append({"role": "user", "content": content})
