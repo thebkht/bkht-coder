@@ -39,13 +39,15 @@ def pytest_addoption(parser):
 
 
 @pytest.fixture(autouse=True)
-def isolated_rules(tmp_path, monkeypatch):
-    """Keep the permission store out of the developer's real ``~/.bkht-coder``.
+def isolated_state(tmp_path, monkeypatch):
+    """Keep the suite out of the developer's real ``~/.bkht-coder``.
 
-    Autouse because ``Permissions`` loads the store whenever it is given a
-    workspace, so any test that builds one would otherwise read -- and worse,
-    write -- the rules of whoever is running the suite.
+    Autouse because both stores load themselves: ``Permissions`` reads the rule
+    file whenever it is given a workspace, and discovery reads the global skill
+    directory on every scan. Either would otherwise pick up -- and in the rules'
+    case, write -- whatever is on the machine running the tests.
     """
-    from bkht.coder import rules
+    from bkht.coder import rules, skills
 
     monkeypatch.setattr(rules, "RULES_PATH", tmp_path / "permissions.json")
+    monkeypatch.setattr(skills, "GLOBAL_ROOT", tmp_path / "global-skills")

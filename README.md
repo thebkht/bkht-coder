@@ -22,8 +22,8 @@ coder --model qwen2.5-coder:7b
 ```
 
 Slash commands: `/tools`, `/context`, `/clear`, `/undo`, `/diff`, `/review`,
-`/instructions`, `/permissions`, `/model`, `/mode`, `/help`, `/exit`. `!cmd`
-shells out, and `exit` on its own leaves.
+`/instructions`, `/skills`, `/permissions`, `/model`, `/mode`, `/help`,
+`/exit`. `!cmd` shells out, and `exit` on its own leaves.
 
 On a terminal the session streams: prose appears as the model writes it, a
 status line shows elapsed time and tokens while it is quiet, and each tool call
@@ -34,7 +34,8 @@ commands. Redirect the output and all of that goes away: piped runs print the
 same plain transcript they always did.
 
 State lives in `~/.bkht-coder/`: sessions under `sessions/`, prompt
-history in `history`, remembered approvals in `permissions.json`.
+history in `history`, remembered approvals in `permissions.json`, skills that
+apply everywhere under `skills/`.
 
 ## Requirements
 
@@ -168,6 +169,7 @@ described above.
 | `--cwd`             | `.`                      | Workspace root the tools are confined to                         |
 | `--max-iterations`  | `25`                     | Cap on agent loop iterations per task                            |
 | `--no-instructions` | off                      | Ignore `AGENTS.md` / `CLAUDE.md`                                 |
+| `--no-skills`       | off                      | Ignore skills, and omit the `skill` tool                         |
 
 A few environment variables are read by the **tooling**, not the agent:
 
@@ -247,6 +249,55 @@ telling it invites arguing with the rule.
 
 `--auto` and `--plan` are unchanged and are decided before any rule is
 consulted.
+
+## Skills
+
+`AGENTS.md` charges for its text on every turn, whether or not the turn has
+anything to do with it. At `num_ctx` 8192 that is a real price — which is why
+the instruction budget is capped at 4000 characters, and why long-form
+procedure does not belong there.
+
+A skill splits the cost in two. Its name and one-line description go into the
+system prompt; the body is fetched with the `skill` tool only when the model
+decides it applies. Twenty skills cost about what one paragraph of `AGENTS.md`
+costs, and the twenty bodies cost nothing until one of them is the right one.
+
+A skill is a directory with a `SKILL.md` in it:
+
+```
+.bkht-coder/skills/releasing/SKILL.md
+```
+
+```markdown
+---
+name: releasing
+description: How to cut and publish a release of this project.
+---
+
+Bump the version in pyproject.toml, run the suite, tag it, then ...
+```
+
+Three roots are scanned, one level deep, later ones winning a name collision:
+
+1. `~/.bkht-coder/skills/` — applies everywhere
+2. `<workspace>/.claude/skills/` — read for compatibility with a workspace
+   already set up for another agent; never written to
+3. `<workspace>/.bkht-coder/skills/`
+
+Files sitting beside a `SKILL.md` can be pulled in by name —
+`skill(name="releasing", resource="checklist.md")` — and nothing outside the
+skill's own directory can be, which is the same boundary the workspace root has
+and the same check that draws it.
+
+The `skill` tool is registered **only when a skill was actually found**. A
+workspace without skills gets exactly the tool set it had before the feature
+existed: an extra tool the model can never use successfully is not free, it is
+one more wrong answer available at every step.
+
+A skill missing its `name` or `description` is skipped and said so on startup.
+Silently ignoring it would look identical to a skill the model simply chose not
+to use, and the user would have no way to tell the two apart. `/skills` lists
+what loaded, where each came from, and what was refused.
 
 ## Searching before it answers
 

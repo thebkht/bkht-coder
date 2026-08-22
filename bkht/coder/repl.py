@@ -16,6 +16,7 @@ from .instructions import load_instructions, render
 from .permissions import MODES
 from .provider import DEFAULT_NUM_CTX
 from .rules import DECISIONS
+from .skills import discover as discover_skills
 from .tools.base import ToolError, validate_arguments
 from .tools.shell import NO_SHELL, resolve_shell
 
@@ -27,6 +28,7 @@ Commands
   /undo               restore the file changed by the last mutating call
   /diff               show uncommitted changes in the workspace
   /instructions [reload]  show the project instructions, or re-read them
+  /skills             list the skills the model can open
   /review [base]      review uncommitted changes, or this branch against base
   /model [name]       show or switch the Ollama model
   /mode [ask|auto|plan]   show or switch the permission mode
@@ -125,11 +127,17 @@ class Repl:
             from .context import file_tree
             from .prompts import system_prompt
 
+            # Rebuilt whole, so the skill listing has to be rebuilt with it --
+            # reloading instructions must not quietly cost the session its
+            # skills.
+            from .skills import render as render_skills
+
             self.agent.session.system = system_prompt(
                 self.agent.registry,
                 str(self.workspace.root),
                 file_tree(self.workspace.root),
                 render(loaded),
+                render_skills(discover_skills(self.workspace.root)),
             )
             self.out(f"Reloaded {len(loaded)} instruction file(s).")
 
@@ -138,6 +146,24 @@ class Repl:
             self.out(f"  {instruction.source}{marker}")
             for line in instruction.text.splitlines():
                 self.out(f"      {line}")
+        return Command()
+
+    def do_skills(self, argument: str) -> Command:
+        """Show which skills were found, and which were skipped and why."""
+        found = discover_skills(self.workspace.root)
+        if not (found.skills or found.problems):
+            self.out(
+                "No skills found. Add one as "
+                ".bkht-coder/skills/<name>/SKILL.md with a name and description "
+                "in its frontmatter."
+            )
+            return Command()
+
+        for skill in found.skills:
+            available = " (loaded)" if "skill" in self.agent.registry else ""
+            self.out(f"  {skill.name}{available}\n      {skill.description}\n      {skill.source}")
+        for problem in found.problems:
+            self.out(f"  skipped: {problem}")
         return Command()
 
     def do_context(self, argument: str) -> Command:
@@ -154,6 +180,7 @@ class Repl:
         self.out(f"  session    {session.path or 'not saved'}")
         self.out(f"  undo depth {len(self.snapshots)}")
         self.out(f"  scout      {'on' if self.agent.scout_root else 'off'}")
+        self.out(f"  skills     {len(discover_skills(self.workspace.root))} available")
         rules = getattr(self.permissions, "rules", None)
         if rules is not None:
             self.out(f"  remembered {len(rules.listing())} permission rule(s)")

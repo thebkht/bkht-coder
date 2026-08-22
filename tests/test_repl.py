@@ -265,3 +265,31 @@ def test_review_still_reaches_its_subparser():
 
     args = build_parser().parse_args(["review", "--staged"])
     assert args.command == "review" and args.staged
+
+
+def test_skills_reports_an_empty_workspace(repl):
+    r, lines = repl
+    r.dispatch("/skills")
+    assert "No skills found" in lines[0]
+
+
+def test_skills_lists_what_was_found(repl, project):
+    r, lines = repl
+    directory = project / ".bkht-coder" / "skills" / "releasing"
+    directory.mkdir(parents=True)
+    (directory / "SKILL.md").write_text(
+        "---\nname: releasing\ndescription: How to cut a release.\n---\n\nBump it.\n"
+    )
+    lines.clear()
+    r.dispatch("/skills")
+    assert "releasing" in lines[0] and "How to cut a release." in lines[0]
+
+
+def test_skills_names_what_it_skipped(repl, project):
+    r, lines = repl
+    directory = project / ".bkht-coder" / "skills" / "broken"
+    directory.mkdir(parents=True)
+    (directory / "SKILL.md").write_text("---\nname: broken\n---\n\nBody.\n")
+    lines.clear()
+    r.dispatch("/skills")
+    assert "skipped" in lines[0] and "broken" in lines[0]

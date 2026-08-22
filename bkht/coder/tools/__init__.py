@@ -23,12 +23,15 @@ __all__ = [
 
 
 def build_registry(
-    root: Path | str, read_only: bool = False, snapshots=None
+    root: Path | str, read_only: bool = False, snapshots=None, skills=None
 ) -> tuple[Registry, Workspace]:
     """Build the tool set for a workspace rooted at ``root``.
 
     ``read_only`` omits the mutating tools entirely rather than denying them at
-    call time, so the model is never tempted by a tool it cannot use.
+    call time, so the model is never tempted by a tool it cannot use. ``skills``
+    is omitted for the same reason when a workspace has none: no skills, no
+    ``skill`` tool, and a tool set byte-for-byte what it was before skills
+    existed.
     """
     workspace = Workspace(Path(root))
     registry = Registry()
@@ -37,6 +40,11 @@ def build_registry(
     from .search import register_search_tools
 
     register_search_tools(registry, workspace)
+
+    if skills:
+        from .skills import register_skill_tool
+
+        register_skill_tool(registry, skills)
 
     if not read_only:
         from .fs import register_write_tools

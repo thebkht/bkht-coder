@@ -89,7 +89,7 @@ Root: {root}
 All paths are relative to that root. You cannot read or write outside it.
 
 {tree}
-{instructions}
+{instructions}{skills}
 # Tools
 
 {tools}
@@ -117,18 +117,33 @@ def instructions_block(instructions: str) -> str:
     return "\n" + INSTRUCTIONS_HEADER + "\n" + instructions.strip() + "\n"
 
 
-def system_prompt(registry, root: str, tree: str = "", instructions: str = "") -> str:
+def skills_block(skills: str) -> str:
+    """The skills section, or nothing when the workspace has none.
+
+    Concatenated rather than formatted, for the same reason the instruction
+    block is: skill descriptions are user prose and routinely contain braces.
+    """
+    if not skills.strip():
+        return ""
+    return "\n" + skills.strip() + "\n"
+
+
+def system_prompt(
+    registry, root: str, tree: str = "", instructions: str = "", skills: str = ""
+) -> str:
     """Assemble the system prompt for a session.
 
-    Project instructions sit above the tool section, never below it: the tool
-    protocol has to be the last thing the model reads, because drifting away
-    from the emission format is this model's characteristic failure.
+    Project instructions and the skill listing sit above the tool section, never
+    below it: the tool protocol has to be the last thing the model reads,
+    because drifting away from the emission format is this model's
+    characteristic failure.
     """
     tree_block = f"Files:\n{tree}" if tree else ""
     return SYSTEM.format(
         root=root,
         tree=tree_block,
         instructions=instructions_block(instructions),
+        skills=skills_block(skills),
         tools=describe_tools(registry),
         protocol=TOOL_PROTOCOL,
     )

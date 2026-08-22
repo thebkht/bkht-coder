@@ -162,6 +162,21 @@ def truncate(text: str, max_lines: int = MAX_OUTPUT_LINES) -> str:
     return "\n".join(lines[:max_lines] + [f"[truncated {dropped} lines]"])
 
 
+def contain(root: Path, candidate: Path) -> Path | None:
+    """``candidate`` resolved, or None if it lands outside ``root``.
+
+    The one place a sandbox boundary is decided, so every directory the agent
+    is confined to -- the workspace, a skill's own folder -- is confined the
+    same way. ``realpath`` follows symlinks, so a link pointing out is caught
+    rather than followed.
+    """
+    root = Path(os.path.realpath(root))
+    resolved = Path(os.path.realpath(candidate))
+    if resolved != root and root not in resolved.parents:
+        return None
+    return resolved
+
+
 @dataclass
 class Workspace:
     """The directory the agent is confined to.
@@ -185,9 +200,8 @@ class Workspace:
         if not candidate.is_absolute():
             candidate = self.root / candidate
 
-        # resolve() follows symlinks, so a symlink pointing outside is caught.
-        resolved = Path(os.path.realpath(candidate))
-        if resolved != self.root and self.root not in resolved.parents:
+        resolved = contain(self.root, candidate)
+        if resolved is None:
             raise ToolError(
                 f"path '{path}' is outside the workspace root {self.root}"
             )

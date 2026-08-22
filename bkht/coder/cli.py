@@ -21,6 +21,8 @@ from .provider import DEFAULT_HOST, DEFAULT_MODEL, DEFAULT_NUM_CTX, OllamaProvid
 from .repl import Repl
 from .review import cli as review_cli
 from .session import Session, Snapshots
+from .skills import Discovery, discover as discover_skills, render as render_skills
+from .skills import summarize as summarize_skills
 from .status import Status
 from .streaming import Gate
 from .terminal import BOLD, CYAN, DIM, RED, YELLOW, paint
@@ -144,6 +146,7 @@ def add_common_arguments(parser) -> None:
     parser.add_argument("--cwd", default=".", help="Workspace root. Defaults to the current directory.")
     parser.add_argument("--auto", action="store_true", help="Allow every tool call without prompting.")
     parser.add_argument("--no-instructions", action="store_true", help="Ignore AGENTS.md and CLAUDE.md.")
+    parser.add_argument("--no-skills", action="store_true", help="Ignore skills, and omit the skill tool.")
 
 
 def add_agent_arguments(parser) -> None:
@@ -205,11 +208,17 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
     mode = resolve_mode(args)
     snapshots = Snapshots()
 
+    # Discovered before the registry is built: whether the `skill` tool exists
+    # at all depends on whether there is anything for it to fetch.
+    found_skills = (
+        Discovery() if getattr(args, "no_skills", False) else discover_skills(root)
+    )
+
     # In plan mode the mutating tools are left out of the registry entirely
     # rather than denied at call time, so the model is never tempted by a tool
     # it cannot use -- one fewer way for a small model to waste a turn.
     registry, workspace = build_registry(
-        root, read_only=(mode == PLAN), snapshots=snapshots
+        root, read_only=(mode == PLAN), snapshots=snapshots, skills=found_skills
     )
     # The prompt pauses the status line for the whole exchange: without it the
     # spinner repaints over the diff being approved.
@@ -231,8 +240,18 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
     loaded = [] if getattr(args, "no_instructions", False) else load_instructions(workspace.root)
     if loaded:
         print(paint(summarize_instructions(loaded), DIM))
+    # Skills are announced for the same reason instructions are: a rule that
+    # shapes answers silently is worse than no rule. Skipped ones are named
+    # too -- a skill that never loads looks exactly like one the model chose
+    # not to use.
+    if found_skills.skills or found_skills.problems:
+        print(paint(summarize_skills(found_skills), DIM))
     system = system_prompt(
-        registry, str(workspace.root), file_tree(workspace.root), render(loaded)
+        registry,
+        str(workspace.root),
+        file_tree(workspace.root),
+        render(loaded),
+        render_skills(found_skills),
     )
 
     # The system prompt is rebuilt rather than reloaded, so a resumed session
