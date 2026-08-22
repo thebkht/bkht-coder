@@ -189,6 +189,9 @@ class Reviewer:
             session=Session(system=system),
             listener=NullListener(),
             max_iterations=max_iterations,
+            # A find or verify pass answers in JSON, not prose. There is no
+            # user language to match here, only a format to not break.
+            track_language=False,
         )
 
     def find(self, unit: ReviewUnit, dimension: str, result: ReviewResult) -> list[Finding]:

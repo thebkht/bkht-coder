@@ -269,3 +269,35 @@ def test_a_broken_scout_does_not_lose_the_turn(loop, project, monkeypatch):
     outcome = agent.run("what does helper do?")
     assert outcome.answer == "helper doubles its argument."
     assert scout_messages(provider.calls[0]) == []
+
+
+# --- the user's language ----------------------------------------------------
+
+
+def test_an_uzbek_message_sets_the_language(loop):
+    agent, provider = loop(["Salom! Nima qilay?"])
+    agent.run("salom")
+    assert agent.session.language == "Uzbek"
+    assert "Uzbek" in provider.calls[0][-1]["content"]
+
+
+def test_the_language_survives_a_message_that_says_nothing(loop):
+    agent, provider = loop(["Salom!", "Xush kelibsiz."])
+    agent.run("salom")
+    agent.run("src/util.py")
+    assert agent.session.language == "Uzbek"
+    assert "Uzbek" in provider.calls[1][-1]["content"]
+
+
+def test_an_english_message_gets_no_reminder(loop):
+    agent, provider = loop(["It is a demo project."])
+    agent.run("what is this?")
+    assert agent.session.language == "English"
+    assert provider.calls[0][-1]["role"] == "user"
+
+
+def test_tracking_can_be_switched_off(loop):
+    agent, provider = loop(["[]"], track_language=False)
+    agent.run("salom")
+    assert agent.session.language is None
+    assert provider.calls[0][-1]["role"] == "user"

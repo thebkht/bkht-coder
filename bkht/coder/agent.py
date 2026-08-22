@@ -19,6 +19,7 @@ from typing import Protocol
 
 from . import prompts
 from .context import compact, should_compact
+from .language import detect as detect_language
 from .parsing import ToolCall
 from .provider import Provider, ProviderError, Reply, collect
 from .retrieval import scout, terms
@@ -78,6 +79,7 @@ class Agent:
         permissions=None,
         max_iterations: int = MAX_ITERATIONS,
         scout_root: Path | str | None = None,
+        track_language: bool = True,
     ) -> None:
         self.provider = provider
         self.registry = registry
@@ -85,6 +87,9 @@ class Agent:
         self.listener = listener or NullListener()
         self.permissions = permissions
         self.max_iterations = max_iterations
+        # Off for the review passes, whose replies are JSON rather than prose:
+        # a reminder to answer in Uzbek would only corrupt them.
+        self.track_language = track_language
         # None means no scouting. The review passes drive their own conversation
         # from a diff they already have, so retrieval would only be noise there.
         self.scout_root = Path(scout_root) if scout_root else None
@@ -92,8 +97,22 @@ class Agent:
     def run(self, user_message: str) -> Outcome:
         """Run the loop until the model answers, or a bound is hit."""
         self.session.add_user(user_message)
+        self._note_language(user_message)
         self._scout(user_message)
         return self.resume()
+
+    def _note_language(self, user_message: str) -> None:
+        """Update the language the session is being conducted in.
+
+        A message that identifies no language leaves the previous answer
+        standing, which is the point: "rahmat" or a bare path says nothing, and
+        dropping the language there would let the next reply revert.
+        """
+        if not self.track_language:
+            return
+        detected = detect_language(user_message)
+        if detected:
+            self.session.language = detected
 
     def _scout(self, user_message: str) -> None:
         """Search the workspace for what the message is about, before asking.
