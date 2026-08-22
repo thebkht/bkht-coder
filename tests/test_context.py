@@ -43,6 +43,32 @@ def test_tree_is_bounded(project):
     assert len(listing.splitlines()) == 11
 
 
+def test_tree_counts_what_it_left_out(project):
+    for i in range(50):
+        (project / f"f{i}.py").write_text("x\n")
+    # 50 planted files plus the fixture's own three, minus the ten shown.
+    assert "and 43 more files" in file_tree(project, max_entries=10)
+
+
+def test_tree_skips_hidden_directories_at_any_depth(project):
+    cache = project / ".aider.tags.cache.v4" / "07" / "15"
+    cache.mkdir(parents=True)
+    (cache / "b5e4.val").write_text("x\n")
+    assert ".aider" not in file_tree(project)
+
+
+def test_tree_spends_its_budget_on_the_shallowest_files(project):
+    """A deep vendored tree must not crowd out the manifests above it."""
+    deep = project / "vendor" / "sdk" / "sources" / "internal"
+    deep.mkdir(parents=True)
+    for i in range(50):
+        (deep / f"gen{i}.swift").write_text("x\n")
+
+    listing = file_tree(project, max_entries=3).splitlines()
+    assert listing[:3] == ["README.md", "src/main.py", "src/util.py"]
+    assert "and 50 more files" in listing[-1]
+
+
 def test_tree_of_an_empty_directory(tmp_path):
     assert file_tree(tmp_path) == "(no files)"
 
