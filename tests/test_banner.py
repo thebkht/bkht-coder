@@ -144,7 +144,11 @@ def test_a_narrow_terminal_falls_back_rather_than_wrapping(monkeypatch, width):
 def test_the_divider_spans_the_window(monkeypatch):
     monkeypatch.setattr(terminal, "interactive", lambda *a, **k: True)
     monkeypatch.setattr(terminal, "width", lambda *a, **k: 72)
-    assert bare(cli.divider()) == banner.RULE * 72
+    gap, rule = bare(cli.divider()).splitlines()
+    # The blank line is what makes the rule a boundary rather than the last
+    # line of the answer above it.
+    assert gap == ""
+    assert rule == banner.RULE * 72
 
 
 def test_a_pipe_gets_no_divider(monkeypatch):
@@ -154,19 +158,60 @@ def test_a_pipe_gets_no_divider(monkeypatch):
     assert cli.divider() == ""
 
 
-def test_the_hint_rides_above_the_rule(monkeypatch):
-    # Below the rule is where readline's cursor is, and drawing under it would
-    # mean owning key handling.
+def test_the_hint_is_drawn_below_the_line_being_typed(monkeypatch):
     monkeypatch.setattr(terminal, "interactive", lambda *a, **k: True)
-    monkeypatch.setattr(terminal, "width", lambda *a, **k: 72)
-    gap, hint, rule = bare(cli.chrome()).splitlines()
-    # The gap closes the exchange above: a rule pressed against the last line
-    # of an answer reads as part of that answer.
-    assert gap == ""
-    assert hint == cli.HINT
-    assert rule == banner.RULE * 72
+    stream = FakeTTY()
+    typed = []
+
+    class Reader:
+        def read(self, prompt):
+            typed.append(prompt)
+            return "hi"
+
+    assert cli.read_line(Reader(), "> ", stream) == "hi"
+    drawn = stream.getvalue()
+    # Written first, then walked back over: readline edits the row above a
+    # line that is already on screen.
+    assert drawn.startswith("\n")
+    assert cli.HINT in drawn
+    assert drawn.index(cli.HINT) < drawn.index(terminal.CURSOR_UP)
+    assert typed == ["> "]
 
 
-def test_a_pipe_gets_no_chrome_either(monkeypatch):
+def test_the_hint_is_cleared_once_the_line_is_submitted(monkeypatch):
+    # It is for the moment you are typing; left behind it would sit stranded
+    # above an answer it says nothing about.
+    monkeypatch.setattr(terminal, "interactive", lambda *a, **k: True)
+    stream = FakeTTY()
+
+    class Reader:
+        def read(self, prompt):
+            return "hi"
+
+    cli.read_line(Reader(), "> ", stream)
+    assert stream.getvalue().endswith(terminal.CLEAR_LINE)
+
+
+def test_the_hint_is_cleared_even_when_the_reader_raises(monkeypatch):
+    monkeypatch.setattr(terminal, "interactive", lambda *a, **k: True)
+    stream = FakeTTY()
+
+    class Reader:
+        def read(self, prompt):
+            raise EOFError
+
+    with pytest.raises(EOFError):
+        cli.read_line(Reader(), "> ", stream)
+    assert stream.getvalue().endswith(terminal.CLEAR_LINE)
+
+
+def test_a_pipe_gets_the_prompt_and_no_cursor_games(monkeypatch):
     monkeypatch.setattr(terminal, "interactive", lambda *a, **k: False)
-    assert cli.chrome() == ""
+    stream = io.StringIO()
+
+    class Reader:
+        def read(self, prompt):
+            return "hi"
+
+    assert cli.read_line(Reader(), "> ", stream) == "hi"
+    assert stream.getvalue() == ""

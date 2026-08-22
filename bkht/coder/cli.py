@@ -534,30 +534,41 @@ def greeting(agent, permissions, workspace, stream=None, loaded=None) -> str:
 
 
 def divider() -> str:
-    """A rule across the window, or nothing at all off a terminal.
+    """A blank line and a rule, or nothing at all off a terminal.
 
     Drawn above each prompt so one exchange ends where the next begins: a long
     turn scrolled back through is otherwise an unbroken wall, with no line to
-    say where the answer to the last question started.
+    say where the answer to the last question started. The blank line above it
+    is what makes it a boundary rather than the last line of the answer.
     """
     if not terminal.interactive():
         return ""
-    return paint(banner.rule(terminal.width()), DIM)
+    return f"\n{paint(banner.rule(terminal.width()), DIM)}"
 
 
-def chrome() -> str:
-    """The two lines above each prompt: what to type, then the rule.
+def read_line(reader, prompt: str, stream=None) -> str:
+    """Read one line with the hint parked on the row beneath it.
 
-    The hint sits above the rule rather than below the input, where the video
-    this follows puts it. Below is where readline's cursor is, and drawing
-    under it would mean owning key handling -- a different program.
+    Under the input is where it belongs -- it is about what you are typing, and
+    proximity is what says so. Under the input is also where the cursor is, so
+    the row is written first and the cursor walked back up over it; readline
+    then edits the row above a line that is already on screen.
+
+    Enter leaves the cursor back on the hint's row, so it is cleared there. The
+    hint is for the moment you are typing; left behind, it would sit stranded
+    in the scrollback above an answer it says nothing about.
     """
-    rule = divider()
-    if not rule:
-        return ""
-    # Opens with a blank line: the rule closes the exchange above it, and a
-    # rule pressed against the last line of that exchange reads as part of it.
-    return f"\n{paint(HINT, DIM)}\n{rule}"
+    stream = sys.stdout if stream is None else stream
+    if not terminal.interactive(stream):
+        return reader.read(prompt)
+
+    stream.write(f"\n{paint(HINT, DIM, stream)}{terminal.CURSOR_UP}\r")
+    stream.flush()
+    try:
+        return reader.read(prompt)
+    finally:
+        stream.write(terminal.CLEAR_LINE)
+        stream.flush()
 
 
 def interactive(agent, snapshots, permissions, workspace, listener,
@@ -574,9 +585,9 @@ def interactive(agent, snapshots, permissions, workspace, listener,
 
     while True:
         try:
-            if above := chrome():
-                print(above)
-            line = reader.read(paint("> ", ACCENT + BOLD))
+            if rule := divider():
+                print(rule)
+            line = read_line(reader, paint("> ", ACCENT + BOLD))
         except EOFError:
             print()
             return 0

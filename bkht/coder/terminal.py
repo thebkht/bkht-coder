@@ -52,6 +52,7 @@ ORANGE = _hue("\033[38;5;208m", YELLOW)
 ACCENT = _hue("\033[38;5;33m", BLUE)
 
 CLEAR_LINE = "\r\033[2K"
+CURSOR_UP = "\033[A"
 HIDE_CURSOR = "\033[?25l"
 SHOW_CURSOR = "\033[?25h"
 
