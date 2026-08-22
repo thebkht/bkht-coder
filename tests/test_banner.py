@@ -82,73 +82,49 @@ def test_a_pipe_gets_the_two_lines_it_always_did():
     )
 
 
-def test_a_middling_terminal_gets_the_logo_and_the_same_facts(monkeypatch):
-    monkeypatch.setattr(terminal, "interactive", lambda *a, **k: True)
-    monkeypatch.setattr(terminal, "width", lambda *a, **k: 60)
-    agent, permissions, workspace = session()
-
-    greeting = bare(cli.greeting(agent, permissions, workspace, FakeTTY()))
-    assert greeting.startswith(banner.LOGO[0])
-    assert "bkht.coder" in greeting
-    assert "qwen2.5-coder:14b · ask · 1,234/8,192 ctx" in greeting
-    assert "/tmp/project" in greeting
-
-
-# --- the box ----------------------------------------------------------------
-
-
-def box(monkeypatch, width=100, **kwargs):
+def drawn(monkeypatch, width=100, **kwargs):
     monkeypatch.setattr(terminal, "interactive", lambda *a, **k: True)
     monkeypatch.setattr(terminal, "width", lambda *a, **k: width)
     agent, permissions, workspace = session()
     return bare(cli.greeting(agent, permissions, workspace, FakeTTY(), **kwargs))
 
 
-def test_a_wide_terminal_gets_the_box_with_the_same_facts_in_it(monkeypatch):
-    greeting = box(monkeypatch)
-    assert greeting.startswith(banner.TOP_LEFT)
-    assert banner.LOGO[0] in greeting
-    assert "qwen2.5-coder:14b" in greeting
-    assert "ask · 1,234/8,192 ctx" in greeting
-    assert "/tmp/project" in greeting
+def test_the_greeting_is_the_mark_with_the_facts_beside_it(monkeypatch):
+    rows = drawn(monkeypatch).splitlines()
+    assert rows[0].startswith(banner.LOGO[0])
+    assert "bkht.coder" in rows[0]
+    assert "qwen2.5-coder:14b" in rows[1]
+    assert "/tmp/project" in rows[2]
+    assert "ask · 1,234/8,192 ctx" in rows[3]
 
 
-def test_the_title_rides_in_the_lid_rather_than_a_row(monkeypatch):
-    lid, *_ = box(monkeypatch).splitlines()
-    assert usage.title() in lid
+def test_one_shape_at_every_width_worth_drawing_at(monkeypatch):
+    # There used to be a second, wider layout, which was a second thing that
+    # had to stay true of the first.
+    for width in (banner.MIN_WIDTH, 90, 200):
+        assert drawn(monkeypatch, width=width).splitlines()[0] == drawn(monkeypatch).splitlines()[0]
 
 
-def test_every_row_of_the_box_is_the_same_width(monkeypatch):
-    # Uneven rows are a box with a hole in one side, and the one place it would
-    # show up first is a terminal nobody tested at.
-    for width in (banner.BOX_MIN_WIDTH, 90, 200):
-        rows = box(monkeypatch, width=width).splitlines()
-        assert len(set(map(terminal.visible, rows))) == 1
-        assert terminal.visible(rows[0]) == min(width, banner.MAX_WIDTH)
-
-
-def test_a_line_too_long_for_its_column_is_cut_rather_than_wrapped(monkeypatch):
-    long = "skills: " + ", ".join(f"skill-{n}" for n in range(40))
-    rows = box(monkeypatch, loaded=cli.Loaded("", long)).splitlines()
-    assert any("…" in row for row in rows)
-    assert len(set(map(terminal.visible, rows))) == 1
-
-
-def test_nothing_loaded_means_no_heading_over_the_empty_space(monkeypatch):
-    assert "Loaded" not in box(monkeypatch, loaded=cli.Loaded("", ""))
-    assert "Loaded" in box(monkeypatch, loaded=cli.Loaded("instructions: AGENTS.md", ""))
-
-
-def test_a_skipped_skill_gets_its_own_row(monkeypatch):
+def test_what_loaded_is_listed_under_the_art(monkeypatch):
     loaded = cli.Loaded("", "skills: tdd\n1 skill(s) skipped: broken.md")
     assert loaded.lines() == ["skills: tdd", "1 skill(s) skipped: broken.md"]
-    greeting = box(monkeypatch, loaded=loaded)
-    assert "1 skill(s) skipped: broken.md" in greeting
+    rows = drawn(monkeypatch, loaded=loaded).splitlines()
+    assert rows[-1].strip() == "1 skill(s) skipped: broken.md"
 
 
-def test_the_box_drawn_without_colour_carries_no_escapes():
-    drawn = banner.frame("coder", [None, *banner.LOGO], ["tip"], 80, colour=False)
-    assert "\033" not in drawn
+def test_nothing_loaded_adds_no_rows(monkeypatch):
+    assert len(drawn(monkeypatch, loaded=cli.Loaded("", "")).splitlines()) == len(banner.LOGO)
+
+
+def test_only_the_name_is_coloured(monkeypatch):
+    # A column of accents is a column that keeps asking to be read; a greeting
+    # is meant to be read once.
+    agent, permissions, workspace = session()
+    monkeypatch.setattr(terminal, "interactive", lambda *a, **k: True)
+    monkeypatch.setattr(terminal, "width", lambda *a, **k: 100)
+    rows = cli.greeting(agent, permissions, workspace, FakeTTY()).splitlines()
+    assert terminal.ACCENT in rows[0]
+    assert all(terminal.ACCENT not in row for row in rows[1:])
 
 
 @pytest.mark.parametrize("width", [40, banner.MIN_WIDTH - 1])
@@ -176,3 +152,18 @@ def test_a_pipe_gets_no_divider(monkeypatch):
     # a redirected transcript it is a line of noise every turn.
     monkeypatch.setattr(terminal, "interactive", lambda *a, **k: False)
     assert cli.divider() == ""
+
+
+def test_the_hint_rides_above_the_rule(monkeypatch):
+    # Below the rule is where readline's cursor is, and drawing under it would
+    # mean owning key handling.
+    monkeypatch.setattr(terminal, "interactive", lambda *a, **k: True)
+    monkeypatch.setattr(terminal, "width", lambda *a, **k: 72)
+    hint, rule = bare(cli.chrome()).splitlines()
+    assert hint == cli.HINT
+    assert rule == banner.RULE * 72
+
+
+def test_a_pipe_gets_no_chrome_either(monkeypatch):
+    monkeypatch.setattr(terminal, "interactive", lambda *a, **k: False)
+    assert cli.chrome() == ""

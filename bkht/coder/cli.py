@@ -464,16 +464,6 @@ def header(agent, permissions, workspace) -> str:
 
 
 HINT = "/help for commands, /exit to leave."
-TAGLINE = usage.TAGLINE
-
-#: The three things worth knowing before the first prompt, written out rather
-#: than pulled from `repl.HELP`: that page is a reference, and a greeting is an
-#: introduction. A tip added below is a tip somebody chose to give.
-TIPS: tuple[str, ...] = (
-    "/help lists commands, /exit leaves",
-    "!cmd runs a shell command",
-    "coder --resume picks this session back up",
-)
 
 
 def home_relative(path) -> str:
@@ -485,55 +475,35 @@ def home_relative(path) -> str:
         return text
 
 
-def sidebar(loaded: Loaded | None, width: int, stream=None) -> list[str | None]:
-    """The right column: what to type, and what was loaded before you type it.
-
-    The second half is dropped entirely when nothing loaded -- a heading over
-    an empty space says a session is missing something it never had.
-    """
-    rows: list[str | None] = [paint("Getting started", BOLD, stream), *TIPS]
-    if loaded and loaded.lines():
-        rows += [None, banner.rule(width), paint("Loaded", BOLD, stream), *loaded.lines()]
-    return rows
-
-
 def greeting(agent, permissions, workspace, stream=None, loaded=None) -> str:
-    """What the session opens with, in whichever of three sizes fits.
+    """What the session opens with: the mark, and four facts beside it.
 
     The banner is chrome, and chrome that reaches a pipe is noise -- worse,
     noise that something downstream is already parsing. Off a terminal, in a
     window too narrow to hold the art, or in a locale that cannot draw it, this
-    is exactly the two lines it has always been. Between that and a box wide
-    enough for two columns sits the art with the text beside it, which is what
-    the greeting was before the box existed.
+    is exactly the two lines it has always been.
+
+    One shape, not three. What the greeting has to say is a name, a model and a
+    place, and that fits beside the art at any width worth drawing art at; a
+    second, wider layout was a second thing to keep true of the first.
     """
     stream = sys.stdout if stream is None else stream
     plain = f"{header(agent, permissions, workspace)}\n{HINT}"
     if not terminal.interactive(stream):
         return plain
-    columns = terminal.width()
-    if columns < banner.MIN_WIDTH or not banner.drawable(stream):
+    if terminal.width() < banner.MIN_WIDTH or not banner.drawable(stream):
         return paint(plain, DIM, stream)
 
-    if columns < banner.BOX_MIN_WIDTH:
-        return paint(banner.render([
-            " ".join(filter(None, ("bkht.coder", version()))),
-            TAGLINE,
-            facts(agent, permissions),
-            str(workspace.root),
-            None,
-            HINT,
-        ]), DIM, stream)
-
-    width = min(columns, banner.MAX_WIDTH)
-    model, mode, context = parts(agent, permissions)
-    return banner.frame(
-        usage.title(),
-        [None, *banner.LOGO, None, model, f"{mode} · {context}", home_relative(workspace.root)],
-        sidebar(loaded, width // 3, stream),
-        width,
-        colour=terminal.colourful(stream),
-    )
+    _, mode, context = parts(agent, permissions)
+    # Only the name is coloured. What a greeting is for is being read once and
+    # then ignored, and a column of accents is a column that keeps asking.
+    return banner.render([
+        paint(" ".join(filter(None, ("bkht.coder", version()))), ACCENT, stream),
+        paint(agent.provider.model, DIM, stream),
+        paint(home_relative(workspace.root), DIM, stream),
+        paint(f"{mode} · {context}", DIM, stream),
+        *(paint(line, DIM, stream) for line in (loaded.lines() if loaded else [])),
+    ])
 
 
 def divider() -> str:
@@ -546,6 +516,17 @@ def divider() -> str:
     if not terminal.interactive():
         return ""
     return paint(banner.rule(terminal.width()), DIM)
+
+
+def chrome() -> str:
+    """The two lines above each prompt: what to type, then the rule.
+
+    The hint sits above the rule rather than below the input, where the video
+    this follows puts it. Below is where readline's cursor is, and drawing
+    under it would mean owning key handling -- a different program.
+    """
+    rule = divider()
+    return f"{paint(HINT, DIM)}\n{rule}" if rule else ""
 
 
 def interactive(agent, snapshots, permissions, workspace, listener,
@@ -562,9 +543,9 @@ def interactive(agent, snapshots, permissions, workspace, listener,
 
     while True:
         try:
-            if rule := divider():
-                print(rule)
-            line = reader.read(paint("> ", BOLD))
+            if above := chrome():
+                print(above)
+            line = reader.read(paint("> ", ACCENT + BOLD))
         except EOFError:
             print()
             return 0

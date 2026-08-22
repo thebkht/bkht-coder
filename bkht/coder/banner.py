@@ -19,8 +19,6 @@ from __future__ import annotations
 import sys
 from collections.abc import Sequence
 
-from . import terminal
-
 BLANK = "⠀"
 
 LOGO: tuple[str, ...] = (
@@ -36,100 +34,12 @@ GUTTER = 5
 #: Art, gutter, and enough room for the longest line printed beside it.
 MIN_WIDTH = 54
 
-#: Under this the two columns would each be too narrow to say anything, so the
-#: caller draws the art with the text beside it instead. The box is the widest
-#: of the three greetings, not the only one.
-BOX_MIN_WIDTH = 80
-
-#: A greeting that grows to fill a maximised terminal is a greeting whose two
-#: columns drift a screen apart. Past this the box stops widening.
-MAX_WIDTH = 100
-
-#: Blank columns between a border and the text inside it.
-PAD = 2
-
-TOP_LEFT = "\u256d"
-TOP_RIGHT = "\u256e"
-BOTTOM_LEFT = "\u2570"
-BOTTOM_RIGHT = "\u256f"
-EDGE = "\u2502"
 RULE = "\u2500"
 
 
 def rule(width: int) -> str:
     """A horizontal run of ``width`` columns, for dividing a column's sections."""
     return RULE * max(0, width)
-
-
-def _cell(text: str | None, width: int, centre: bool = False) -> str:
-    """``text`` in a column exactly ``width`` columns wide.
-
-    Measured with ``terminal.visible`` rather than ``len``, so a line that has
-    already been coloured pads to the same place an uncoloured one would.
-    """
-    text = terminal.fit(text or "", width)
-    gap = max(0, width - terminal.visible(text))
-    if not centre:
-        return text + " " * gap
-    left = gap // 2
-    return " " * left + text + " " * (gap - left)
-
-
-def frame(
-    title: str,
-    left: Sequence[str | None],
-    right: Sequence[str | None],
-    width: int,
-    colour: bool = True,
-) -> str:
-    """Two columns of text in a box ``width`` columns wide, ``title`` in its lid.
-
-    ``left`` is centred and ``right`` is ragged-right, which is what makes the
-    shape read as a mark with a page beside it rather than as a table. ``None``
-    is a blank row, the same convention ``render`` uses, and the shorter column
-    is padded with blank rows so both reach the bottom.
-
-    The left column is sized to its own widest line -- never narrower than the
-    art -- and the right column takes what is left. Anything still too long is
-    cut by ``terminal.fit``: a box whose contents wrap is a box with a hole in
-    one side.
-
-    The border is dim and nothing here is anything else: the greeting is one
-    colour, and what stands out in it stands out by weight and position rather
-    than by hue. ``colour`` off produces the same geometry with no escape bytes
-    in it at all, so the shape can be measured without stripping them first.
-    """
-    def tint(text: str, code: str) -> str:
-        return f"{code}{text}{terminal.RESET}" if colour else text
-
-    interior = width - 2
-    widest = max([WIDTH, *(terminal.visible(line) for line in left if line)])
-    # Half the box at the outside: the left column holds a mark and three short
-    # facts, and a column wider than that is one long path away from crowding
-    # the text it was meant to introduce.
-    cell_left = min(widest + PAD * 2, interior // 2)
-    cell_right = interior - cell_left - 1
-
-    rows = []
-    for index in range(max(len(left), len(right))):
-        here = left[index] if index < len(left) else None
-        there = right[index] if index < len(right) else None
-        rows.append(
-            tint(EDGE, terminal.DIM)
-            + _cell(here, cell_left, centre=True)
-            + tint(EDGE, terminal.DIM)
-            + " " * PAD
-            + _cell(there, cell_right - PAD * 2)
-            + " " * PAD
-            + tint(EDGE, terminal.DIM)
-        )
-
-    # The lid carries the title so the box needs no first row to say what it
-    # is; the run of rule after it fills whatever the title did not.
-    lead = f"{TOP_LEFT}{RULE} {title} " if title else TOP_LEFT
-    lid = tint(lead + rule(width - terminal.visible(lead) - 1) + TOP_RIGHT, terminal.DIM)
-    floor = tint(BOTTOM_LEFT + rule(interior) + BOTTOM_RIGHT, terminal.DIM)
-    return "\n".join([lid, *rows, floor])
 
 
 def render(lines: Sequence[str | None]) -> str:
