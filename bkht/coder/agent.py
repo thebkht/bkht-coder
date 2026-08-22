@@ -13,6 +13,7 @@ between usable and infuriating.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -65,6 +66,12 @@ class Outcome:
     tool_calls: int = 0
     stopped: str = "answered"  # answered | iteration-cap | retry-cap | denied
     errors: list[str] = field(default_factory=list)
+    #: What this turn cost, for the line printed under the answer. Per-turn,
+    #: which is what makes it different from the running totals the session
+    #: keeps for the context meter: those only ever grow.
+    seconds: float = 0.0
+    sent: int = 0  # the prompt at its largest, on the last round trip
+    received: int = 0  # every token the model generated, across every round
 
 
 class Agent:
@@ -80,6 +87,7 @@ class Agent:
         max_iterations: int = MAX_ITERATIONS,
         scout_root: Path | str | None = None,
         track_language: bool = True,
+        clock=time.monotonic,
     ) -> None:
         self.provider = provider
         self.registry = registry
@@ -87,6 +95,8 @@ class Agent:
         self.listener = listener or NullListener()
         self.permissions = permissions
         self.max_iterations = max_iterations
+        # Injected so a turn's duration can be asserted without sleeping.
+        self.clock = clock
         # Off for the review passes, whose replies are JSON rather than prose:
         # a reminder to answer in Uzbek would only corrupt them.
         self.track_language = track_language
@@ -96,10 +106,16 @@ class Agent:
 
     def run(self, user_message: str) -> Outcome:
         """Run the loop until the model answers, or a bound is hit."""
+        started = self.clock()
         self.session.add_user(user_message)
         self._note_language(user_message)
         self._scout(user_message)
-        return self.resume()
+        outcome = self.resume()
+        # Restamped over what resume() measured: scouting greps the workspace
+        # before the first round trip, and a turn's duration that leaves that
+        # out is not the duration the user waited.
+        outcome.seconds = max(0.0, self.clock() - started)
+        return outcome
 
     def _note_language(self, user_message: str) -> None:
         """Update the language the session is being conducted in.
@@ -143,6 +159,13 @@ class Agent:
 
     def resume(self) -> Outcome:
         """Continue from the current history without adding a user message."""
+        started = self.clock()
+        outcome = self._loop()
+        outcome.seconds = max(0.0, self.clock() - started)
+        return outcome
+
+    def _loop(self) -> Outcome:
+        """The loop itself. Every exit from here is a finished turn."""
         outcome = Outcome()
         retries = 0
 
@@ -157,6 +180,8 @@ class Agent:
                 return outcome
 
             self.session.record_usage(reply.prompt_tokens, reply.completion_tokens)
+            outcome.sent = reply.prompt_tokens or outcome.sent
+            outcome.received += reply.completion_tokens or 0
             self.session.add_assistant(reply.content)
 
             if not reply.tool_calls:

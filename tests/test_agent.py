@@ -301,3 +301,41 @@ def test_tracking_can_be_switched_off(loop):
     agent.run("salom")
     assert agent.session.language is None
     assert provider.calls[0][-1]["role"] == "user"
+
+
+# --- what a turn cost -------------------------------------------------------
+
+
+def test_a_turn_reports_how_long_it_took(loop):
+    ticks = iter([10.0, 12.5, 13.0, 14.0])
+    agent, _ = loop(["Done."], clock=lambda: next(ticks))
+    assert agent.run("go").seconds == pytest.approx(4.0)
+
+
+def test_the_duration_covers_the_whole_turn_not_just_the_model(loop):
+    # run() restamps over resume()'s own measurement, so the scout's search of
+    # the workspace is inside the number the user is shown.
+    agent, _ = loop(["Done."])
+    outcome = agent.run("go")
+    assert outcome.seconds > 0
+
+
+def test_generated_tokens_are_summed_across_every_round_trip(loop):
+    agent, _ = loop([call("read_file", path="README.md"), "It is a demo."])
+    outcome = agent.run("read it")
+    # The fake reports one completion token per character of each reply.
+    assert outcome.received == len(call("read_file", path="README.md")) + len("It is a demo.")
+
+
+def test_the_prompt_size_reported_is_the_last_one_not_the_sum(loop):
+    # The prompt grows every round; adding them up would claim a turn sent
+    # several times what it ever held.
+    agent, _ = loop([call("read_file", path="README.md"), "It is a demo."])
+    assert agent.run("read it").sent == 100
+
+
+def test_a_turn_that_never_reached_the_model_costs_nothing(loop):
+    agent, _ = loop([ProviderError("ollama is not running")])
+    outcome = agent.run("go")
+    assert outcome.stopped == "provider-error"
+    assert (outcome.sent, outcome.received) == (0, 0)
