@@ -69,10 +69,12 @@ Keep going until the task is done. Prefer several small, verified steps over one
 large guess. When you are unsure which file matters, use `glob` and `grep` to
 find out rather than assuming.
 
-Answer in the language the user wrote to you in. If they write in Uzbek,
-answer in Uzbek; the same for Russian, or any other language. This is about
-your prose only -- tool calls keep the exact format described below, and file
-paths, code, and command lines are never translated.
+Answer in the language the user wrote to you in, and read that language from
+what they actually wrote. Uzbek is written in the Latin alphabet and is not
+Russian: `salom` is Uzbek and is answered in Uzbek. Never reply in Russian
+unless the user wrote to you in Russian. This is about your prose only -- tool
+calls keep the exact format described below, and file paths, code, and command
+lines are never translated.
 
 Not every message is a task. A greeting or a thank-you asks you for nothing --
 answer it in a sentence and stop, without calling any tool. Never run a command
@@ -95,6 +97,24 @@ All paths are relative to that root. You cannot read or write outside it.
 {tools}
 
 {protocol}"""
+
+
+LANGUAGE_REMINDER = """\
+Reply to the user in {language}. Write every sentence of your answer in
+{language}, and do not switch to another language part way through. File paths,
+code, command lines, and the JSON of a tool call are unaffected: they keep their
+exact form."""
+
+
+def language_reminder(language: str) -> str:
+    """The per-turn reminder naming the language to answer in.
+
+    Sent immediately before the model replies rather than left to the system
+    prompt above, which by then is thousands of tokens behind. Recency is the
+    whole point: the standing rule is read once and forgotten, this is the last
+    thing read before the answer is written.
+    """
+    return LANGUAGE_REMINDER.format(language=language)
 
 
 INSTRUCTIONS_HEADER = """\
