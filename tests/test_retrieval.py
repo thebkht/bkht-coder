@@ -19,6 +19,14 @@ def test_identifiers_and_paths_beat_plain_words():
     assert "fix" not in found  # a stopword: it matches everything
 
 
+def test_asking_to_be_told_about_something_searches_for_nothing():
+    """"explain me this project" has no term in it worth a search."""
+    assert terms("explain me this project") == []
+    assert terms("give me an overview") == []
+    # The verb goes, what it was asked about stays.
+    assert terms("explain the auth flow") == ["auth", "flow"]
+
+
 def test_compound_names_are_searched_by_their_parts_too():
     found = terms("the handle_undo helper")
     assert "handle_undo" in found and "handle" in found and "undo" in found

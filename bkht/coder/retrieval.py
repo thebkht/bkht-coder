@@ -60,6 +60,12 @@ STOPWORDS = {
     "file", "files", "code", "codebase", "project", "repo", "repository",
     "function", "functions", "method", "methods", "change", "changes", "work",
     "works", "working", "check", "show", "tell", "look", "find", "write",
+    # Asking to be told about something is not a term to search for. Left in,
+    # "explain me this project" searches the repository for "explain" and
+    # hands the model whatever happens to say it.
+    "explain", "explains", "explained", "describe", "describes", "summarise",
+    "summarize", "summary", "overview", "understand", "give", "gives", "walk",
+    "mean", "means",
     "new", "old", "one", "two", "now", "just", "like", "sure", "yes", "yeah",
     "thanks", "thank", "ok", "okay", "good", "ahead", "sounds", "great",
 }
