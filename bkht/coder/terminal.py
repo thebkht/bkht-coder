@@ -8,12 +8,16 @@ would think to look for.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import sys
 
 BOLD = "\033[1m"
 DIM = "\033[2m"
+ITALIC = "\033[3m"
+UNDERLINE = "\033[4m"
+REVERSE = "\033[7m"
 RED = "\033[31m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
@@ -21,6 +25,31 @@ BLUE = "\033[34m"
 MAGENTA = "\033[35m"
 CYAN = "\033[36m"
 RESET = "\033[0m"
+
+
+def supports_256(env=None) -> bool:
+    """True when the terminal can be trusted with the 256-colour range.
+
+    The two accents this file exposes are hues the sixteen ANSI colours cannot
+    reach, and a terminal that does not understand ``38;5`` renders the escape
+    as text. Asked once, at import, because the answer cannot change while the
+    process runs.
+    """
+    env = os.environ if env is None else env
+    if (env.get("COLORTERM") or "").lower() in ("truecolor", "24bit"):
+        return True
+    return "256color" in (env.get("TERM") or "")
+
+
+def _hue(extended: str, basic: str) -> str:
+    return extended if supports_256() else basic
+
+
+#: The two accents the interface is built from: orange names what the agent is
+#: doing, blue names what the user asked and how the answer is structured.
+#: Everything else on screen is weight, or dim.
+ORANGE = _hue("\033[38;5;208m", YELLOW)
+ACCENT = _hue("\033[38;5;33m", BLUE)
 
 CLEAR_LINE = "\r\033[2K"
 HIDE_CURSOR = "\033[?25l"
