@@ -6,6 +6,7 @@ command table can be tested by calling :meth:`Repl.dispatch` directly.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -14,6 +15,8 @@ from . import highlight
 from .instructions import load_instructions, render
 from .permissions import MODES
 from .provider import DEFAULT_NUM_CTX
+from .rules import DECISIONS
+from .tools.base import ToolError, validate_arguments
 from .tools.shell import NO_SHELL, resolve_shell
 
 HELP = """\
@@ -27,6 +30,7 @@ Commands
   /review [base]      review uncommitted changes, or this branch against base
   /model [name]       show or switch the Ollama model
   /mode [ask|auto|plan]   show or switch the permission mode
+  /permissions        list remembered decisions, or `remember`/`revoke` one
   /help               this list
   /exit               leave (or just `exit`)
 
@@ -150,6 +154,9 @@ class Repl:
         self.out(f"  session    {session.path or 'not saved'}")
         self.out(f"  undo depth {len(self.snapshots)}")
         self.out(f"  scout      {'on' if self.agent.scout_root else 'off'}")
+        rules = getattr(self.permissions, "rules", None)
+        if rules is not None:
+            self.out(f"  remembered {len(rules.listing())} permission rule(s)")
         return Command()
 
     def do_clear(self, argument: str) -> Command:
@@ -229,10 +236,90 @@ class Repl:
             return Command()
 
         self.permissions.mode = argument
-        # A mode switch is an explicit re-decision, so blanket approvals from
-        # the previous mode should not carry over.
-        self.permissions.always_allow.clear()
         self.out(f"Permission mode is now {argument}.")
+        return Command()
+
+    PERMISSIONS_USAGE = (
+        "Usage: /permissions\n"
+        "       /permissions remember allow|deny <tool> <arguments-json>\n"
+        "       /permissions revoke <rule-id>"
+    )
+
+    def do_permissions(self, argument: str) -> Command:
+        """Show, add, or remove remembered permission decisions.
+
+        `remember` exists so a decision can be made deliberately, at a keyboard,
+        rather than only in the middle of a turn -- which is when the user is
+        least inclined to read what they are approving.
+        """
+        rules = getattr(self.permissions, "rules", None)
+        if rules is None:
+            self.out("No permission store for this session.")
+            return Command()
+
+        verb, _, rest = argument.partition(" ")
+        rest = rest.strip()
+
+        if not verb:
+            return self._list_rules(rules)
+        if verb == "revoke":
+            return self._revoke_rule(rules, rest)
+        if verb == "remember":
+            return self._remember_rule(rules, rest)
+
+        self.out(self.PERMISSIONS_USAGE)
+        return Command()
+
+    def _list_rules(self, rules) -> Command:
+        stored = rules.listing()
+        if not stored:
+            self.out("No remembered decisions for this workspace.")
+            return Command()
+        for rule in stored:
+            self.out("  " + rule.label())
+        return Command()
+
+    def _revoke_rule(self, rules, identifier: str) -> Command:
+        if not identifier:
+            self.out(self.PERMISSIONS_USAGE)
+            return Command()
+        removed = rules.revoke(identifier)
+        self.out(
+            f"Revoked {removed.tool} rule {identifier}."
+            if removed
+            else f"No rule with id {identifier}. /permissions lists them."
+        )
+        return Command()
+
+    def _remember_rule(self, rules, rest: str) -> Command:
+        decision, _, tail = rest.partition(" ")
+        name, _, payload = tail.strip().partition(" ")
+        if decision not in DECISIONS or not name or not payload.strip():
+            self.out(self.PERMISSIONS_USAGE)
+            return Command()
+
+        tool = self.agent.registry.get(name)
+        if tool is None:
+            self.out(f"No tool named {name}. /tools lists them.")
+            return Command()
+
+        try:
+            arguments = json.loads(payload)
+        except ValueError as exc:
+            self.out(f"Arguments must be JSON: {exc}")
+            return Command()
+
+        # Validated against the tool's own schema: a rule whose arguments the
+        # tool would reject can never match a real call, and a stored rule that
+        # silently never fires is worse than no rule at all.
+        try:
+            arguments = validate_arguments(tool, arguments)
+        except ToolError as exc:
+            self.out(str(exc))
+            return Command()
+
+        rule = rules.remember(tool.name, arguments, decision)
+        self.out(f"Remembered: {rule.label()}")
         return Command()
 
     # --- shell escape -------------------------------------------------------

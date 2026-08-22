@@ -22,19 +22,19 @@ coder --model qwen2.5-coder:7b
 ```
 
 Slash commands: `/tools`, `/context`, `/clear`, `/undo`, `/diff`, `/review`,
-`/instructions`, `/model`, `/mode`, `/help`, `/exit`. `!cmd` shells out, and
-`exit` on its own leaves.
+`/instructions`, `/permissions`, `/model`, `/mode`, `/help`, `/exit`. `!cmd`
+shells out, and `exit` on its own leaves.
 
 On a terminal the session streams: prose appears as the model writes it, a
 status line shows elapsed time and tokens while it is quiet, and each tool call
 is announced in words above the call itself. Approvals take a single key --
-`y`, `n`, `a` for always, or `d` to see the whole diff rather than the first
-forty lines. Arrow keys recall earlier prompts, and Tab completes slash
+`y`, `n`, `a` to remember this call, or `d` to see the whole diff rather than
+the first forty lines. Arrow keys recall earlier prompts, and Tab completes slash
 commands. Redirect the output and all of that goes away: piped runs print the
 same plain transcript they always did.
 
 State lives in `~/.bkht-coder/`: sessions under `sessions/`, prompt
-history in `history`.
+history in `history`, remembered approvals in `permissions.json`.
 
 ## Requirements
 
@@ -211,6 +211,42 @@ In a session, `/instructions` shows what is loaded and `/instructions reload`
 re-reads it, so editing the rules doesn't cost the conversation. `--resume`
 picks up edits on its own, because the system prompt is rebuilt rather than
 replayed.
+
+## Remembered approvals
+
+`a` at the approval prompt stores the decision and stops asking. What it stores
+is **one exact call** -- this command, or this path, in this workspace -- and
+never the tool it was made with. Approving `uv run pytest -q` does not approve
+the next shell command, and approving a write to `src/api.py` does not approve a
+write to anything else.
+
+That distinction is the whole feature. A grant that quietly widens itself is
+worse than no grant, because the user believes they know what they gave away.
+
+Rules live in `~/.bkht-coder/permissions.json`, keyed by workspace, so one
+project's approvals never fire in another, and they survive restarts -- a
+session preference that has to be re-earned every morning is just a slower way
+of typing `y`.
+
+```sh
+/permissions                                       # what is remembered here, with ids
+/permissions remember allow bash {"command": "make test"}
+/permissions remember deny bash {"command": "git push"}
+/permissions revoke 4f2a9c11
+```
+
+`remember` stores a decision without running the call, which is the only way to
+make one calmly -- mid-turn, with a diff on screen and a model waiting, is when
+a user is least inclined to read what they are approving. Its arguments are
+checked against the tool's own schema, because a rule that can never match looks
+like a grant and behaves like nothing.
+
+A denial reads to the model exactly like a fresh refusal. It is told not to
+retry and nothing more: that a rule exists is not information it can use, and
+telling it invites arguing with the rule.
+
+`--auto` and `--plan` are unchanged and are decided before any rule is
+consulted.
 
 ## Searching before it answers
 

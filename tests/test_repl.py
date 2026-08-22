@@ -143,13 +143,77 @@ def test_mode_rejects_an_unknown_value(repl):
     assert r.permissions.mode == ASK
 
 
-def test_switching_mode_forgets_blanket_approvals(repl):
-    # An approval given under 'ask' must not silently survive into a new mode.
+def test_remembered_rules_survive_a_mode_switch(repl):
+    # Unlike the old session-wide grant, a stored rule is a deliberate decision
+    # about one call. Switching modes is not a reason to forget it.
     r, _ = repl
-    r.permissions.always_allow.add("bash")
+    r.permissions.rules.remember("bash", {"command": "ls"}, "allow")
     r.dispatch("/mode auto")
     r.dispatch("/mode ask")
-    assert r.permissions.always_allow == set()
+    assert r.permissions.rules.decide("bash", {"command": "ls"}) == "allow"
+
+
+def test_permissions_lists_rules_with_ids(repl):
+    r, lines = repl
+    rule = r.permissions.rules.remember("bash", {"command": "ls"}, "allow")
+    lines.clear()
+    r.dispatch("/permissions")
+    assert rule.id in lines[0] and "ls" in lines[0]
+
+
+def test_permissions_with_no_rules_says_so(repl):
+    r, lines = repl
+    r.dispatch("/permissions")
+    assert "No remembered decisions" in lines[0]
+
+
+def test_permissions_remember_stores_without_running(repl):
+    r, lines = repl
+    r.dispatch('/permissions remember allow bash {"command": "ls"}')
+    assert r.permissions.rules.decide("bash", {"command": "ls"}) == "allow"
+    assert "Remembered" in lines[0]
+
+
+def test_permissions_remember_rejects_an_unknown_tool(repl):
+    r, lines = repl
+    r.dispatch('/permissions remember allow nope {"command": "ls"}')
+    assert "No tool named nope" in lines[0]
+
+
+def test_permissions_remember_rejects_arguments_the_tool_would_reject(repl):
+    # A rule whose arguments can never match a real call is worse than no rule:
+    # it looks like a grant and behaves like nothing.
+    r, lines = repl
+    r.dispatch('/permissions remember allow bash {"cmd": "ls"}')
+    assert "unknown argument" in lines[0]
+    assert r.permissions.rules.listing() == []
+
+
+def test_permissions_remember_rejects_malformed_json(repl):
+    r, lines = repl
+    r.dispatch("/permissions remember allow bash {not json}")
+    assert "must be JSON" in lines[0]
+
+
+def test_permissions_revoke_removes_a_rule(repl):
+    r, lines = repl
+    rule = r.permissions.rules.remember("bash", {"command": "ls"}, "allow")
+    lines.clear()
+    r.dispatch(f"/permissions revoke {rule.id}")
+    assert "Revoked" in lines[0]
+    assert r.permissions.rules.decide("bash", {"command": "ls"}) is None
+
+
+def test_permissions_revoke_of_an_unknown_id_says_so(repl):
+    r, lines = repl
+    r.dispatch("/permissions revoke deadbeef")
+    assert "No rule with id deadbeef" in lines[0]
+
+
+def test_permissions_usage_on_a_bad_verb(repl):
+    r, lines = repl
+    r.dispatch("/permissions forget everything")
+    assert "Usage: /permissions" in lines[0]
 
 
 def test_diff_on_a_non_repo_reports_the_failure(repl):

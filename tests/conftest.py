@@ -36,3 +36,16 @@ def pytest_addoption(parser):
         default=None,
         help="Ollama model for the live tests. Defaults to the provider default.",
     )
+
+
+@pytest.fixture(autouse=True)
+def isolated_rules(tmp_path, monkeypatch):
+    """Keep the permission store out of the developer's real ``~/.bkht-coder``.
+
+    Autouse because ``Permissions`` loads the store whenever it is given a
+    workspace, so any test that builds one would otherwise read -- and worse,
+    write -- the rules of whoever is running the suite.
+    """
+    from bkht.coder import rules
+
+    monkeypatch.setattr(rules, "RULES_PATH", tmp_path / "permissions.json")

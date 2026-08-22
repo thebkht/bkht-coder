@@ -64,14 +64,28 @@ def test_yes_allows_once_and_asks_again(parts):
     assert not policy.check(tool, {"path": "a.py", "content": "2"}).allowed
 
 
-def test_always_is_remembered_for_the_session(parts):
+def test_always_remembers_the_same_call(parts):
+    # The same path again is the same decision: the diff was shown once and
+    # answered once, and asking again is the friction that drives people to
+    # --auto.
     registry, workspace = parts
     recorder = Recorder("a")
     policy = Permissions(mode=ASK, workspace=workspace, prompt=recorder)
     tool = registry.get("write_file")
     assert policy.check(tool, {"path": "a.py", "content": "1"}).allowed
-    assert policy.check(tool, {"path": "b.py", "content": "2"}).allowed
+    assert policy.check(tool, {"path": "a.py", "content": "2"}).allowed
     assert len(recorder.shown) == 1
+
+
+def test_always_does_not_widen_to_other_calls(parts):
+    # The whole point of the rule store: approving one call must never approve
+    # a different one made with the same tool.
+    registry, workspace = parts
+    recorder = Recorder("a", "n")
+    policy = Permissions(mode=ASK, workspace=workspace, prompt=recorder)
+    tool = registry.get("write_file")
+    assert policy.check(tool, {"path": "a.py", "content": "1"}).allowed
+    assert not policy.check(tool, {"path": "b.py", "content": "2"}).allowed
 
 
 def test_always_is_per_tool_not_global(parts):
@@ -80,6 +94,30 @@ def test_always_is_per_tool_not_global(parts):
     policy = Permissions(mode=ASK, workspace=workspace, prompt=recorder)
     assert policy.check(registry.get("write_file"), {"path": "a.py", "content": "1"}).allowed
     assert not policy.check(registry.get("bash"), {"command": "ls"}).allowed
+
+
+def test_a_remembered_rule_survives_a_new_policy(parts):
+    # Persistence is the difference between a rule and a session preference:
+    # tomorrow's session must not re-ask what today's already answered.
+    registry, workspace = parts
+    call = {"command": "uv run pytest -q"}
+    first = Permissions(mode=ASK, workspace=workspace, prompt=Recorder("a"))
+    assert first.check(registry.get("bash"), call).allowed
+
+    second = Permissions(mode=ASK, workspace=workspace, prompt=Recorder("n"))
+    assert second.check(registry.get("bash"), call).allowed
+    assert not second.check(registry.get("bash"), {"command": "rm -rf /"}).allowed
+
+
+def test_a_remembered_denial_refuses_without_asking(parts):
+    registry, workspace = parts
+    recorder = Recorder()
+    policy = Permissions(mode=ASK, workspace=workspace, prompt=recorder)
+    policy.rules.remember("bash", {"command": "rm -rf /"}, "deny")
+
+    decision = policy.check(registry.get("bash"), {"command": "rm -rf /"})
+    assert not decision.allowed and "Do not retry" in decision.reason
+    assert recorder.shown == []
 
 
 def test_denial_tells_the_model_not_to_retry(parts):

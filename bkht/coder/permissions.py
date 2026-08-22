@@ -8,9 +8,10 @@ raised, so the loop feeds it back and the model can try something else.
 from __future__ import annotations
 
 import difflib
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Callable
+
+from .rules import ALLOW, DENY, Rules
 
 ASK = "ask"
 AUTO = "auto"
@@ -34,7 +35,10 @@ def preview(tool, arguments: dict, workspace) -> str:
     Showing the actual diff rather than the tool name is the point: approving
     'edit_file' blind is not meaningfully different from running in --auto.
     """
-    if tool.name == "bash":
+    if tool.name == "background":
+        return f"$ {arguments.get('command', '')} &"
+
+    if "command" in arguments:
         return f"$ {arguments.get('command', '')}"
 
     path = arguments.get("path")
@@ -116,11 +120,13 @@ class Permissions:
     mode: str = ASK
     workspace: object = None
     prompt: Callable[[str, str], str] = ask_terminal
-    always_allow: set[str] = field(default_factory=set)
+    rules: Rules | None = None
 
     def __post_init__(self) -> None:
         if self.mode not in MODES:
             raise ValueError(f"unknown permission mode {self.mode!r}; expected one of {', '.join(MODES)}")
+        if self.rules is None and self.workspace is not None:
+            self.rules = Rules.load(str(getattr(self.workspace, "root", "")))
 
     def check(self, tool, arguments: dict) -> Decision:
         """Decide whether ``tool`` may run with ``arguments``."""
@@ -137,19 +143,35 @@ class Permissions:
                 "plan mode. Describe the change instead of making it.",
             )
 
-        if tool.name in self.always_allow:
+        # A decision the user already made about this exact call, in this
+        # workspace. Not about this tool: approving one shell command must
+        # never approve the next one.
+        remembered = self.rules.decide(tool.name, arguments) if self.rules else None
+        if remembered == ALLOW:
             return Decision(True)
+        if remembered == DENY:
+            return Decision(False, self.refusal(tool))
 
         body = preview(tool, arguments, self.workspace) if self.workspace else ""
         answer = self.prompt(f"Allow {tool.name}?", body)
 
         if answer in ("a", "always"):
-            self.always_allow.add(tool.name)
+            if self.rules:
+                self.rules.remember(tool.name, arguments, ALLOW)
             return Decision(True)
         if answer in ("y", "yes"):
             return Decision(True)
-        return Decision(
-            False,
+        return Decision(False, self.refusal(tool))
+
+    @staticmethod
+    def refusal(tool) -> str:
+        """What the model is told when a call is refused, however it was refused.
+
+        A remembered denial and a fresh one read identically on purpose: the
+        model has nothing useful to do with the difference, and telling it a
+        rule exists invites arguing with the rule.
+        """
+        return (
             f"the user declined this {tool.name} call. Do not retry it; either "
-            "propose a different approach or explain what you would have done.",
+            "propose a different approach or explain what you would have done."
         )

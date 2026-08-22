@@ -218,6 +218,11 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
         mode=mode, workspace=workspace,
         **({"prompt": partial(ask_tty, pause=pause)} if terminal.interactive() else {}),
     )
+    # A permissions file that could not be read is announced, never swallowed:
+    # a session that believes it has rules and does not is the one case where
+    # the user would be surprised by a prompt they thought they had answered.
+    if permissions.rules is not None and permissions.rules.error:
+        print(paint(permissions.rules.error, YELLOW, sys.stderr), file=sys.stderr)
     provider = OllamaProvider(model=args.model, host=args.host, num_ctx=args.num_ctx)
 
     # Announced rather than applied silently: instructions shape every answer

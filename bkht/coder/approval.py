@@ -7,6 +7,9 @@ permission system exists to avoid.
 
 `d` is here for the same reason: a preview cut off at forty lines invites
 approving the part you cannot see.
+
+`a` remembers *this* call -- this command, this path -- and not the tool it was
+made with. See :mod:`bkht.coder.rules`.
 """
 
 from __future__ import annotations
@@ -18,7 +21,7 @@ from .highlight import diff
 from .permissions import truncate
 from .terminal import CYAN, DIM, RESET, read_key
 
-HINT = "[y] yes  [n] no  [a] always  [d] full diff"
+HINT = "[y] yes  [n] no  [a] always this call  [d] full diff"
 
 YES = {"y", "Y"}
 NO = {"n", "N"}
@@ -71,7 +74,7 @@ def _paint(text: str, colour_code: str, colour: bool) -> str:
 
 
 def _label(answer: str) -> str:
-    return {"y": "yes", "a": "always", "n": "no"}[answer]
+    return {"y": "yes", "a": "always (remembered)", "n": "no"}[answer]
 
 
 def _writer(stream):
