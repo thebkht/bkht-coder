@@ -62,6 +62,17 @@ def register_read_tools(registry, workspace: Workspace):
 
     def read_file(path: str, offset: int = 1, limit: int = DEFAULT_READ_LIMIT) -> ToolResult:
         target = workspace.resolve(path)
+        if not target.exists():
+            # Named in full, with the way out. A model that guessed a path
+            # reads "file not found: queries.ts", guesses a second directory,
+            # and then asks the user where the file is -- when one `glob` would
+            # have told it. The listing in the system prompt is a sample of the
+            # workspace, not all of it, so a miss here is expected, not fatal.
+            raise ToolError(
+                f"file not found: {path}. "
+                "The file list you were given is only part of the workspace. "
+                "Use `glob` to find the real path instead of guessing another one."
+            )
         text = read_text(target)
         lines = text.splitlines()
 

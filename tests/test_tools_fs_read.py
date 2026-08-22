@@ -40,6 +40,16 @@ def test_read_file_missing_file(tools):
         run(registry, "read_file", path="nope.py")
 
 
+def test_a_missing_file_names_the_path_and_the_way_out(tools):
+    """A guessed path must come back correctable, not as a dead end."""
+    registry, _ = tools
+    with pytest.raises(ToolError) as raised:
+        run(registry, "read_file", path="packages/database/src/queries.ts")
+    message = str(raised.value)
+    assert "packages/database/src/queries.ts" in message
+    assert "glob" in message
+
+
 def test_read_file_on_a_directory(tools):
     registry, _ = tools
     with pytest.raises(ToolError, match="is a directory"):
