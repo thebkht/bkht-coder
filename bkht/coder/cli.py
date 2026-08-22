@@ -8,6 +8,7 @@ import contextlib
 import sys
 from functools import partial
 from pathlib import Path
+from typing import NamedTuple
 
 from . import banner, narrate, terminal
 from .agent import Agent
@@ -256,6 +257,27 @@ def resolve_mode(args) -> str:
     return ASK
 
 
+class Loaded(NamedTuple):
+    """What shaped this session before the first turn: instructions, and skills.
+
+    One line each, already summarised, and empty when there was nothing to say.
+    The greeting sets them inside the box; a one-shot run prints them above its
+    answer, which is where they have always been.
+    """
+
+    instructions: str
+    skills: str
+
+    def lines(self) -> list[str]:
+        """One entry per line: a skipped skill is reported on its own row."""
+        return [
+            line
+            for summary in (self.instructions, self.skills)
+            for line in summary.splitlines()
+            if line
+        ]
+
+
 def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
     """Wire up provider, tools, permissions, session, jobs, and agent."""
     root = Path(args.cwd).expanduser().resolve()
@@ -297,14 +319,17 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
     # the model gives, and a rule the user has forgotten writing is worse than
     # no rule at all.
     loaded = [] if getattr(args, "no_instructions", False) else load_instructions(workspace.root)
-    if loaded:
-        print(paint(summarize_instructions(loaded), DIM))
     # Skills are announced for the same reason instructions are: a rule that
     # shapes answers silently is worse than no rule. Skipped ones are named
     # too -- a skill that never loads looks exactly like one the model chose
     # not to use.
-    if found_skills.skills or found_skills.problems:
-        print(paint(summarize_skills(found_skills), DIM))
+    #
+    # Returned rather than printed here: a session that draws the greeting has
+    # somewhere better to put these two lines than above it.
+    announced = Loaded(
+        summarize_instructions(loaded) if loaded else "",
+        summarize_skills(found_skills) if found_skills.skills or found_skills.problems else "",
+    )
     system = system_prompt(
         registry,
         str(workspace.root),
@@ -341,7 +366,7 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
         max_iterations=args.max_iterations,
         scout_root=None if getattr(args, "no_scout", False) else workspace.root,
     )
-    return agent, snapshots, permissions, workspace, jobs
+    return agent, snapshots, permissions, workspace, jobs, announced
 
 
 def report(outcome, streamed: bool = False) -> int:
@@ -372,12 +397,21 @@ def run_turn(agent, listener, task: str) -> int:
     return report(outcome, streamed=listener.streamed)
 
 
-def facts(agent, permissions) -> str:
-    """Model, mode and context: the three things that change what a turn does."""
+def parts(agent, permissions) -> tuple[str, str, str]:
+    """Model, mode and context: the three things that change what a turn does.
+
+    Separately, because the box stacks them in a column half a screen wide and
+    every other caller wants them on one line.
+    """
     num_ctx = getattr(agent.provider, "num_ctx", DEFAULT_NUM_CTX)
     used = agent.session.prompt_tokens
     context = f"{used:,}/{num_ctx:,} ctx" if num_ctx else f"{used:,} tokens"
-    return f"{agent.provider.model} · {permissions.mode} · {context}"
+    return agent.provider.model, permissions.mode, context
+
+
+def facts(agent, permissions) -> str:
+    """The three of them on one line."""
+    return " · ".join(parts(agent, permissions))
 
 
 def header(agent, permissions, workspace) -> str:
@@ -387,45 +421,104 @@ def header(agent, permissions, workspace) -> str:
 HINT = "/help for commands, /exit to leave."
 TAGLINE = usage.TAGLINE
 
+#: The three things worth knowing before the first prompt, written out rather
+#: than pulled from `repl.HELP`: that page is a reference, and a greeting is an
+#: introduction. A tip added below is a tip somebody chose to give.
+TIPS: tuple[str, ...] = (
+    "/help lists commands, /exit leaves",
+    "!cmd runs a shell command",
+    "coder --resume picks this session back up",
+)
 
-def greeting(agent, permissions, workspace, stream=None) -> str:
-    """What the session opens with.
+
+def home_relative(path) -> str:
+    """``~/project`` where that is the same place, for a column with an edge."""
+    text = str(path)
+    try:
+        return "~/" + str(Path(text).relative_to(Path.home()))
+    except ValueError:
+        return text
+
+
+def sidebar(loaded: Loaded | None, width: int, stream=None) -> list[str | None]:
+    """The right column: what to type, and what was loaded before you type it.
+
+    The second half is dropped entirely when nothing loaded -- a heading over
+    an empty space says a session is missing something it never had.
+    """
+    rows: list[str | None] = [paint("Getting started", BOLD, stream), *TIPS]
+    if loaded and loaded.lines():
+        rows += [None, banner.rule(width), paint("Loaded", BOLD, stream), *loaded.lines()]
+    return rows
+
+
+def greeting(agent, permissions, workspace, stream=None, loaded=None) -> str:
+    """What the session opens with, in whichever of three sizes fits.
 
     The banner is chrome, and chrome that reaches a pipe is noise -- worse,
     noise that something downstream is already parsing. Off a terminal, in a
     window too narrow to hold the art, or in a locale that cannot draw it, this
-    is exactly the two lines it has always been.
+    is exactly the two lines it has always been. Between that and a box wide
+    enough for two columns sits the art with the text beside it, which is what
+    the greeting was before the box existed.
     """
     stream = sys.stdout if stream is None else stream
     plain = f"{header(agent, permissions, workspace)}\n{HINT}"
     if not terminal.interactive(stream):
         return plain
-    if terminal.width() < banner.MIN_WIDTH or not banner.drawable(stream):
-        return plain
+    columns = terminal.width()
+    if columns < banner.MIN_WIDTH or not banner.drawable(stream):
+        return paint(plain, DIM, stream)
 
-    name = " ".join(filter(None, ("bkht.coder", version())))
-    return banner.render([
-        name,
-        TAGLINE,
-        facts(agent, permissions),
-        str(workspace.root),
-        None,
-        HINT,
-    ])
+    if columns < banner.BOX_MIN_WIDTH:
+        return paint(banner.render([
+            " ".join(filter(None, ("bkht.coder", version()))),
+            TAGLINE,
+            facts(agent, permissions),
+            str(workspace.root),
+            None,
+            HINT,
+        ]), DIM, stream)
+
+    width = min(columns, banner.MAX_WIDTH)
+    model, mode, context = parts(agent, permissions)
+    return banner.frame(
+        usage.title(),
+        [None, *banner.LOGO, None, model, f"{mode} · {context}", home_relative(workspace.root)],
+        sidebar(loaded, width // 3, stream),
+        width,
+        colour=terminal.colourful(stream),
+    )
+
+
+def divider() -> str:
+    """A rule across the window, or nothing at all off a terminal.
+
+    Drawn above each prompt so one exchange ends where the next begins: a long
+    turn scrolled back through is otherwise an unbroken wall, with no line to
+    say where the answer to the last question started.
+    """
+    if not terminal.interactive():
+        return ""
+    return paint(banner.rule(terminal.width()), DIM)
 
 
 def interactive(agent, snapshots, permissions, workspace, listener,
-                use_instructions=True, jobs=None) -> int:
+                use_instructions=True, jobs=None, loaded=None) -> int:
     """The REPL. Ctrl-C abandons the current line; Ctrl-D leaves."""
     repl = Repl(
         agent, snapshots, permissions, workspace,
         use_instructions=use_instructions, jobs=jobs,
     )
     reader = Reader(repl, enabled=terminal.interactive())
-    print(paint(greeting(agent, permissions, workspace), DIM))
+    # Printed as it comes back: the greeting dims and bolds its own parts now,
+    # and a paint() around the whole of it would flatten both.
+    print(greeting(agent, permissions, workspace, loaded=loaded))
 
     while True:
         try:
+            if rule := divider():
+                print(rule)
             line = reader.read(paint("> ", BOLD))
         except EOFError:
             print()
@@ -499,14 +592,18 @@ def main(argv: list[str] | None = None) -> int:
 
     args = build_agent_parser().parse_args(argv)
     listener = TerminalListener(verbose=args.verbose)
-    agent, snapshots, permissions, workspace, jobs = make_agent(args, listener)
+    agent, snapshots, permissions, workspace, jobs, announced = make_agent(args, listener)
 
     try:
         if args.prompt:
+            # A one-shot run draws no greeting, so what loaded is announced the
+            # way it always was: above the answer it shaped.
+            for line in announced.lines():
+                print(paint(line, DIM))
             return run_turn(agent, listener, " ".join(args.prompt))
         return interactive(
             agent, snapshots, permissions, workspace, listener,
-            use_instructions=not args.no_instructions, jobs=jobs,
+            use_instructions=not args.no_instructions, jobs=jobs, loaded=announced,
         )
     finally:
         # The user started nothing here and can see nothing here: a server left

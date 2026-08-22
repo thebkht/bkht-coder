@@ -94,8 +94,10 @@ def frame(
     cut by ``terminal.fit``: a box whose contents wrap is a box with a hole in
     one side.
 
-    ``colour`` off produces the same geometry with no escape bytes in it, so
-    the shape can be measured without stripping them first.
+    The border is dim and nothing here is anything else: the greeting is one
+    colour, and what stands out in it stands out by weight and position rather
+    than by hue. ``colour`` off produces the same geometry with no escape bytes
+    in it at all, so the shape can be measured without stripping them first.
     """
     def tint(text: str, code: str) -> str:
         return f"{code}{text}{terminal.RESET}" if colour else text
@@ -113,20 +115,20 @@ def frame(
         here = left[index] if index < len(left) else None
         there = right[index] if index < len(right) else None
         rows.append(
-            tint(EDGE, terminal.ORANGE)
+            tint(EDGE, terminal.DIM)
             + _cell(here, cell_left, centre=True)
-            + tint(EDGE, terminal.ORANGE)
+            + tint(EDGE, terminal.DIM)
             + " " * PAD
             + _cell(there, cell_right - PAD * 2)
             + " " * PAD
-            + tint(EDGE, terminal.ORANGE)
+            + tint(EDGE, terminal.DIM)
         )
 
     # The lid carries the title so the box needs no first row to say what it
     # is; the run of rule after it fills whatever the title did not.
     lead = f"{TOP_LEFT}{RULE} {title} " if title else TOP_LEFT
-    lid = tint(lead + rule(width - terminal.visible(lead) - 1) + TOP_RIGHT, terminal.ORANGE)
-    floor = tint(BOTTOM_LEFT + rule(interior) + BOTTOM_RIGHT, terminal.ORANGE)
+    lid = tint(lead + rule(width - terminal.visible(lead) - 1) + TOP_RIGHT, terminal.DIM)
+    floor = tint(BOTTOM_LEFT + rule(interior) + BOTTOM_RIGHT, terminal.DIM)
     return "\n".join([lid, *rows, floor])
 
 

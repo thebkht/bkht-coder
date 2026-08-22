@@ -20,9 +20,6 @@ YELLOW = "\033[33m"
 BLUE = "\033[34m"
 MAGENTA = "\033[35m"
 CYAN = "\033[36m"
-#: The mark's own orange, for borders and headings. 256-colour rather than one
-#: of the eight above: none of them is the colour of the logo.
-ORANGE = "\033[38;5;209m"
 RESET = "\033[0m"
 
 CLEAR_LINE = "\r\033[2K"
@@ -45,14 +42,23 @@ def interactive(stdout=None, stdin=None) -> bool:
         return False
 
 
-def paint(text: str, colour: str, stream=None) -> str:
-    """Colour ``text`` only when the destination is a terminal."""
+def colourful(stream=None) -> bool:
+    """True when ``stream`` should be given escape codes at all.
+
+    Asked directly by anything that colours more than one span and has to know
+    up front -- a box paints its border but not the text a caller handed it,
+    and the two must agree about whether this is a terminal.
+    """
     stream = stream or sys.stdout
     try:
-        tty = stream.isatty()
+        return bool(stream.isatty())
     except (AttributeError, ValueError):
-        tty = False
-    return f"{colour}{text}{RESET}" if tty else text
+        return False
+
+
+def paint(text: str, colour: str, stream=None) -> str:
+    """Colour ``text`` only when the destination is a terminal."""
+    return f"{colour}{text}{RESET}" if colourful(stream) else text
 
 
 #: Every SGR sequence ``paint`` can emit. Colour is invisible to the terminal's
