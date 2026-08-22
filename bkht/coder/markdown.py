@@ -143,18 +143,65 @@ class Renderer:
         return f"{code}{text}{RESET}" if self.colour else text
 
 
-class Stream:
-    """Renders fed text a line at a time, emitting each as it completes.
+#: A line that could still turn out to be a heading, a bullet, a fence, a rule
+#: or an indented block -- anything :meth:`Renderer.line` does not render with
+#: :func:`inline` alone. Deliberately over-broad: a paragraph that happens to
+#: open with a digit simply waits for its newline, which is no worse than every
+#: line waiting.
+BLOCKY = re.compile(r"^\s|^[#>*+\-`~_]|^\d")
 
-    The buffer holds only the unterminated tail, so what reaches ``emit`` never
-    depends on how the text was chunked -- feeding a document one character at a
-    time and feeding it whole produce the same output.
+#: Every character that can open an inline span. Text after an unclosed one is
+#: not settled: `a *b` renders differently once its closing star arrives.
+OPENERS = "`*_["
+
+
+def settled(text: str) -> int:
+    """How much of a partial line renders the same whatever arrives next.
+
+    The prefix before the first still-open span. An opener that never closes on
+    this line blocks the rest of it, which costs nothing worse than waiting for
+    the newline -- the same thing that would have happened anyway.
+    """
+    index = 0
+    while index < len(text):
+        character = text[index]
+        if character not in OPENERS:
+            index += 1
+            continue
+        if character == "[":
+            close = text.find(")", index + 1)
+            step = 1
+        else:
+            marker = "**" if text.startswith("**", index) else character
+            close = text.find(marker, index + len(marker))
+            step = len(marker)
+        if close < 0:
+            return index
+        index = close + step
+    return len(text)
+
+
+class Stream:
+    """Renders fed text as it arrives, a settled piece at a time.
+
+    Two things reach ``emit``: a finished line, and -- while one is still being
+    written -- the part of it no later token can change. The second is what
+    keeps a paragraph appearing as the model writes it rather than all at once
+    when it finally reaches a newline, which is the responsiveness
+    :mod:`streaming` exists to protect.
+
+    What ``emit`` receives in total never depends on how the text was chunked:
+    feeding a document one character at a time and feeding it whole produce the
+    same output, only cut in different places.
     """
 
     def __init__(self, emit, colour: bool = True, renderer: Renderer | None = None) -> None:
         self.emit = emit
         self.renderer = renderer or Renderer(colour=colour)
         self.buffer = ""
+        # Rendered characters of the line in progress that are already on
+        # screen. Everything emitted afterwards is the delta past this.
+        self.shown = 0
 
     def feed(self, text: str) -> None:
         if not text:
@@ -163,6 +210,7 @@ class Stream:
         while "\n" in self.buffer:
             line, _, self.buffer = self.buffer.partition("\n")
             self._write(line)
+        self._preview()
 
     def finish(self) -> None:
         """Flush the unterminated tail and reset for the next turn."""
@@ -171,10 +219,27 @@ class Stream:
         self.buffer = ""
         self.renderer.reset()
 
+    def _preview(self) -> None:
+        """Show the settled head of the line still being written."""
+        # Inside a fence the body is syntax-coloured as a whole line, and a
+        # block-shaped line has a prefix -- a bullet, a heading -- that is not
+        # decided until more of it exists.
+        if self.renderer.fenced or BLOCKY.match(self.buffer):
+            return
+        head = self.buffer[: settled(self.buffer)]
+        if not head:
+            return
+        rendered = inline(head, self.renderer.colour)
+        if len(rendered) > self.shown:
+            self.emit(rendered[self.shown :])
+            self.shown = len(rendered)
+
     def _write(self, line: str) -> None:
         rendered = self.renderer.line(line)
-        if rendered is not None:
-            self.emit(rendered + "\n")
+        shown, self.shown = self.shown, 0
+        if rendered is None:
+            return
+        self.emit(rendered[shown:] + "\n")
 
 
 def render(text: str, colour: bool = True) -> str:

@@ -145,7 +145,7 @@ def test_a_line_is_emitted_as_soon_as_it_is_complete():
     seen: list[str] = []
     stream = Stream(seen.append, colour=False)
     stream.feed("first line\nsecond")
-    assert seen == ["first line\n"]
+    assert seen[0] == "first line\n"
 
 
 def test_the_unterminated_tail_is_flushed_at_the_end():
@@ -153,7 +153,44 @@ def test_the_unterminated_tail_is_flushed_at_the_end():
     stream = Stream(seen.append, colour=False)
     stream.feed("no trailing newline")
     stream.finish()
-    assert seen == ["no trailing newline\n"]
+    assert "".join(seen) == "no trailing newline\n"
+
+
+# --- previewing the line still being written --------------------------------
+
+
+def test_a_paragraph_appears_before_its_newline_arrives():
+    # The whole reason this is not a plain line buffer: a model writes a
+    # paragraph as one long line, and waiting for it would show nothing at all
+    # until the paragraph was finished.
+    seen: list[str] = []
+    stream = Stream(seen.append, colour=False)
+    stream.feed("The retrieval module has ")
+    assert "".join(seen) == "The retrieval module has "
+
+
+def test_an_unclosed_span_is_held_back_until_it_closes():
+    seen: list[str] = []
+    stream = Stream(seen.append, colour=False)
+    stream.feed("call `read_")
+    assert "".join(seen) == "call "
+    stream.feed("file` now")
+    assert "".join(seen) == "call read_file now"
+
+
+def test_a_block_shaped_line_waits_for_its_newline():
+    # `-` could still become a bullet or a rule, and `#` a heading of any depth.
+    for opener in ("- item", "### head", "```py", "1. first"):
+        seen: list[str] = []
+        Stream(seen.append, colour=False).feed(opener)
+        assert seen == [], opener
+
+
+def test_settled_stops_at_the_first_opener_that_never_closes():
+    assert markdown.settled("plain text") == len("plain text")
+    assert markdown.settled("a `code` b") == len("a `code` b")
+    assert markdown.settled("a `code") == 2
+    assert markdown.settled("**bold** then *") == len("**bold** then ")
 
 
 def test_finishing_closes_an_unterminated_fence():
