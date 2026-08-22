@@ -67,3 +67,51 @@ def test_glob_no_match_is_a_clear_message(registry):
 
 def test_read_only_registry_tool_set(registry):
     assert registry.names() == ["glob", "grep", "list_files", "read_file"]
+
+
+# --- the walk itself ------------------------------------------------------
+
+
+def test_the_walk_stops_when_the_caller_does(project, monkeypatch):
+    # Every cap in the search and scout paths bounds how many files they read,
+    # which only bounds their cost if the walk itself can be abandoned. Sorting
+    # the whole tree up front meant the work was already done by the time the
+    # first result appeared.
+    from pathlib import Path
+
+    from bkht.coder.tools.search import iter_files
+
+    for index in range(50):
+        package = project / f"pkg{index:02d}"
+        package.mkdir()
+        (package / "mod.py").write_text("value = 1\n")
+
+    visited = []
+    original = Path.iterdir
+    monkeypatch.setattr(Path, "iterdir", lambda self: visited.append(self) or original(self))
+
+    next(iter_files(project, project))
+    assert len(visited) < 10, "the whole tree was walked to produce one file"
+
+
+def test_an_ignored_directory_is_never_entered(project, monkeypatch):
+    # node_modules is not merely filtered out of the results; it is not read.
+    from pathlib import Path
+
+    from bkht.coder.tools.search import iter_files
+
+    visited = []
+    original = Path.iterdir
+    monkeypatch.setattr(Path, "iterdir", lambda self: visited.append(self) or original(self))
+
+    list(iter_files(project, project))
+    assert not any(path.name == "node_modules" for path in visited)
+
+
+def test_a_directory_symlinked_to_its_own_parent_terminates(project):
+    # Rare in a repository, unavoidable in a home directory, and fatal either
+    # way: the walk would never end.
+    from bkht.coder.tools.search import iter_files
+
+    (project / "loop").symlink_to(project)
+    assert any(path.name == "main.py" for path in iter_files(project, project))

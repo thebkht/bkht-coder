@@ -18,9 +18,37 @@ MAX_SCANNED_BYTES = 1_000_000
 
 
 def iter_files(root: Path, workspace_root: Path, pattern: str | None = None):
-    """Every non-ignored file under ``root``, optionally filtered by a glob."""
-    for path in sorted(root.rglob("*")):
-        if not path.is_file() or is_ignored(path, workspace_root):
+    """Every non-ignored file under ``root``, optionally filtered by a glob.
+
+    Pruned at the directory and yielded lazily. The obvious spelling --
+    ``sorted(root.rglob("*"))`` -- does neither: it descends into every
+    ``node_modules`` and cache on the way down only to discard them afterwards,
+    and it materialises the entire tree before yielding anything. That makes
+    every cap the callers apply arrive too late to save them, because the walk
+    they were meant to bound has already finished. On a small repository the
+    difference is invisible; started one directory too high up it is the
+    difference between a prompt that returns and one that does not.
+
+    Ordering stays deterministic -- sorted within each directory, depth first
+    -- which is the only property callers relied on.
+    """
+
+    def walk(directory: Path):
+        try:
+            entries = sorted(directory.iterdir())
+        except OSError:
+            return  # unreadable directory; not an error for a search
+        for path in entries:
+            # Symlinked directories are not followed: rglob did not follow them
+            # either, and a loop under the root would never terminate.
+            if path.is_dir():
+                if not path.is_symlink() and not is_ignored(path, workspace_root):
+                    yield from walk(path)
+            elif path.is_file():
+                yield path
+
+    for path in walk(Path(root)):
+        if is_ignored(path, workspace_root):
             continue
         if pattern and not _matches(path, workspace_root, pattern):
             continue
