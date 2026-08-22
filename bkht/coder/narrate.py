@@ -2,8 +2,10 @@
 
 A transcript of `edit_file(path=bkht/coder/cli.py, old_string=..., new_string=...)`
 is a log of function calls; what a reader actually wants to know is that the
-agent is editing cli.py. The call still prints underneath -- it is the evidence
--- but the sentence is what gets read.
+agent is editing cli.py. The call itself is printed once it has finished, with
+the mark that says whether it worked; this sentence is what the status line
+says while it is still running, and for a long call it is the only thing
+saying what the agent is doing at all.
 
 Deliberately mechanical: this describes the call, it does not ask the model to
 narrate itself. A second opinion about its own intentions would cost a round
@@ -51,17 +53,3 @@ def intent(call: ToolCall) -> str:
     # An unknown tool -- a future one, or one a model invented -- still gets a
     # sentence rather than nothing.
     return f"Calling {call.name}" if call.name else FALLBACK
-
-
-def label(call: ToolCall) -> str:
-    """The short form for the status line, while the call runs."""
-    return {
-        "read_file": "reading",
-        "write_file": "writing",
-        "edit_file": "editing",
-        "list_files": "listing",
-        "grep": "searching",
-        "glob": "searching",
-        "codebase_search": "searching",
-        "bash": "running",
-    }.get(call.name, "thinking")

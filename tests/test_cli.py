@@ -6,7 +6,7 @@ import io
 import re
 
 from bkht.coder.agent import Agent
-from bkht.coder.cli import TerminalListener, report, run_turn
+from bkht.coder.cli import TerminalListener, report, run_turn, summarize
 from bkht.coder.parsing import ToolCall
 from bkht.coder.session import Session
 from bkht.coder.tools.base import Registry, ToolResult
@@ -31,23 +31,40 @@ def visible_text(stream) -> str:
 # --- off a terminal: nothing may change -------------------------------------
 
 
-def test_a_pipe_gets_the_same_lines_it_always_did():
+def test_a_pipe_gets_the_tool_lines_and_nothing_else():
     # This output is parsed by scripts and by the live suite; a spinner or a
     # streamed token appearing here is a regression, not a feature.
     listen, stream = listener(live=False)
     with listen.turn():
         listen.on_token("thinking out loud")
         listen.on_tool_call(ToolCall(name="read_file", arguments={"path": "a.py"}))
-        listen.on_tool_result(ToolCall(name="read_file"), ToolResult.success("contents"))
+        listen.on_tool_result(
+            ToolCall(name="read_file", arguments={"path": "a.py"}),
+            ToolResult.success("contents"),
+        )
 
-    assert stream.getvalue() == "  · Reading a.py\n    read_file(path=a.py)\n"
+    assert stream.getvalue() == "● read_file(a.py)\n"
+
+
+def test_the_line_for_a_call_waits_until_its_result_is_known():
+    # The mark says which way the call went, so it cannot be drawn before that
+    # is known -- a line the terminal has scrolled cannot be repainted.
+    listen, stream = listener(live=False)
+    with listen.turn():
+        listen.on_tool_call(ToolCall(name="read_file", arguments={"path": "a.py"}))
+        assert stream.getvalue() == ""
 
 
 def test_a_pipe_still_reports_tool_errors():
     listen, stream = listener(live=False)
     with listen.turn():
         listen.on_tool_result(ToolCall(name="read_file"), ToolResult.failure("no such file"))
-    assert stream.getvalue() == "    ! no such file\n"
+    assert stream.getvalue() == "● read_file()\n  ! no such file\n"
+
+
+def test_a_single_argument_call_drops_the_argument_name():
+    assert summarize({"path": "a.py"}) == "a.py"
+    assert summarize({"path": "a.py", "limit": 5}) == "path=a.py, limit=5"
 
 
 def test_nothing_is_streamed_when_not_live_so_report_still_prints():
@@ -111,6 +128,16 @@ def test_report_does_not_print_prose_that_was_already_streamed(capsys):
     assert capsys.readouterr().out == "the answer\n"
 
 
+def test_report_renders_the_markdown_it_prints(capsys):
+    # A piped run never reaches the listener's renderer, and an answer full of
+    # raw asterisks is no more readable for having been redirected.
+    class Outcome:
+        answer, stopped, errors = "### Head\n\n- **bold** item", "answered", []
+
+    report(Outcome(), streamed=False)
+    assert capsys.readouterr().out == "### Head\n\n• bold item\n"
+
+
 def test_a_streamed_turn_shows_its_answer_exactly_once():
     # The whole point of the streamed=... handshake: prose on screen once.
     listen, stream = listener(live=True)
@@ -120,4 +147,22 @@ def test_a_streamed_turn_shows_its_answer_exactly_once():
     )
 
     assert run_turn(agent, listen, "hi") == 0
-    assert visible_text(stream) == "All done."
+    assert visible_text(stream).splitlines()[0] == "All done."
+
+
+def test_a_finished_turn_says_what_it_cost():
+    listen, stream = listener(live=True)
+    provider = FakeProvider(["All done."])
+    agent = Agent(
+        provider=provider, registry=Registry([]), session=Session(), listener=listen
+    )
+
+    run_turn(agent, listen, "hi")
+    # The fake reports one completion token per character, and a fixed prompt.
+    assert visible_text(stream).splitlines()[-1] == "0.0s (↑100 ↓9)"
+
+
+def test_a_turn_with_no_answer_gets_no_footer():
+    listen, stream = listener(live=True)
+    listen.footer(type("O", (), {"answer": "", "seconds": 1.0, "sent": 1, "received": 1})())
+    assert visible_text(stream) == ""

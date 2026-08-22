@@ -10,7 +10,7 @@ from functools import partial
 from pathlib import Path
 from typing import NamedTuple
 
-from . import banner, narrate, terminal
+from . import banner, markdown, narrate, terminal
 from .agent import Agent
 from .approval import ask_tty
 from . import doctor
@@ -30,7 +30,7 @@ from .skills import Discovery, discover as discover_skills, render as render_ski
 from .skills import summarize as summarize_skills
 from .status import Status
 from .streaming import Gate
-from .terminal import BOLD, CYAN, DIM, RED, YELLOW, paint
+from .terminal import ACCENT, BOLD, DIM, GREEN, ORANGE, RED, YELLOW, paint
 from . import usage
 from .tools import build_registry
 from .tools.background import Jobs
@@ -38,14 +38,35 @@ from .tools.base import ToolResult
 
 
 def summarize(arguments: dict) -> str:
-    """A one-line rendering of tool arguments for the activity line."""
+    """A one-line rendering of tool arguments for the activity line.
+
+    A call with a single argument drops the name: nobody reading
+    ``read_file(bkht/coder/cli.py)`` wonders which argument that was, and the
+    characters it saves are more of the path that fits on the line.
+    """
     parts = []
     for key, value in arguments.items():
         text = str(value).replace("\n", "\\n")
         if len(text) > 60:
             text = text[:57] + "..."
-        parts.append(f"{key}={text}")
+        parts.append(text if len(arguments) == 1 else f"{key}={text}")
     return ", ".join(parts)
+
+
+#: The status mark beside a tool call. Green once it worked, red when it did
+#: not -- and never drawn before that is known, because a line which has
+#: already scrolled cannot be repainted.
+DOT = "\u25cf"
+
+
+def duration(seconds: float) -> str:
+    """A turn's length, in whole seconds once there is a whole second of it."""
+    return f"{seconds:.1f}s" if seconds < 1 else f"{round(seconds)}s"
+
+
+def cost(outcome) -> str:
+    """What the turn took: how long it ran, and how many tokens went each way."""
+    return f"{duration(outcome.seconds)} (\u2191{outcome.sent:,} \u2193{outcome.received:,})"
 
 
 class TerminalListener:
@@ -69,7 +90,11 @@ class TerminalListener:
         # for a spinner to fill and nothing to gate.
         self.rich = self.live and not verbose
         self.status = Status(writer=self.stream, enabled=self.rich)
-        self.gate = Gate(self._emit) if self.rich else None
+        # provider -> gate (drops tool-call JSON) -> markdown -> screen. The
+        # gate comes first because what it removes was never prose, and a
+        # half-written tool call passed through a renderer would be formatted.
+        self.markdown = markdown.Stream(self._emit, colour=terminal.colourful(self.stream))
+        self.gate = Gate(self.markdown.feed) if self.rich else None
         self.streamed = False
         self._streaming = False
 
@@ -85,8 +110,22 @@ class TerminalListener:
         finally:
             self.status.stop()
             if self.gate is not None:
+                # In that order: the gate releases what it held into the
+                # renderer, and only then does the renderer flush its own tail.
                 self.gate.finish()
+                self.markdown.finish()
             self._newline()
+
+    def footer(self, outcome) -> None:
+        """The line under an answer saying what the turn cost.
+
+        Outside :meth:`turn` because only the caller has the outcome, and a
+        context manager that had to be handed one would be a worse shape than
+        a second call.
+        """
+        if not self.rich or not outcome.answer:
+            return
+        self._say(paint(cost(outcome), DIM, self.stream))
 
     def _emit(self, text: str) -> None:
         with self.status.pause():
@@ -124,25 +163,25 @@ class TerminalListener:
             print(text, file=self.stream, flush=True)
 
     def on_tool_call(self, call: ToolCall) -> None:
-        # The sentence is what gets read; the call underneath is the evidence
-        # for it, which is why both are printed and neither replaces the other.
-        self._say(
-            paint(f"  · {narrate.intent(call)}", CYAN, self.stream)
-            + "\n"
-            + paint(f"    {call.name}({summarize(call.arguments)})", DIM, self.stream)
-        )
-        self.status.note(narrate.label(call))
+        # Nothing is printed yet. The call's line is drawn when its result is
+        # known, so the mark beside it can say which way it went; until then
+        # the status line is what says the call is running, and it says it in
+        # the same words the printed sentence used to.
+        self.status.note(narrate.intent(call))
 
     def on_tool_result(self, call: ToolCall, result: ToolResult) -> None:
+        mark = paint(DOT, GREEN if result.ok else RED, self.stream)
+        name = paint(call.name, ORANGE, self.stream)
+        self._say(f"{mark} {name}({summarize(call.arguments)})")
         if not result.ok:
-            self._say(paint(f"    ! {result.error.splitlines()[0]}", RED, self.stream))
+            self._say(paint(f"  ! {result.error.splitlines()[0]}", RED, self.stream))
         elif self.verbose:
             for line in result.content.splitlines()[:20]:
-                self._say(paint(f"    {line}", DIM, self.stream))
+                self._say(paint(f"  {line}", DIM, self.stream))
         self.status.note("thinking")
 
     def on_retry(self, reason: str) -> None:
-        self._say(paint("  · retrying (malformed reply)", YELLOW, self.stream))
+        self._say(paint(f"{DOT} retrying (malformed reply)", YELLOW, self.stream))
 
 
 def add_common_arguments(parser) -> None:
@@ -376,7 +415,12 @@ def report(outcome, streamed: bool = False) -> int:
     arrived, so printing it again would show the answer twice.
     """
     if outcome.answer and not streamed:
-        print(outcome.answer)
+        # Rendered here too. A piped run and a --verbose one never reached the
+        # listener's renderer, and an answer full of raw asterisks is no more
+        # readable for having been redirected.
+        # rstrip, because render() ends every document with a newline and
+        # print would add a second one.
+        print(markdown.render(outcome.answer, colour=terminal.colourful()).rstrip("\n"))
 
     if outcome.stopped != "answered":
         detail = outcome.errors[-1] if outcome.errors else ""
@@ -394,6 +438,7 @@ def run_turn(agent, listener, task: str) -> int:
         return report(agent.run(task))
     with listener.turn():
         outcome = agent.run(task)
+    listener.footer(outcome)
     return report(outcome, streamed=listener.streamed)
 
 

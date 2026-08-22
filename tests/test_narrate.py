@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from bkht.coder.narrate import intent, label
+from bkht.coder.narrate import intent
 from bkht.coder.parsing import ToolCall
 
 
@@ -43,8 +43,3 @@ def test_long_arguments_are_cut_to_one_line():
 
 def test_a_multiline_argument_stays_on_one_line():
     assert "\n" not in intent(ToolCall("bash", {"command": "a\nb\nc"}))
-
-
-def test_the_status_label_is_a_verb():
-    assert label(ToolCall("read_file", {})) == "reading"
-    assert label(ToolCall("teleport", {})) == "thinking"
