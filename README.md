@@ -463,6 +463,52 @@ report is worse than no report because it teaches you to ignore it.
 Review is read-only. `--fix` is a separate phase that goes through the normal
 agent loop and the normal permission gate.
 
+## Checking what an edit means
+
+`edit_file` used to check one thing: that `old_string` appeared exactly once.
+It wrote the bytes and reported "Edited", and every one of those statements was
+true of `from .session import STATE_DIR, Input` — a name `session.py` has never
+defined. The string matched. The write succeeded. The package stopped importing,
+and nobody found out until the next command.
+
+A local model invents a name because the sentence reads well. That is the
+failure mode, not an occasional slip, so `verify.py` parses the result of every
+Python write before it lands. Two checks, deliberately asymmetric:
+
+- **A syntax error is refused.** Checked before the write, so there is nothing
+  to roll back. A file that does not parse is never what anyone meant.
+- **An unresolved import is reported.** Names can arrive at runtime — a star
+  import, a conditional definition, a module `__getattr__` — so this warns
+  rather than blocks. A check that stops a correct edit is worse than one that
+  misses an incorrect one.
+
+The warning goes to both readers. The model gets it appended to the tool result,
+in the same breath as the success, while it can still fix it. The human gets it
+under the diff at the approval prompt:
+
+```
+--- bkht/coder/commands.py
++++ bkht/coder/commands.py
+@@ -18,5 +18,5 @@
+-from .session import STATE_DIR
++from .session import STATE_DIR, Input
+
+! bkht/coder/session.py does not define `Input`, imported on line 20.
+Allow edit_file? [y] yes  [n] no  [a] always this call  [d] full diff
+```
+
+That is the moment someone is already deciding, and that line is the whole of
+what they need in order to say no.
+
+Both checks are static. The check that would catch everything is "does the
+module still import?", and running it means executing the model's new code to
+find out whether the model's new code is safe to execute.
+
+Only relative imports resolving inside the workspace are checked, and the
+name collection is deliberately over-inclusive — it currently reports nothing
+across this repository's own source, which is the bar. One false alarm is enough
+to teach everybody to ignore the next true one.
+
 ## How it talks to the model
 
 `qwen2.5-coder:14b` emits tool calls as ordinary message **content** with

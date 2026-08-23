@@ -180,3 +180,64 @@ def test_huge_diff_preview_is_bounded_for_display(parts):
     )
     assert "more diff lines" in body
     assert len(body.splitlines()) < 50
+
+
+# --- what the approval prompt shows -----------------------------------------
+
+
+@pytest.fixture
+def package(tmp_path):
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("")
+    (tmp_path / "pkg" / "session.py").write_text("STATE_DIR = '/tmp'\n")
+    (tmp_path / "pkg" / "commands.py").write_text("from .session import STATE_DIR\n")
+    registry, workspace = build_registry(tmp_path)
+    return registry, workspace
+
+
+def test_the_prompt_warns_about_a_name_that_does_not_exist(package):
+    """The one moment a person is already deciding.
+
+    "session.py does not define Input" is the whole of what someone needs in
+    order to say no, and the prompt is where they are being asked.
+    """
+    registry, workspace = package
+    body = preview(
+        registry.get("edit_file"),
+        {
+            "path": "pkg/commands.py",
+            "old_string": "from .session import STATE_DIR",
+            "new_string": "from .session import STATE_DIR, Input",
+        },
+        workspace,
+    )
+    assert "session.py does not define `Input`" in body
+
+
+def test_the_diff_still_leads(package):
+    registry, workspace = package
+    body = preview(
+        registry.get("edit_file"),
+        {
+            "path": "pkg/commands.py",
+            "old_string": "from .session import STATE_DIR",
+            "new_string": "from .session import STATE_DIR, Input",
+        },
+        workspace,
+    )
+    assert body.startswith("---")
+    assert body.index("does not define") > body.index("+from .session")
+
+
+def test_a_sound_edit_shows_only_the_diff(package):
+    registry, workspace = package
+    body = preview(
+        registry.get("edit_file"),
+        {
+            "path": "pkg/commands.py",
+            "old_string": "from .session import STATE_DIR",
+            "new_string": "from .session import STATE_DIR as WHERE",
+        },
+        workspace,
+    )
+    assert "does not define" not in body

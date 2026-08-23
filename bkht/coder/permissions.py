@@ -11,6 +11,7 @@ import difflib
 from dataclasses import dataclass
 from typing import Callable
 
+from . import verify
 from .rules import ALLOW, DENY, Rules
 
 ASK = "ask"
@@ -84,7 +85,16 @@ def preview(tool, arguments: dict, workspace) -> str:
     )
     if not diff:
         return f"{label} (no change)"
-    return "\n".join(diff)
+
+    # The warning belongs here more than anywhere else. This is the one moment
+    # a person is already looking at the change and deciding, and "session.py
+    # does not define Input" is the whole of what they need to say no. It sits
+    # under the diff rather than above it so the diff still leads.
+    _, warnings = verify.check(after, target, workspace.root, label)
+    body = "\n".join(diff)
+    if warnings:
+        body += "\n\n! " + "\n! ".join(warnings)
+    return body
 
 
 def truncate(body: str, limit: int = MAX_PREVIEW_LINES) -> str:

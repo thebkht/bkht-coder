@@ -160,3 +160,79 @@ def test_a_failed_edit_leaves_no_snapshot(tools):
     with pytest.raises(ToolError):
         run(registry, "edit_file", path="src/util.py", old_string="nope", new_string="x")
     assert len(snapshots) == 0
+
+
+# --- checking what the edit means -------------------------------------------
+
+
+@pytest.fixture
+def package(tmp_path):
+    """A workspace where relative imports resolve, and its write tools."""
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("")
+    (tmp_path / "pkg" / "session.py").write_text("STATE_DIR = '/tmp'\n")
+    (tmp_path / "pkg" / "commands.py").write_text(
+        "from .session import STATE_DIR\n\n\ndef go():\n    return STATE_DIR\n"
+    )
+    registry, workspace = build_registry(tmp_path)
+    return registry, tmp_path
+
+
+def test_an_edit_importing_a_name_that_does_not_exist_still_writes(package):
+    """Reported, not refused.
+
+    Names can arrive at runtime, and a check that blocks a correct edit is
+    worse than one that misses an incorrect edit.
+    """
+    registry, root = package
+    result = registry.get("edit_file").run(
+        path="pkg/commands.py",
+        old_string="from .session import STATE_DIR",
+        new_string="from .session import STATE_DIR, Input",
+    )
+    assert result.ok
+    assert "Input" in (root / "pkg" / "commands.py").read_text()
+
+
+def test_the_model_is_told_about_the_name_in_the_same_breath(package):
+    registry, _ = package
+    result = registry.get("edit_file").run(
+        path="pkg/commands.py",
+        old_string="from .session import STATE_DIR",
+        new_string="from .session import STATE_DIR, Input",
+    )
+    assert "Warning" in result.content
+    assert "session.py does not define `Input`" in result.content
+
+
+def test_an_edit_that_would_not_parse_is_refused(package):
+    registry, root = package
+    before = (root / "pkg" / "commands.py").read_text()
+
+    with pytest.raises(ToolError, match="unparseable"):
+        registry.get("edit_file").run(
+            path="pkg/commands.py", old_string="def go():", new_string="def go(:"
+        )
+
+    assert (root / "pkg" / "commands.py").read_text() == before, "nothing was written"
+
+
+def test_write_file_is_checked_the_same_way(package):
+    registry, root = package
+    with pytest.raises(ToolError, match="unparseable"):
+        registry.get("write_file").run(path="pkg/commands.py", content="def go(:\n")
+    assert "def go():" in (root / "pkg" / "commands.py").read_text()
+
+
+def test_a_correct_edit_says_nothing_extra(package):
+    registry, _ = package
+    result = registry.get("edit_file").run(
+        path="pkg/commands.py", old_string="return STATE_DIR", new_string="return str(STATE_DIR)"
+    )
+    assert result.ok and "Warning" not in result.content
+
+
+def test_a_non_python_file_is_written_unchecked(package):
+    registry, root = package
+    result = registry.get("write_file").run(path="notes.md", content="def go(:\n")
+    assert result.ok and (root / "notes.md").exists()

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .. import verify
 from .base import Tool, ToolError, ToolResult, Workspace, output_chars, truncate
 
 IGNORED_DIRS = {
@@ -201,6 +202,18 @@ def walk(directory: Path, root: Path, depth: int, prefix: str = "") -> list[str]
     return lines
 
 
+def _with_warnings(message: str, warnings: list[str]) -> str:
+    """The tool result, with anything the check noticed appended.
+
+    Appended to a *success*, deliberately. The write happened and the model
+    needs to know that; it also needs to know the file now imports a name that
+    does not exist, in the same breath, while it can still fix it.
+    """
+    if not warnings:
+        return message
+    return message + "\n\nWarning: " + "\n".join(warnings)
+
+
 def register_write_tools(registry, workspace: Workspace, snapshots=None):
     """Add the mutating filesystem tools to ``registry``.
 
@@ -217,6 +230,13 @@ def register_write_tools(registry, workspace: Workspace, snapshots=None):
         if target.is_dir():
             raise ToolError(f"'{path}' is a directory")
 
+        # Checked before the write, not after, so a refusal needs no rollback.
+        refusal, warnings = verify.check(
+            content, target, workspace.root, workspace.relative(target)
+        )
+        if refusal:
+            raise ToolError(refusal)
+
         _snapshot(target)
         target.parent.mkdir(parents=True, exist_ok=True)
         existed = target.exists()
@@ -224,7 +244,9 @@ def register_write_tools(registry, workspace: Workspace, snapshots=None):
 
         verb = "Updated" if existed else "Created"
         lines = len(content.splitlines())
-        return ToolResult.success(f"{verb} {workspace.relative(target)} ({lines} lines)")
+        return ToolResult.success(
+            _with_warnings(f"{verb} {workspace.relative(target)} ({lines} lines)", warnings)
+        )
 
     registry.add(
         Tool(
@@ -275,14 +297,24 @@ def register_write_tools(registry, workspace: Workspace, snapshots=None):
                 "or pass replace_all: true to change every occurrence."
             )
 
-        _snapshot(target)
         updated = text.replace(old_string, new_string) if replace_all else text.replace(
             old_string, new_string, 1
         )
+
+        # Checked before the write, not after, so a refusal needs no rollback.
+        refusal, warnings = verify.check(
+            updated, target, workspace.root, workspace.relative(target)
+        )
+        if refusal:
+            raise ToolError(refusal)
+
+        _snapshot(target)
         target.write_text(updated, encoding="utf-8")
 
         where = f"{count} occurrences" if replace_all and count > 1 else "1 occurrence"
-        return ToolResult.success(f"Edited {workspace.relative(target)} ({where}).")
+        return ToolResult.success(
+            _with_warnings(f"Edited {workspace.relative(target)} ({where}).", warnings)
+        )
 
     registry.add(
         Tool(
