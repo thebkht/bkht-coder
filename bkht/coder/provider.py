@@ -33,11 +33,20 @@ DEFAULT_MODEL = "qwen2.5-coder:14b"
 #     16384    9% CPU / 91% GPU         12 GB     11.1 s
 #     32768    27% CPU / 73% GPU        15 GB    >300 s (timed out)
 #
-# The model advertises 32768 natively, but the binding constraint is host RAM,
-# not the model: past 8192 the KV cache pushes the working set off the GPU and
-# every turn pays for it. Raise this with --num-ctx on a machine with more
-# memory; that is the only change needed.
-DEFAULT_NUM_CTX = 8192
+# 8192 is the fastest number in that table and the wrong default. The table
+# measures one trivial completion; a real turn is a conversation, and at 8192 it
+# cannot hold a source file and think at the same time -- this project's own
+# cli.py is ~6,900 tokens, 85% of the window. The turn does not fail loudly. It
+# reads a file, frees context to make room, loses the file, and reads it again,
+# spending its whole iteration budget paging. Measured on the task that exposed
+# this: 25 iterations and no answer at 8192, eight tool calls and a complete one
+# at 16384.
+#
+# So the default pays 11 seconds a turn to be able to finish. 32768 is still out
+# of reach -- the model advertises it, but past 16384 the KV cache pushes the
+# working set off the GPU far enough that turns time out. On a machine with less
+# memory, drop to 8192 with --num-ctx; `coder doctor` says when to.
+DEFAULT_NUM_CTX = 16384
 
 # Ollama's own default is 2048, which silently truncates instead of erroring.
 # Anything at or below it is a misconfiguration rather than a small window.

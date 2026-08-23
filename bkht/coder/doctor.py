@@ -203,11 +203,27 @@ def check_context(num_ctx: int, ram_gb: float | None) -> Check:
         (size for size in (4096, 8192, 16384, 32768) if _needed_gb(size) <= usable),
         default=None,
     )
-    remedy = (
-        f"Lower it with `--num-ctx {fits}`."
-        if fits
-        else "Even the smallest useful context is tight here; use `--model qwen2.5-coder:7b`."
-    )
+    if fits is None:
+        remedy = (
+            "Even the smallest useful context is tight here; use "
+            "`--model qwen2.5-coder:7b`."
+        )
+    elif num_ctx <= DEFAULT_NUM_CTX:
+        # Naming the trade rather than just the smaller number. Lowering the
+        # default does buy back the seconds, and it costs the ability to finish:
+        # at 8192 this project's own cli.py is 85% of the window, so a turn
+        # cannot hold a file and think at the same time. It reads, frees context
+        # to make room, loses the file, and reads it again until it runs out of
+        # iterations. Slower and finishing beats faster and looping, so the
+        # default stays -- but a machine this tight deserves to be told.
+        remedy = (
+            f"Turns will be slower here. `--num-ctx {fits}` buys the speed back, "
+            "at the cost of turns that run out of iterations on larger files. "
+            "Try the default first."
+        )
+    else:
+        remedy = f"Lower it with `--num-ctx {fits}`."
+
     return Check(
         "num_ctx", WARN,
         f"{num_ctx} tokens wants roughly {needed:.0f} GB, and this machine has {ram_gb:.0f} GB",

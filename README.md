@@ -39,7 +39,8 @@ commands under `commands/`.
 - **[uv](https://docs.astral.sh/uv/)** — used for the venv, the lockfile, and running the tests
 - **[Ollama](https://ollama.com/download)**, serving on `http://localhost:11434`
 - The model: `qwen2.5-coder:14b` (~9 GB on disk). About **16 GB of RAM** is
-  enough at the default `num_ctx` of 8192; on 8 GB use `qwen2.5-coder:7b`.
+  enough at the default `num_ctx` of 16384, though turns are slower there;
+  on 8 GB use `qwen2.5-coder:7b`.
 
 ## Install
 
@@ -161,7 +162,7 @@ described above.
 | ------------------- | ------------------------ | ---------------------------------------------------------------- |
 | `--model`           | `qwen2.5-coder:14b`      | Ollama model tag                                                 |
 | `--host`            | `http://localhost:11434` | Ollama server URL                                                |
-| `--num-ctx`         | `8192`                   | Context window requested from Ollama (values ≤ 4096 are refused) |
+| `--num-ctx`         | `16384`                  | Context window requested from Ollama (values ≤ 4096 are refused) |
 | `--temperature`     | `0.2`                    | Sampling temperature; low keeps tool calls well-formed           |
 | `--cwd`             | `.`                      | Workspace root the tools are confined to                         |
 | `--max-iterations`  | `25`                     | Cap on agent loop iterations per task                            |
@@ -282,7 +283,7 @@ consulted.
 ## Skills
 
 `AGENTS.md` charges for its text on every turn, whether or not the turn has
-anything to do with it. At `num_ctx` 8192 that is a real price — which is why
+anything to do with it. Even at `num_ctx` 16384 that is a real price — which is why
 the instruction budget is capped at 4000 characters, and why long-form
 procedure does not belong there.
 
@@ -490,7 +491,7 @@ weights between two turns on Ollama's five-minute idle timer.
 truncates past it, which is the most common cause of a bad local-model session;
 a `num_ctx` below 4096 is refused outright.
 
-The default is **8192**, not the model's native 32768, because the binding
+The default is **16384**, not the model's native 32768, because the binding
 constraint is host RAM. Measured on a 16 GB machine with `qwen2.5-coder:14b`,
 one warm trivial completion:
 
@@ -500,9 +501,17 @@ one warm trivial completion:
 | 16384     | 9% CPU / 91% GPU  | 12 GB | 11.1 s             |
 | 32768     | 27% CPU / 73% GPU | 15 GB | >300 s (timed out) |
 
-Past 8192 the KV cache pushes the working set off the GPU and every turn pays
-for it. On a machine with more memory, raise it with `--num-ctx` — that is the
-only change needed.
+8192 is the fastest number in that table and the wrong default. The table
+measures one trivial completion; a real turn is a conversation, and at 8192 it
+cannot hold a source file and think at the same time — this project's own
+`cli.py` is ~6,900 tokens, 85% of the window. The turn does not fail loudly: it
+reads a file, frees context to make room, loses the file, and reads it again,
+spending its whole iteration budget paging. On the task that exposed this, 8192
+gave 25 iterations and no answer; 16384 gave eight tool calls and a complete one.
+
+So the default pays about ten seconds a turn to be able to finish. On a machine
+with less memory, drop to `--num-ctx 8192` — `coder doctor` says when to, and
+names what it costs.
 
 An 8K window fills quickly, so several things are sized against it rather than fixed.
 Tool output is capped at a quarter of the window (`tools/base.py`), because a
@@ -522,10 +531,7 @@ it: in practice it switches to `offset`/`limit` and pages through.
 And a turn that runs out of iterations or retries is asked for a final answer in
 prose before it ends, so a bounded turn reports what it found instead of nothing.
 
-On this repository, `--num-ctx 8192` is genuinely too small for the larger files:
-`cli.py` alone is about 6,900 tokens. The turn no longer loops, but it spends its
-iterations paging. At `--num-ctx 16384` the same task finishes in eight tool
-calls. If turns are hitting the iteration cap, that is the flag to raise.
+If turns are still hitting the iteration cap, `--num-ctx` is the flag to raise.
 
 ## Development
 

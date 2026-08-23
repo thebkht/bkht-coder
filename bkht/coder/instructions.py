@@ -5,7 +5,7 @@ a worse tool than one that reads them once. These files are the mechanism: drop
 an ``AGENTS.md`` or ``CLAUDE.md`` in the workspace and its contents become part
 of the system prompt, binding on the model for every turn.
 
-The budget below is not tidiness. ``num_ctx`` is 8192 on this machine, so every
+The budget below is not tidiness. ``num_ctx`` is 16384 by default, so every
 character of instruction is a character the conversation does not get. A file
 that grows without bound would quietly starve the session it was meant to help.
 """

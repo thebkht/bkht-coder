@@ -6,6 +6,7 @@ import pytest
 
 from bkht.coder.parsing import ToolCall
 from bkht.coder.provider import (
+    DEFAULT_NUM_CTX,
     DEFAULT_TEMPERATURE,
     Chunk,
     OllamaProvider,
@@ -175,3 +176,15 @@ def test_for_review_leaves_other_providers_alone():
 
     other = Other()
     assert for_review(other) is other
+
+
+def test_the_default_window_can_hold_a_file_and_still_think():
+    """8192 is the fastest measured number and the wrong default.
+
+    A real turn is a conversation, not one completion. At 8192 this project's
+    own cli.py is ~85% of the window, so a turn reads a file, frees context to
+    make room, loses the file, and reads it again until it runs out of
+    iterations. The default pays about ten seconds a turn to be able to finish.
+    """
+    assert DEFAULT_NUM_CTX == 16384
+    assert OllamaProvider().num_ctx == DEFAULT_NUM_CTX

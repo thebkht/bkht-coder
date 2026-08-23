@@ -211,3 +211,27 @@ def test_every_failure_carries_a_fix(project, offline):
 def test_the_rendered_report_shows_fixes_under_their_check():
     text = render([doctor.Check("model", FAIL, "not pulled", "Run `ollama pull x`.")])
     assert text.index("not pulled") < text.index("ollama pull x")
+
+
+def test_a_tight_machine_is_told_what_lowering_costs():
+    """The doctor must not simply contradict its own default.
+
+    16384 does spill to CPU on a 16 GB machine, and that is worth saying. But
+    the remedy is a trade, not a correction: 8192 buys the seconds back and
+    costs the ability to finish a turn on a larger file.
+    """
+    check = check_context(16384, 16)
+    assert check.status == WARN
+    assert "--num-ctx 8192" in check.fix
+    assert "run out of iterations" in check.fix
+    assert "Try the default first" in check.fix
+
+
+def test_asking_for_more_than_the_default_is_still_told_to_lower_it():
+    check = check_context(32768, 16)
+    assert check.status == WARN
+    assert check.fix.endswith("Lower it with `--num-ctx 8192`.")
+
+
+def test_a_machine_too_small_for_any_window_is_sent_to_the_7b():
+    assert "qwen2.5-coder:7b" in check_context(8192, 4).fix

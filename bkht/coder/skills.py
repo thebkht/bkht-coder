@@ -1,7 +1,7 @@
 """Skills: standing instructions that only cost context when they are used.
 
 ``AGENTS.md`` charges for its text up front, on every turn, whether or not the
-turn has anything to do with it. At ``num_ctx=8192`` that is a real price, and
+turn has anything to do with it. Even at ``num_ctx=16384`` that is a real price, and
 it is why the instruction budget is capped at 4000 characters.
 
 A skill splits the cost in two. Its name and one-line description go into the
