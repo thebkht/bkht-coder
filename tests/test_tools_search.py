@@ -66,7 +66,16 @@ def test_glob_no_match_is_a_clear_message(registry):
 
 
 def test_read_only_registry_tool_set(registry):
-    assert registry.names() == ["glob", "grep", "list_files", "read_file"]
+    # codebase_search is registered because the agent's opening scout already
+    # shows the model a result from it; a tool it has seen the output of has to
+    # exist, or it calls a name that does not resolve and loses a turn to it.
+    assert registry.names() == [
+        "codebase_search",
+        "glob",
+        "grep",
+        "list_files",
+        "read_file",
+    ]
 
 
 # --- the walk itself ------------------------------------------------------

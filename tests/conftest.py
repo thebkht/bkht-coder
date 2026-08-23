@@ -4,7 +4,21 @@ from pathlib import Path
 
 import pytest
 
-from bkht.coder.tools.base import Workspace
+from bkht.coder.tools.base import Workspace, set_output_budget
+
+
+@pytest.fixture(autouse=True)
+def default_output_budget():
+    """Restore the tool-output cap around every test.
+
+    The cap is process-wide: it is sized once at startup from ``num_ctx``,
+    because ``truncate`` is called from six tools in five modules. That is right
+    for a run and wrong for a suite, where one test sizing it for a small window
+    would silently shorten the output of every test after it.
+    """
+    set_output_budget(0)
+    yield
+    set_output_budget(0)
 
 
 @pytest.fixture

@@ -43,6 +43,20 @@ DEFAULT_NUM_CTX = 8192
 # Anything at or below it is a misconfiguration rather than a small window.
 MIN_USEFUL_NUM_CTX = 4096
 
+# Ollama's default is 0.8. That is a reasonable setting for prose and a poor one
+# here: every tool call is a JSON object that has to be exactly right, and the
+# characteristic failure of a 14b model on this loop is drifting off the
+# emission format. Low, not zero -- at 0.0 a model that has taken a wrong turn
+# repeats it verbatim on every retry, and the retry exists to get a different
+# answer.
+DEFAULT_TEMPERATURE = 0.2
+
+# Ollama unloads a model after five idle minutes by default. A turn that has to
+# reload 9 GB of weights before its first token spends longer waiting than
+# thinking, and between two turns of a conversation that is exactly what
+# happens.
+DEFAULT_KEEP_ALIVE = "30m"
+
 # A dead server must fail in seconds; a loaded 14b legitimately takes minutes to
 # produce its first token, so connect and read are bounded separately.
 CONNECT_TIMEOUT = 5.0
@@ -143,7 +157,8 @@ class OllamaProvider:
         host: str = DEFAULT_HOST,
         num_ctx: int = DEFAULT_NUM_CTX,
         timeout: float = READ_TIMEOUT,
-        temperature: float | None = None,
+        temperature: float | None = DEFAULT_TEMPERATURE,
+        keep_alive: str = DEFAULT_KEEP_ALIVE,
     ) -> None:
         if num_ctx < MIN_USEFUL_NUM_CTX:
             raise ValueError(
@@ -155,6 +170,7 @@ class OllamaProvider:
         self.host = host.rstrip("/")
         self.num_ctx = num_ctx
         self.temperature = temperature
+        self.keep_alive = keep_alive
         self.timeout = httpx.Timeout(
             timeout, connect=CONNECT_TIMEOUT, write=CONNECT_TIMEOUT
         )
@@ -171,6 +187,7 @@ class OllamaProvider:
             "messages": messages,
             "stream": True,
             "options": options,
+            "keep_alive": self.keep_alive,
         }
         if tools:
             payload["tools"] = tools
@@ -241,4 +258,5 @@ def for_review(provider: Provider) -> Provider:
         host=provider.host,
         num_ctx=provider.num_ctx,
         temperature=0.0,
+        keep_alive=provider.keep_alive,
     )

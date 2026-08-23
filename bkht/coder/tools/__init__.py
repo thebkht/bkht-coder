@@ -41,6 +41,12 @@ def build_registry(
 
     register_search_tools(registry, workspace)
 
+    # Registered because the agent's opening scout already shows the model a
+    # `codebase_search` result; a tool it has seen the output of has to exist.
+    from ..retrieval import register_retrieval_tool
+
+    register_retrieval_tool(registry, workspace)
+
     if skills:
         from .skills import register_skill_tool
 

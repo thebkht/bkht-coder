@@ -5,7 +5,13 @@ import json
 import pytest
 
 from bkht.coder.parsing import ToolCall
-from bkht.coder.provider import Chunk, OllamaProvider, ProviderError, collect
+from bkht.coder.provider import (
+    DEFAULT_TEMPERATURE,
+    Chunk,
+    OllamaProvider,
+    ProviderError,
+    collect,
+)
 
 
 def test_collect_joins_content_and_usage():
@@ -138,8 +144,15 @@ def test_available_is_false_for_a_dead_host():
     assert OllamaProvider(host="http://127.0.0.1:9").available() is False
 
 
-def test_temperature_is_omitted_unless_set():
-    assert OllamaProvider().temperature is None
+def test_temperature_defaults_low_for_tool_calls():
+    # Ollama's own default of 0.8 is for prose. Every tool call here is a JSON
+    # object that has to be exactly right, so the default is pulled down.
+    assert OllamaProvider().temperature == DEFAULT_TEMPERATURE
+    assert 0 < DEFAULT_TEMPERATURE < 0.8
+
+
+def test_temperature_can_be_turned_off_entirely():
+    assert OllamaProvider(temperature=None).temperature is None
 
 
 def test_for_review_pins_temperature_to_zero():
@@ -149,7 +162,9 @@ def test_for_review_pins_temperature_to_zero():
     review = for_review(original)
     assert review.temperature == 0.0
     assert review.model == "m" and review.num_ctx == 8192
-    assert original.temperature is None, "the original must not be mutated"
+    assert (
+        original.temperature == DEFAULT_TEMPERATURE
+    ), "the original must not be mutated"
 
 
 def test_for_review_leaves_other_providers_alone():

@@ -21,7 +21,13 @@ from .parsing import ToolCall
 from .permissions import ASK, AUTO, PLAN, Permissions
 from .prompts import system_prompt
 from .prompt import Reader
-from .provider import DEFAULT_HOST, DEFAULT_MODEL, DEFAULT_NUM_CTX, OllamaProvider
+from .provider import (
+    DEFAULT_HOST,
+    DEFAULT_MODEL,
+    DEFAULT_NUM_CTX,
+    DEFAULT_TEMPERATURE,
+    OllamaProvider,
+)
 from .repl import Repl
 from .review import cli as review_cli
 from .session import Session, Snapshots
@@ -34,7 +40,7 @@ from .terminal import ACCENT, BOLD, DIM, GREEN, ORANGE, RED, YELLOW, paint
 from . import usage
 from .tools import build_registry
 from .tools.background import Jobs
-from .tools.base import ToolResult
+from .tools.base import ToolResult, set_output_budget
 
 
 def summarize(arguments: dict) -> str:
@@ -207,8 +213,15 @@ class TerminalListener:
         self.status.note("thinking")
 
     def on_retry(self, reason: str) -> None:
+        """Report why the loop is doing something other than answering.
+
+        The reason is printed rather than discarded. It used to be replaced with
+        a fixed "retrying (malformed reply)", which was wrong for the caller that
+        fires most often -- freeing context -- and sent a real diagnosis off in
+        the wrong direction for two turns.
+        """
         self._gap()
-        self._say(paint(f"{DOT} retrying (malformed reply)", YELLOW, self.stream))
+        self._say(paint(f"{DOT} {reason}", YELLOW, self.stream))
 
 
 def add_common_arguments(parser) -> None:
@@ -216,6 +229,10 @@ def add_common_arguments(parser) -> None:
     parser.add_argument("--model", default=DEFAULT_MODEL, help="Ollama model to use.")
     parser.add_argument("--host", default=DEFAULT_HOST, help="Ollama server URL.")
     parser.add_argument("--num-ctx", type=int, default=DEFAULT_NUM_CTX, help="Context window to request.")
+    parser.add_argument(
+        "--temperature", type=float, default=DEFAULT_TEMPERATURE,
+        help="Sampling temperature. Low keeps tool calls well-formed.",
+    )
     parser.add_argument("--cwd", default=".", help="Workspace root. Defaults to the current directory.")
     parser.add_argument("--auto", action="store_true", help="Allow every tool call without prompting.")
     parser.add_argument("--no-instructions", action="store_true", help="Ignore AGENTS.md and CLAUDE.md.")
@@ -379,7 +396,13 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
     # the user would be surprised by a prompt they thought they had answered.
     if permissions.rules is not None and permissions.rules.error:
         print(paint(permissions.rules.error, YELLOW, sys.stderr), file=sys.stderr)
-    provider = OllamaProvider(model=args.model, host=args.host, num_ctx=args.num_ctx)
+    provider = OllamaProvider(
+        model=args.model, host=args.host, num_ctx=args.num_ctx,
+        temperature=args.temperature,
+    )
+    # Tool output is capped as a share of the window, so the window has to be
+    # known before any tool runs.
+    set_output_budget(provider.num_ctx)
 
     # Announced rather than applied silently: instructions shape every answer
     # the model gives, and a rule the user has forgotten writing is worse than
@@ -450,7 +473,11 @@ def report(outcome, streamed: bool = False) -> int:
         print(markdown.render(outcome.answer, colour=terminal.colourful()).rstrip("\n"))
 
     if outcome.stopped != "answered":
-        detail = outcome.errors[-1] if outcome.errors else ""
+        # Only when there is nothing else to show. The last error is a message
+        # written for the model -- "you already ran read_file with exactly these
+        # arguments" -- and printing it beneath a real answer reads as though it
+        # were the answer's caveat.
+        detail = "" if outcome.answer else (outcome.errors[-1] if outcome.errors else "")
         print(
             paint(f"[stopped: {outcome.stopped}] {detail}".strip(), YELLOW, sys.stderr),
             file=sys.stderr,

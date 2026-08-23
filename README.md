@@ -162,6 +162,7 @@ described above.
 | `--model`           | `qwen2.5-coder:14b`      | Ollama model tag                                                 |
 | `--host`            | `http://localhost:11434` | Ollama server URL                                                |
 | `--num-ctx`         | `8192`                   | Context window requested from Ollama (values ≤ 4096 are refused) |
+| `--temperature`     | `0.2`                    | Sampling temperature; low keeps tool calls well-formed           |
 | `--cwd`             | `.`                      | Workspace root the tools are confined to                         |
 | `--max-iterations`  | `25`                     | Cap on agent loop iterations per task                            |
 | `--no-instructions` | off                      | Ignore `AGENTS.md` / `CLAUDE.md`                                 |
@@ -469,6 +470,22 @@ sees nothing and halts. So calls are parsed out of content with a
 brace-matching scan (`parsing.py`), and native `tool_calls` are accepted too
 when present — `provider.py` normalizes both into one type.
 
+The `tools` array is deliberately **not** sent, even though `ollama show` lists
+`tools` under Capabilities. Passing it makes Ollama render qwen2.5's own
+`<tool_call></tool_call>` protocol into the prompt, contradicting the one this
+system prompt states — and the model then honours neither reliably. Asked with
+`tools` set, it answered with the plain JSON object three times out of three and
+left `message.tool_calls` null every time. Content is the transport that works;
+the native path stays in `collect()` for a model that keeps the promise.
+
+`temperature` defaults to **0.2**. Ollama's own default of 0.8 is tuned for
+prose, and every tool call here is a JSON object that has to be exactly right.
+Not 0.0: a model that has taken a wrong turn repeats it verbatim on every
+retry, and the retry exists to get a different answer.
+
+`keep_alive` is **30m**, so a conversation does not reload nine gigabytes of
+weights between two turns on Ollama's five-minute idle timer.
+
 `options.num_ctx` is always sent. Ollama defaults to 2048 and silently
 truncates past it, which is the most common cause of a bad local-model session;
 a `num_ctx` below 4096 is refused outright.
@@ -485,8 +502,30 @@ one warm trivial completion:
 
 Past 8192 the KV cache pushes the working set off the GPU and every turn pays
 for it. On a machine with more memory, raise it with `--num-ctx` — that is the
-only change needed. This is also why context compaction earns its place: an
-8K window fills quickly.
+only change needed.
+
+An 8K window fills quickly, so several things are sized against it rather than fixed.
+Tool output is capped at a quarter of the window (`tools/base.py`), because a
+683-line file is 85% of 8192 tokens and a single `read_file` used to be able to
+fill the context on its own. And a turn summarizes **once**: after that,
+pressure is relieved by eliding older tool output, which is free. Summarizing
+repeatedly was worse than not summarizing at all — each pass cost a full model
+call and threw away the model's record of what it had already read, so it read
+it again, and the turn spun until the iteration cap.
+
+An exact repeat of a tool call is refused rather than run (`agent.py`). Freeing
+context necessarily costs the model some of what it read, and a model that has
+lost a file reaches for it again — spending the window that made it forget, and
+losing the file again. The refusal names what to do instead, and the model takes
+it: in practice it switches to `offset`/`limit` and pages through.
+
+And a turn that runs out of iterations or retries is asked for a final answer in
+prose before it ends, so a bounded turn reports what it found instead of nothing.
+
+On this repository, `--num-ctx 8192` is genuinely too small for the larger files:
+`cli.py` alone is about 6,900 tokens. The turn no longer loops, but it spends its
+iterations paging. At `--num-ctx 16384` the same task finishes in eight tool
+calls. If turns are hitting the iteration cap, that is the flag to raise.
 
 ## Development
 

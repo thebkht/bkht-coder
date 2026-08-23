@@ -17,6 +17,7 @@ from ..prompts import system_prompt
 from ..provider import OllamaProvider, for_review
 from ..session import Session, Snapshots
 from ..tools import build_registry
+from ..tools.base import set_output_budget
 from . import render
 from .diff import GitError, collect_diff, collect_files
 from .reviewer import DIMENSIONS, ReviewListener, Reviewer
@@ -160,6 +161,9 @@ def run(args) -> int:
         print("Nothing to review: no changes were found.", file=sys.stderr)
         return 0
 
+    # Tool output is capped as a share of the window; size it before the
+    # review passes start calling tools.
+    set_output_budget(args.num_ctx)
     provider = for_review(
         OllamaProvider(model=args.model, host=args.host, num_ctx=args.num_ctx)
     )

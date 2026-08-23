@@ -221,3 +221,25 @@ def test_a_pipe_gets_no_gaps_because_they_are_chrome():
             ToolCall("grep", {"pattern": "def"}), ToolResult.success("y")
         )
     assert stream.getvalue() == "● read_file(a.py)\n● grep(def)\n"
+
+
+# --- why the loop paused ----------------------------------------------------
+
+
+def test_retry_reason_is_reported_not_replaced():
+    """The reason is printed, not overwritten with a guess.
+
+    This line used to read "retrying (malformed reply)" whatever the cause,
+    including the caller that fires most often -- freeing context. A real
+    diagnosis followed it in the wrong direction for two turns.
+    """
+    reporter, stream = listener()
+    reporter.on_retry("compacted earlier turns to free context")
+    assert "compacted earlier turns to free context" in stream.getvalue()
+    assert "malformed" not in stream.getvalue()
+
+
+def test_a_genuine_format_failure_still_says_so():
+    reporter, stream = listener()
+    reporter.on_retry("retrying: no tool call and no answer")
+    assert "no tool call and no answer" in stream.getvalue()

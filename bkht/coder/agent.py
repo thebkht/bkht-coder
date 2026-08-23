@@ -13,13 +13,14 @@ between usable and infuriating.
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
 from . import prompts
-from .context import compact, should_compact
+from .context import compact, elide_tool_results, should_compact
 from .language import detect as detect_language
 from .parsing import ToolCall
 from .provider import Provider, ProviderError, Reply, collect
@@ -103,6 +104,9 @@ class Agent:
         # None means no scouting. The review passes drive their own conversation
         # from a diff they already have, so retrieval would only be noise there.
         self.scout_root = Path(scout_root) if scout_root else None
+        # Both reset at the top of every turn; see _loop.
+        self._summarized = False
+        self._made: set[tuple[str, str]] = set()
 
     def run(self, user_message: str) -> Outcome:
         """Run the loop until the model answers, or a bound is hit."""
@@ -168,6 +172,10 @@ class Agent:
         """The loop itself. Every exit from here is a finished turn."""
         outcome = Outcome()
         retries = 0
+        # Summarizing is allowed once per turn; see _compact_if_needed.
+        self._summarized = False
+        # Every call already made this turn, so an exact repeat can be refused.
+        self._made: set[tuple[str, str]] = set()
 
         for _ in range(self.max_iterations):
             outcome.iterations += 1
@@ -182,7 +190,12 @@ class Agent:
             self.session.record_usage(reply.prompt_tokens, reply.completion_tokens)
             outcome.sent = reply.prompt_tokens or outcome.sent
             outcome.received += reply.completion_tokens or 0
-            self.session.add_assistant(reply.content)
+            # An empty reply is recorded nowhere. It carries nothing the model
+            # could act on, and leaving it in history teaches the format that
+            # produced it: three attempts at a malformed call used to mean the
+            # model read two of its own failures before making the third.
+            if reply.content.strip():
+                self.session.add_assistant(reply.content)
 
             if not reply.tool_calls:
                 # Prose first, but fall back to the raw content: a reply that is
@@ -200,10 +213,12 @@ class Agent:
                 if retries > MAX_RETRIES:
                     outcome.stopped = "retry-cap"
                     outcome.errors.append("model produced no usable reply")
+                    self._final_answer(outcome)
                     return outcome
-                reason = prompts.no_call_and_no_answer(self.registry.names())
-                self.listener.on_retry(reason)
-                self.session.add_tool_result("system", reason)
+                self.listener.on_retry("retrying: no tool call and no answer")
+                self.session.add_tool_result(
+                    "system", prompts.no_call_and_no_answer(self.registry.names())
+                )
                 continue
 
             progressed = False
@@ -230,19 +245,56 @@ class Agent:
                 retries += 1
                 if retries > MAX_RETRIES:
                     outcome.stopped = "retry-cap"
+                    self._final_answer(outcome)
                     return outcome
 
         outcome.stopped = "iteration-cap"
+        self._final_answer(outcome)
         return outcome
 
+    def _final_answer(self, outcome: Outcome) -> None:
+        """One last round asking for prose, when the loop ran out of room.
+
+        A bounded turn used to end with nothing at all, and the CLI filled the
+        gap with the last tool error -- a message written for the model, shown
+        to the user as though it explained why the turn stopped. By the time a
+        turn is bounded the model has usually read enough to say something
+        useful. It was simply never asked.
+        """
+        self.session.add_tool_result("system", prompts.out_of_steps())
+        try:
+            reply = self._ask()
+        except ProviderError as exc:
+            outcome.errors.append(str(exc))
+            return
+
+        self.session.record_usage(reply.prompt_tokens, reply.completion_tokens)
+        outcome.received += reply.completion_tokens or 0
+
+        answer = reply.prose.strip()
+        if not answer:
+            return
+        self.session.add_assistant(reply.content)
+        outcome.answer = answer
+        outcome.raw = reply.content
+
     def _ask(self) -> Reply:
-        """One streamed round trip, with tokens forwarded to the listener."""
+        """One streamed round trip, with tokens forwarded to the listener.
+
+        The tool declarations are deliberately *not* sent. Ollama's qwen2.5
+        template renders its own ``<tool_call></tool_call>`` protocol whenever
+        ``tools`` is present, which contradicts the one this system prompt
+        states -- and measurement says the model follows neither reliably when
+        it is given both. Asked with a bare system prompt and ``tools`` set,
+        qwen2.5-coder:14b answered with the plain JSON object three times out of
+        three and left ``message.tool_calls`` null every time. The native
+        transport is a promise the model does not keep, so it is not asked for.
+        Parsing for it stays in :func:`provider.collect`, for a model that does.
+        """
         self._compact_if_needed()
 
         def stream():
-            for chunk in self.provider.chat(
-                self.session.payload(), self.registry.declarations()
-            ):
+            for chunk in self.provider.chat(self.session.payload()):
                 if chunk.content:
                     self.listener.on_token(chunk.content)
                 yield chunk
@@ -250,12 +302,31 @@ class Agent:
         return collect(stream())
 
     def _compact_if_needed(self) -> None:
-        """Summarize the oldest turns once the window is close to full."""
+        """Free context when the window is close to full.
+
+        Summarizing costs a full model call, so a turn gets one. After that the
+        pressure is relieved by eliding old tool output instead, which is free.
+        Without that limit a single large read put the turn permanently over
+        threshold and it summarized on every iteration -- three or four extra
+        model calls per turn, each one throwing away the model's record of what
+        it had already read, so it read it again. That was the loop the user saw.
+        """
         num_ctx = getattr(self.provider, "num_ctx", 0)
         if not should_compact(self.session, num_ctx):
             return
-        if compact(self.session, self.provider) is not None:
-            self.listener.on_retry("compacted earlier turns to free context")
+
+        if not self._summarized:
+            self._summarized = True
+            if compact(self.session, self.provider) is not None:
+                self.listener.on_retry("compacted earlier turns to free context")
+                return
+
+        elided = elide_tool_results(self.session)
+        if elided:
+            self.listener.on_retry(
+                f"dropped {elided} earlier tool result"
+                f"{'' if elided == 1 else 's'} to free context"
+            )
 
     def _execute(self, call: ToolCall) -> ToolResult:
         """Validate, authorize, and run one tool call.
@@ -263,6 +334,18 @@ class Agent:
         Never raises: every failure comes back as a :class:`ToolResult` whose
         text tells the model what to do differently.
         """
+        # An exact repeat is refused before anything else runs. Freeing context
+        # necessarily costs the model some of what it read, and a model that has
+        # lost a file reaches for it again -- which spends the window that made
+        # it forget, and loses the file again. Left alone the turn reads the same
+        # file until the iteration cap. Refusing is what breaks the cycle: it
+        # costs nothing, and the round counts as no progress, so the retry bound
+        # ends the turn instead of the iteration cap.
+        signature = (call.name, json.dumps(call.arguments, sort_keys=True))
+        if signature in self._made:
+            return ToolResult.failure(prompts.repeated_call(call.name))
+        self._made.add(signature)
+
         tool = self.registry.get(call.name)
         if tool is None:
             return ToolResult.failure(

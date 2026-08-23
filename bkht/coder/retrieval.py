@@ -228,11 +228,22 @@ Automatic keyword search of the workspace for this request. You did not call thi
 it is provided to save you a step, and it is a keyword match, not a complete answer.
 Terms: {terms}"""
 
+# The same search, when the model asked for it. The scouted header's "you did
+# not call this" is a lie once it has.
+CALLED_HEADER = """\
+Keyword search of the workspace. This is a keyword match, not a complete answer.
+Terms: {terms}"""
+
 FOOTER = """\
 Read the files that matter before changing anything, and grep further if this missed something."""
 
 
-def render(wanted: list[str], hits: list[Hit], budget: int = BUDGET_CHARS) -> str:
+def render(
+    wanted: list[str],
+    hits: list[Hit],
+    budget: int = BUDGET_CHARS,
+    header: str = HEADER,
+) -> str:
     """The block as the model sees it, in the same shape ``grep`` returns."""
     if not hits:
         return ""
@@ -252,7 +263,7 @@ def render(wanted: list[str], hits: list[Hit], budget: int = BUDGET_CHARS) -> st
         return ""
 
     return truncate(
-        HEADER.format(terms=", ".join(wanted))
+        header.format(terms=", ".join(wanted))
         + "\n\n"
         + "\n\n".join(body)
         + "\n\n"
@@ -270,3 +281,59 @@ def scout(root: Path, message: str) -> str:
     if not wanted:
         return ""
     return render(wanted, search(root, wanted))
+
+
+SEARCH_TERM_SPLIT = re.compile(r"[,\s]+")
+
+
+def register_retrieval_tool(registry, workspace) -> None:
+    """Register ``codebase_search`` as a tool the model can actually call.
+
+    It could already see one. :meth:`Agent._scout` opens every turn by injecting
+    a ``tool`` message named ``codebase_search``, and a model that has just read
+    the result of a tool reasonably concludes it may call that tool again -- so
+    it did, and was told there is no such tool, which cost it a retry and taught
+    it that the format was wrong when the format was fine.
+
+    Registering it is the honest fix. The scouted block and this tool are now
+    the same thing said twice: once unprompted at the start of the turn, and
+    once on request when the model wants to look for something else.
+    """
+    from .tools.base import Tool, ToolError, ToolResult
+
+    def codebase_search(terms: str) -> ToolResult:
+        wanted = [term for term in SEARCH_TERM_SPLIT.split(terms.strip()) if term]
+        if not wanted:
+            raise ToolError("terms is empty; give one or more words to search for")
+        wanted = wanted[:MAX_TERMS]
+        block = render(
+            wanted, search(workspace.root, wanted), header=CALLED_HEADER
+        )
+        if not block:
+            return ToolResult.success(
+                f"No files matched {', '.join(wanted)}. "
+                "Try `grep` with a narrower pattern, or `glob` to find the file."
+            )
+        return ToolResult.success(block)
+
+    registry.add(
+        Tool(
+            name="codebase_search",
+            description=(
+                "Find where the workspace talks about something, by keyword. "
+                "Returns the most relevant files with matching lines. Use it to "
+                "locate an area; use `grep` when you know the exact string."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "terms": {
+                        "type": "string",
+                        "description": "Words to look for, separated by commas.",
+                    },
+                },
+                "required": ["terms"],
+            },
+            run=codebase_search,
+        )
+    )

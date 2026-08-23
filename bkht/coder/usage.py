@@ -34,6 +34,7 @@ COMMON = """\
   --model <name>          Ollama model to use
   --host <url>            Ollama server URL
   --num-ctx <n>           Context window to request
+  --temperature <n>       Sampling temperature; low keeps tool calls valid
   --cwd <path>            Workspace root; defaults to the current directory
   --auto                  Allow every tool call without prompting
   --no-instructions       Ignore AGENTS.md and CLAUDE.md

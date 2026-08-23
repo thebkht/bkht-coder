@@ -3,7 +3,7 @@
 import pytest
 
 from bkht.coder.tools import build_registry
-from bkht.coder.tools.base import ToolError
+from bkht.coder.tools.base import ToolError, set_output_budget
 
 
 @pytest.fixture
@@ -26,7 +26,7 @@ def test_read_file_paging_reports_the_window(tools):
     registry, _ = tools
     out = run(registry, "read_file", path="src/main.py", offset=2, limit=2).content
     assert out.splitlines()[0].startswith("2\t")
-    assert "[showing lines 2-3 of 5]" in out
+    assert "[showing lines 2-3 of 5; read on with offset=4]" in out
 
 
 def test_read_file_full_read_has_no_window_note(tools):
@@ -109,3 +109,20 @@ def test_list_files_on_a_file(tools):
 def test_read_only_registry_has_no_mutating_tools(tools):
     registry, _ = tools
     assert "write_file" not in registry and "bash" not in registry
+
+
+def test_a_clipped_read_still_says_how_to_read_the_rest(tools):
+    """The paging hint has to survive the budget, or the read loops.
+
+    It used to be appended to the body and then handed to `truncate`, which cuts
+    from the end -- so the one line telling the model to page was the first
+    thing dropped. It re-read the same file from the same offset, got the same
+    prefix back, and did it again.
+    """
+    registry, workspace = tools
+    (workspace.root / "long.py").write_text("".join(f"line {i}\n" for i in range(4000)))
+    set_output_budget(8192)
+
+    out = run(registry, "read_file", path="long.py").content
+    assert len(out) < 9000
+    assert "of 4000; read on with offset=" in out.splitlines()[-1]

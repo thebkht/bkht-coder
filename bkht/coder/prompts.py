@@ -1,5 +1,14 @@
 """System and task prompts.
 
+Naming a language here is a trap worth stating once. This prompt used to spell
+out the Uzbek/Russian distinction and quote `salom` as an example, which meant
+every request carried a vivid Uzbek greeting in its most-attended region. A
+model that has lost the thread answers with the most salient thing near it, and
+that is what one did: a task in English came back as `Salom! Sizga qanday
+yordam bera olishim mumkin?`. Which language to answer in is decided in
+``language.detect`` and delivered by ``language_reminder`` only when there is
+something to say -- so the common case carries no language example at all.
+
 Because tool calls travel in message *content* rather than the ``tool_calls``
 field, the model is responsible for formatting them. The system prompt
 therefore states the emission format explicitly and shows an example -- this is
@@ -69,12 +78,9 @@ Keep going until the task is done. Prefer several small, verified steps over one
 large guess. When you are unsure which file matters, use `glob` and `grep` to
 find out rather than assuming.
 
-Answer in the language the user wrote to you in, and read that language from
-what they actually wrote. Uzbek is written in the Latin alphabet and is not
-Russian: `salom` is Uzbek and is answered in Uzbek. Never reply in Russian
-unless the user wrote to you in Russian. This is about your prose only -- tool
-calls keep the exact format described below, and file paths, code, and command
-lines are never translated.
+Answer in the language the user wrote to you in. This is about your prose only
+-- tool calls keep the exact format described below, and file paths, code, and
+command lines are never translated.
 
 Not every message is a task. A greeting or a thank-you asks you for nothing --
 answer it in a sentence and stop, without calling any tool. Never run a command
@@ -100,10 +106,10 @@ All paths are relative to that root. You cannot read or write outside it.
 
 
 LANGUAGE_REMINDER = """\
-Reply to the user in {language}. Write every sentence of your answer in
-{language}, and do not switch to another language part way through. File paths,
-code, command lines, and the JSON of a tool call are unaffected: they keep their
-exact form."""
+(A note about the reply, not a new request: answer in {language}. Write every
+sentence of your answer in {language}, and do not switch to another language
+part way through. File paths, code, command lines, and the JSON of a tool call
+are unaffected: they keep their exact form. Carry on with the task above.)"""
 
 
 def language_reminder(language: str) -> str:
@@ -181,6 +187,33 @@ def malformed_call(error: str, tool_names: list[str]) -> str:
         "Reply with a single JSON object and nothing else, in the form\n"
         '{"name": "<tool name>", "arguments": {<arguments>}}\n'
         "Correct the call and try again, or answer in plain prose if you are done."
+    )
+
+
+def repeated_call(name: str) -> str:
+    """Sent when the model makes a call it has already made this turn.
+
+    Refused rather than run. Repeating a call byte-for-byte cannot produce a new
+    result, so running it again only spends the window that made the model
+    forget in the first place. The message says what to do differently, because
+    "no" on its own is what the model already believes it is doing.
+    """
+    return (
+        f"You already ran `{name}` with exactly these arguments in this turn, so "
+        "this call was not run again -- it cannot tell you anything new.\n"
+        "Do something different: read a different part of the file with `offset` "
+        "and `limit`, search for what you are missing with `grep`, or answer with "
+        "what you already have."
+    )
+
+
+def out_of_steps() -> str:
+    """Asked for once the loop has run out of room to keep working."""
+    return (
+        "You have run out of steps for this turn. Stop calling tools and answer "
+        "now, in plain prose, from what you have already found.\n"
+        "Say what you learned and what you were still missing. A partial answer "
+        "that names what it is missing is useful; silence is not."
     )
 
 

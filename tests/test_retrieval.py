@@ -1,6 +1,10 @@
 """The scout: term extraction, ranking, and the bounds on what it emits."""
 
+import pytest
+
 from bkht.coder.retrieval import BUDGET_CHARS, scout, search, terms
+from bkht.coder.tools import build_registry
+from bkht.coder.tools.base import ToolError
 
 
 # --- terms -------------------------------------------------------------------
@@ -108,3 +112,46 @@ def test_a_file_named_after_the_term_is_shown_even_if_it_never_says_it(project):
     hits = search(project, terms("what does .gitignore exclude?"))
     assert hits and hits[0].path == ".gitignore"
     assert hits[0].best_lines()[0] == (1, "__pycache__/")
+
+
+# --- the tool the scout advertises ------------------------------------------
+
+
+def search_tool(project):
+    registry, _ = build_registry(project, read_only=True)
+    return registry.get("codebase_search")
+
+
+def test_codebase_search_is_a_real_tool(project):
+    """The scout opens every turn with a `codebase_search` result.
+
+    A model that has just read the output of a tool will call that tool. It used
+    to be told there is no such tool, which cost a retry and taught it that its
+    formatting was wrong when the formatting was fine.
+    """
+    assert search_tool(project) is not None
+
+
+def test_codebase_search_finds_what_the_scout_would(project):
+    result = search_tool(project).run(terms="helper")
+    assert result.ok and "src/util.py" in result.content
+
+
+def test_codebase_search_splits_terms_on_commas_and_spaces(project):
+    result = search_tool(project).run(terms="helper, main")
+    assert result.ok and "helper" in result.content
+
+
+def test_a_called_search_does_not_claim_it_was_automatic(project):
+    result = search_tool(project).run(terms="helper")
+    assert "You did not call this" not in result.content
+
+
+def test_codebase_search_says_so_when_nothing_matches(project):
+    result = search_tool(project).run(terms="zzzznotpresentzzzz")
+    assert result.ok and "No files matched" in result.content
+
+
+def test_codebase_search_rejects_empty_terms(project):
+    with pytest.raises(ToolError):
+        search_tool(project).run(terms="   ")

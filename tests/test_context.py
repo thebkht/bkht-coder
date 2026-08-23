@@ -4,8 +4,11 @@ import pytest
 
 from bkht.coder.agent import Agent
 from bkht.coder.context import (
+    ELIDED_PREFIX,
     KEEP_RECENT,
+    SUMMARY_INSTRUCTION,
     compact,
+    elide_tool_results,
     file_tree,
     should_compact,
     transcript,
@@ -174,3 +177,77 @@ def test_the_loop_compacts_before_asking(project):
 
     assert agent.run("carry on").answer == "done"
     assert "compacted to save context" in session.messages[0]["content"]
+
+
+# --- eliding, the second lever ----------------------------------------------
+
+
+def tool_history(count: int, size: int = 5000) -> list[dict]:
+    """A conversation of ``count`` calls, each returning ``size`` characters."""
+    messages = [{"role": "user", "content": "find the bug"}]
+    for i in range(count):
+        messages.append({"role": "assistant", "content": call("read_file", path=f"f{i}.py")})
+        messages.append({"role": "tool", "name": "read_file", "content": "x" * size})
+    return messages
+
+
+def test_elide_drops_all_but_the_most_recent_results():
+    session = Session(messages=tool_history(4))
+    assert elide_tool_results(session) == 2
+
+    results = [m["content"] for m in session.messages if m["role"] == "tool"]
+    assert all(r.startswith(ELIDED_PREFIX) for r in results[:2])
+    assert all(len(r) == 5000 for r in results[2:])
+
+
+def test_elide_names_the_tool_so_the_model_can_call_it_again():
+    session = Session(messages=tool_history(3))
+    elide_tool_results(session)
+    elided = next(m for m in session.messages if m["content"].startswith(ELIDED_PREFIX))
+    assert "read_file" in elided["content"]
+
+
+def test_elide_leaves_small_results_alone():
+    session = Session(messages=tool_history(4, size=10))
+    assert elide_tool_results(session) == 0
+
+
+def test_elide_does_not_re_elide_what_it_already_shortened():
+    session = Session(messages=tool_history(4))
+    assert elide_tool_results(session) == 2
+    assert elide_tool_results(session) == 0
+
+
+def test_the_assistant_call_survives_elision():
+    """The point of eliding rather than summarizing.
+
+    Summarizing threw away the model's record of having read the file, so it
+    read the file again, which put the window back over threshold. Eliding keeps
+    the call and drops only the bulk.
+    """
+    session = Session(messages=tool_history(4))
+    elide_tool_results(session)
+    calls = [m["content"] for m in session.messages if m["role"] == "assistant"]
+    assert "f0.py" in calls[0]
+
+
+def test_a_turn_summarizes_at_most_once(project):
+    """One summary per turn; after that, pressure is relieved for free.
+
+    A single large read is most of a small window, so the turn came back over
+    threshold on every iteration and summarized again each time -- extra model
+    calls that each discarded what the model had just read, so it read it again.
+    """
+    registry, _ = build_registry(project, read_only=True)
+    session = Session(system="sys", messages=history(20))
+    session.record_usage(30_000, 0)
+
+    provider = FakeProvider(
+        ["a summary of earlier work", call("read_file", path="src/main.py"), "done"],
+        num_ctx=100,  # every round trip is over threshold
+    )
+    agent = Agent(provider, registry, session, max_iterations=5)
+
+    assert agent.run("carry on").answer == "done"
+    summarizing = [c for c in provider.calls if SUMMARY_INSTRUCTION in c[0]["content"]]
+    assert len(summarizing) == 1, "summarized more than once in a single turn"

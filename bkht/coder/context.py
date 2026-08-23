@@ -13,6 +13,14 @@ from .provider import ProviderError, collect
 
 COMPACT_AT = 0.75
 KEEP_RECENT = 6
+# Tool results older than the last few are elided rather than summarized again.
+# Two is enough to keep the result the model is currently working from, plus the
+# one before it that it is comparing against.
+KEEP_TOOL_RESULTS = 2
+# Anything shorter than this is not worth eliding: the placeholder costs nearly
+# as much as the text it replaces.
+ELIDE_OVER = 400
+ELIDED_PREFIX = "[elided]"
 MAX_TREE_ENTRIES = 200
 # The walk is bounded separately from the listing: a monorepo can hold hundreds
 # of thousands of files, and counting them all to report an exact remainder is
@@ -173,3 +181,44 @@ def compact(session, provider, keep_recent: int = KEEP_RECENT) -> str | None:
     # avoids compacting again immediately on the stale number.
     session.prompt_tokens = 0
     return summary
+
+
+def elide_tool_results(
+    session, keep_recent: int = KEEP_TOOL_RESULTS, over: int = ELIDE_OVER
+) -> int:
+    """Replace old tool output with a note saying what it was. No model call.
+
+    This is the second lever, and the reason there are two. Summarizing is the
+    right answer once: it turns a long exchange into the few facts that mattered.
+    It is the wrong answer repeatedly, and repeatedly is what used to happen --
+    a single ``read_file`` on a 683-line file is 85% of an 8,192-token window, so
+    the turn came back over threshold immediately, summarized again, and paid
+    another full model call for it. Worse, the summary instruction says to drop
+    tool output that has been acted on, so the model's own record of having read
+    the file went with it and it read the file again. That is the loop.
+
+    Eliding breaks it because it is cheap and it is honest: the call and its
+    result stay in the transcript, the bulk does not, and the model can see it
+    already read the file and can read it again deliberately if it needs to.
+
+    Returns how many results were elided.
+    """
+    seen = 0
+    elided = 0
+    for message in reversed(session.messages):
+        if message.get("role") != "tool":
+            continue
+        seen += 1
+        if seen <= keep_recent:
+            continue
+        content = message.get("content") or ""
+        if len(content) <= over or content.startswith(ELIDED_PREFIX):
+            continue
+        name = message.get("name") or "tool"
+        message["content"] = (
+            f"{ELIDED_PREFIX} the {len(content)}-character result of this "
+            f"`{name}` call was dropped to free context. Call it again if you "
+            "still need it."
+        )
+        elided += 1
+    return elided

@@ -13,7 +13,46 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 MAX_OUTPUT_LINES = 400
+# The ceiling, not the working limit. 30,000 characters is roughly 7,500 tokens,
+# which is 92% of the 8,192-token window this runs in by default -- a cap larger
+# than the thing it exists to protect. The working limit is a share of the real
+# window, resolved once at startup by :func:`set_output_budget`.
 MAX_OUTPUT_CHARS = 30_000
+# A quarter of the window. One tool result is allowed to be expensive, because
+# reading a file is the point; it is not allowed to be the whole conversation.
+OUTPUT_SHARE = 0.25
+CHARS_PER_TOKEN = 4
+# Below this a result is too clipped to answer anything, and a tighter cap would
+# cost more turns in re-reads than it saves in tokens.
+MIN_OUTPUT_CHARS = 2_000
+
+_output_chars = MAX_OUTPUT_CHARS
+
+
+def output_budget(num_ctx: int) -> int:
+    """How many characters one tool result may contribute, given ``num_ctx``."""
+    if not num_ctx:
+        return MAX_OUTPUT_CHARS
+    share = int(num_ctx * OUTPUT_SHARE) * CHARS_PER_TOKEN
+    return max(MIN_OUTPUT_CHARS, min(MAX_OUTPUT_CHARS, share))
+
+
+def set_output_budget(num_ctx: int) -> int:
+    """Size the tool-output cap to the context window, once, at startup.
+
+    Module state rather than a threaded parameter: ``truncate`` is called from
+    six tools in five modules, the value is a process-wide constant derived from
+    another process-wide constant, and threading it would put a context-window
+    argument into the signature of every tool that prints anything.
+    """
+    global _output_chars
+    _output_chars = output_budget(num_ctx)
+    return _output_chars
+
+
+def output_chars() -> int:
+    """The cap currently in force. ``set_output_budget(0)`` restores the default."""
+    return _output_chars
 
 
 class ToolError(Exception):
@@ -143,14 +182,17 @@ def validate_arguments(tool: Tool, arguments: dict) -> dict:
     return coerced
 
 
-def truncate(text: str, max_lines: int = MAX_OUTPUT_LINES) -> str:
+def truncate(
+    text: str, max_lines: int = MAX_OUTPUT_LINES, max_chars: int | None = None
+) -> str:
     """Bound tool output so one ``cat`` of a huge file cannot blow the context.
 
     Truncation is always announced -- a silently shortened file reads to the
     model as the whole file, and it will draw conclusions from the missing part.
     """
-    if len(text) > MAX_OUTPUT_CHARS:
-        kept = text[:MAX_OUTPUT_CHARS]
+    limit = max_chars if max_chars is not None else _output_chars
+    if len(text) > limit:
+        kept = text[:limit]
         dropped = len(text) - len(kept)
         text = f"{kept}\n[truncated {dropped} characters]"
 

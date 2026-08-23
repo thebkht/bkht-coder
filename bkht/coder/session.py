@@ -59,13 +59,21 @@ class Session:
         return head + self.messages + self._reminders()
 
     def _reminders(self) -> list[dict]:
-        """The ephemeral messages appended to the end of every request."""
+        """The ephemeral messages appended to the end of every request.
+
+        Sent as ``user`` rather than ``system``. A fresh system-role message
+        arriving as the very last thing before generation reads, to a small
+        model, like the request it is supposed to answer -- so it answers *it*,
+        greeting the user in the named language instead of doing the work. As a
+        user turn it is plainly an aside attached to the conversation, in the
+        one position where it will actually be read.
+        """
         # English needs no reminder: the prompt is already written in it, and
         # that is the common case, so the common case costs nothing.
         if not self.language or self.language == ENGLISH:
             return []
         content = prompts.language_reminder(self.language)
-        return [{"role": "system", "content": content}]
+        return [{"role": "user", "content": content}]
 
     def add_user(self, content: str) -> None:
         self._append({"role": "user", "content": content})

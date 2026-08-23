@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .base import Tool, ToolError, ToolResult, Workspace, truncate
+from .base import Tool, ToolError, ToolResult, Workspace, output_chars, truncate
 
 IGNORED_DIRS = {
     ".git",
@@ -91,14 +91,31 @@ def register_read_tools(registry, workspace: Workspace):
 
         # Line numbers are shown so findings and edits can cite file:line.
         width = len(str(offset + len(window) - 1))
-        body = "\n".join(
-            f"{offset + i:>{width}}\t{line}" for i, line in enumerate(window)
-        )
 
-        shown_to = offset + len(window) - 1
+        # The window is fitted to the output budget by dropping whole lines,
+        # not by handing the rendered body to `truncate`. Truncating characters
+        # cuts from the end, and the end is where the "showing lines X-Y of N"
+        # hint lives -- so the one line telling the model how to read the rest
+        # was the first thing thrown away. It then re-read the same file from
+        # the same offset, got the same prefix, and did it again.
+        budget = output_chars()
+        kept: list[str] = []
+        used = 0
+        for i, line in enumerate(window):
+            rendered = f"{offset + i:>{width}}\t{line}"
+            if kept and used + len(rendered) + 1 > budget:
+                break
+            kept.append(rendered)
+            used += len(rendered) + 1
+
+        body = "\n".join(kept)
+        shown_to = offset + len(kept) - 1
         if shown_to < len(lines):
-            body += f"\n[showing lines {offset}-{shown_to} of {len(lines)}]"
-        return ToolResult.success(truncate(body))
+            body += (
+                f"\n[showing lines {offset}-{shown_to} of {len(lines)}; "
+                f"read on with offset={shown_to + 1}]"
+            )
+        return ToolResult.success(body)
 
     registry.add(
         Tool(

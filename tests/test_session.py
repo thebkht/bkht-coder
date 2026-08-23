@@ -123,7 +123,10 @@ def test_reminder_is_last_and_names_the_language():
     session = Session(system="sys", language="Uzbek")
     session.add_user("salom")
     last = session.payload()[-1]
-    assert last["role"] == "system"
+    # A user turn, not a system one. A fresh system message arriving as the very
+    # last thing before generation reads to a small model like the request it is
+    # meant to answer, and it answers that instead of doing the work.
+    assert last["role"] == "user"
     assert "Uzbek" in last["content"]
 
 

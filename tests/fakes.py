@@ -20,9 +20,12 @@ class FakeProvider:
         self.model = model
         self.num_ctx = num_ctx
         self.calls: list[list[dict]] = []
+        #: The ``tools`` argument of each call, so a test can assert it is absent.
+        self.tools_seen: list = []
 
     def chat(self, messages: list[dict], tools: list[dict] | None = None) -> Iterator[Chunk]:
         self.calls.append([dict(m) for m in messages])
+        self.tools_seen.append(tools)
         if not self.script:
             raise AssertionError("FakeProvider ran out of scripted replies")
 

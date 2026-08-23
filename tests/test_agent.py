@@ -148,7 +148,13 @@ def test_persistent_tool_failure_stops_at_the_retry_cap(loop):
 
 
 def test_iteration_cap_stops_a_confused_model(loop):
-    agent, _ = loop([call("read_file", path="README.md")] * 20, max_iterations=4)
+    # Distinct calls, so this bounds the model that keeps working and never
+    # answers. A model repeating one call verbatim is stopped sooner, by the
+    # repeat guard below.
+    agent, _ = loop(
+        [call("read_file", path="README.md", offset=i + 1) for i in range(20)],
+        max_iterations=4,
+    )
     outcome = agent.run("loop forever")
     assert outcome.stopped == "iteration-cap"
     assert outcome.iterations == 4
@@ -339,3 +345,126 @@ def test_a_turn_that_never_reached_the_model_costs_nothing(loop):
     outcome = agent.run("go")
     assert outcome.stopped == "provider-error"
     assert (outcome.sent, outcome.received) == (0, 0)
+
+
+# --- what goes on the wire --------------------------------------------------
+
+
+def test_tool_declarations_are_not_sent(loop):
+    """The native ``tools`` array is deliberately omitted.
+
+    Sending it makes Ollama's qwen2.5 template render its own
+    ``<tool_call></tool_call>`` protocol into the prompt, contradicting the one
+    the system prompt states -- and measurement says the model honours neither
+    reliably when it is given both.
+    """
+    agent, provider = loop([call("read_file", path="src/util.py"), "done"])
+    agent.run("read it")
+    assert provider.tools_seen == [None, None]
+
+
+def test_an_empty_reply_is_not_stored_in_history(loop):
+    agent, provider = loop(["", "done"])
+    outcome = agent.run("hi")
+    assert outcome.answer == "done"
+    assert not any(
+        m["role"] == "assistant" and not m["content"].strip()
+        for m in agent.session.messages
+    ), "an empty reply teaches the format that produced it"
+
+
+# --- reading the same thing forever -----------------------------------------
+
+
+def test_an_exact_repeat_is_refused_not_run(loop):
+    """The loop the user actually hit.
+
+    Freeing context necessarily costs the model some of what it read, and a
+    model that has lost a file reaches for it again -- which spends the window
+    that made it forget, and loses the file again. Left alone the turn reads the
+    same file until the iteration cap.
+    """
+    agent, _ = loop(
+        [
+            call("read_file", path="src/util.py"),
+            call("read_file", path="src/util.py"),
+            "done",
+        ]
+    )
+    outcome = agent.run("what does helper do?")
+    assert outcome.answer == "done"
+    assert any("already ran" in e for e in outcome.errors)
+
+
+def test_a_refused_repeat_says_what_to_do_instead(loop):
+    agent, _ = loop([call("read_file", path="src/util.py")] * 2 + ["done"])
+    agent.run("what does helper do?")
+    refusal = agent.session.messages[-2]["content"]
+    assert "offset" in refusal and "grep" in refusal
+
+
+def test_repeating_one_call_ends_the_turn_at_the_retry_cap(loop):
+    agent, _ = loop([call("read_file", path="src/util.py")] * 20, max_iterations=20)
+    outcome = agent.run("loop forever")
+    assert outcome.stopped == "retry-cap"
+    assert outcome.iterations < 20, "stopped by the repeat guard, not the iteration cap"
+
+
+def test_the_same_call_is_allowed_again_in_a_later_turn(loop):
+    agent, _ = loop(
+        [call("read_file", path="src/util.py"), "first"]
+        + [call("read_file", path="src/util.py"), "second"]
+    )
+    assert agent.run("read it").answer == "first"
+    assert agent.run("read it again").answer == "second"
+
+
+def test_different_arguments_are_not_a_repeat(loop):
+    agent, _ = loop(
+        [
+            call("read_file", path="src/util.py"),
+            call("read_file", path="src/util.py", offset=2),
+            "done",
+        ]
+    )
+    outcome = agent.run("read it twice")
+    assert outcome.answer == "done"
+    assert outcome.errors == []
+
+
+# --- running out of room ----------------------------------------------------
+
+
+def test_a_capped_turn_still_asks_for_an_answer(loop):
+    """A bounded turn used to end with nothing at all.
+
+    The CLI then filled the gap with the last tool error -- a message written
+    for the model -- and showed it to the user as though it explained anything.
+    """
+    agent, _ = loop(
+        [call("read_file", path="src/util.py", offset=i + 1) for i in range(3)]
+        + ["I read most of src/util.py; I did not get to the end."],
+        max_iterations=3,
+    )
+    outcome = agent.run("summarize it")
+    assert outcome.stopped == "iteration-cap"
+    assert outcome.answer.startswith("I read most of")
+
+
+def test_the_final_ask_says_a_partial_answer_is_wanted(loop):
+    agent, provider = loop(
+        [call("read_file", path="src/util.py"), "partial"], max_iterations=1
+    )
+    agent.run("summarize it")
+    asked = provider.calls[-1][-1]["content"]
+    assert "run out of steps" in asked and "partial answer" in asked
+
+
+def test_a_capped_turn_that_still_will_not_answer_reports_the_cap(loop):
+    agent, _ = loop(
+        [call("read_file", path="src/util.py", offset=i + 1) for i in range(5)],
+        max_iterations=3,
+    )
+    outcome = agent.run("summarize it")
+    assert outcome.stopped == "iteration-cap"
+    assert outcome.answer == ""

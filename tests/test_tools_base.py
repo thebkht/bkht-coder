@@ -3,11 +3,16 @@
 import pytest
 
 from bkht.coder.tools.base import (
+    MAX_OUTPUT_CHARS,
+    MIN_OUTPUT_CHARS,
     Registry,
     Tool,
     ToolError,
     ToolResult,
     Workspace,
+    output_budget,
+    output_chars,
+    set_output_budget,
     truncate,
     validate_arguments,
 )
@@ -166,3 +171,31 @@ def test_registry_declares_tools_sorted():
     assert registry.names() == ["alpha", "zeta"]
     assert [d["function"]["name"] for d in registry.declarations()] == ["alpha", "zeta"]
     assert "alpha" in registry and len(registry) == 2
+
+
+# --- the output budget ------------------------------------------------------
+
+
+def test_output_budget_is_a_share_of_the_window():
+    # A quarter of 8,192 tokens, at four characters a token.
+    assert output_budget(8192) == 8192
+
+
+def test_output_budget_never_exceeds_the_absolute_ceiling():
+    assert output_budget(1_000_000) == MAX_OUTPUT_CHARS
+
+
+def test_output_budget_stays_usable_on_a_tiny_window():
+    assert output_budget(1024) == MIN_OUTPUT_CHARS
+
+
+def test_setting_the_budget_changes_what_truncate_keeps():
+    """One tool result must not be able to fill the window on its own.
+
+    The old fixed cap of 30,000 characters was ~7,500 tokens against a default
+    8,192-token window: a limit larger than the thing it protected.
+    """
+    set_output_budget(8192)
+    assert output_chars() == 8192
+    out = truncate("x" * 40_000)
+    assert "[truncated 31808 characters]" in out
