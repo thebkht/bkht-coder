@@ -6,4 +6,13 @@ dist/
 build/
 *.egg-info/
 
-.codegraph
+.ruff_cache/
+.coverage
+htmlcov/
+
+.codegraph/
+.claude/
+.cursor/
+.idea/
+.vscode/
+.DS_Store
