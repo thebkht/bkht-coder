@@ -331,9 +331,21 @@ class Editor:
         return line
 
 
+#: A colour per mode, because the footer is read at a glance rather than read.
+#: Orange is what the session already uses for the agent acting on its own, and
+#: blue for the user's side of the exchange -- so auto wears one and plan the
+#: other. Ask stays dim: it is the mode nothing has been changed away from.
+COLOURS = {
+    "ask": DIM,
+    "auto": terminal.ORANGE,
+    "plan": terminal.ACCENT,
+}
+
+
 def footer(mode: str, cycles: bool = True, stream=None) -> str:
     """The line under the prompt: what mode this is, and how to change it."""
+    colour = COLOURS.get(mode, DIM)
     text = f"{mode} mode on"
     if cycles:
         text += " (shift+tab to cycle)"
-    return f"{terminal.paint('▸▸', terminal.ORANGE, stream)} {terminal.paint(text, DIM, stream)}"
+    return f"{terminal.paint('▸▸', colour, stream)} {terminal.paint(text, colour, stream)}"

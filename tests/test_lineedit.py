@@ -1,6 +1,6 @@
 import io
 
-from bkht.coder import lineedit
+from bkht.coder import lineedit, terminal
 from bkht.coder.lineedit import Editor
 
 
@@ -144,3 +144,20 @@ def test_footer_names_the_mode_and_the_shortcut():
 
 def test_available_is_false_off_a_terminal():
     assert lineedit.available(stdin=io.StringIO(), stdout=io.StringIO()) is False
+
+
+class FakeTTY(io.StringIO):
+    def isatty(self):
+        return True
+
+
+def test_each_mode_wears_its_own_colour():
+    tty = FakeTTY()
+    ask, auto, plan = (lineedit.footer(mode, stream=tty) for mode in ("ask", "auto", "plan"))
+    assert terminal.ORANGE in auto and terminal.ACCENT in plan
+    assert len({ask, auto, plan}) == 3
+
+
+def test_an_unknown_mode_is_drawn_quietly_rather_than_not_at_all():
+    tty = FakeTTY()
+    assert "banana mode on" in lineedit.footer("banana", stream=tty)
