@@ -33,7 +33,7 @@ Commands
   /jobs [stop <id>]   background processes this session started
   /review [base]      review uncommitted changes, or this branch against base
   /model [name]       show or switch the Ollama model
-  /mode [ask|auto|plan]   show or switch the permission mode
+  /mode [ask|auto|plan]   show or switch the permission mode (or shift+tab)
   /permissions        list remembered decisions, or `remember`/`revoke` one
   /doctor             check that this install can run a turn
   /help               this list

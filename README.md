@@ -24,9 +24,10 @@ On a terminal the session streams: prose appears as the model writes it, a
 status line shows elapsed time and tokens while it is quiet, and each tool call
 is announced in words above the call itself. Approvals take a single key --
 `y`, `n`, `a` to remember this call, or `d` to see the whole diff rather than
-the first forty lines. Arrow keys recall earlier prompts, and Tab completes slash
-commands. Redirect the output and all of that goes away: piped runs print the
-same plain transcript they always did.
+the first forty lines. Arrow keys recall earlier prompts, Tab completes slash
+commands, and shift+tab cycles the permission mode -- which the line under the
+prompt names as you type. Redirect the output and all of that goes away: piped
+runs print the same plain transcript they always did.
 
 State lives in `~/.bkht-coder/`: sessions under `sessions/`, prompt
 history in `history`, remembered approvals in `permissions.json`, skills that
