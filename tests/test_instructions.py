@@ -208,24 +208,24 @@ def test_system_prompt_carries_instructions_and_survives_braces(project):
 
 def test_make_agent_loads_workspace_instructions(project, monkeypatch, tmp_path, no_global):
     from bkht.coder import session as session_module
-    from bkht.coder.cli import build_parser, make_agent
+    from bkht.coder.cli import build_agent_parser, make_agent
 
     monkeypatch.setattr(session_module, "STATE_DIR", tmp_path / "state")
     (project / "CLAUDE.md").write_text("MARKER-ALPHA")
 
-    args = build_parser().parse_args(["--cwd", str(project)])
+    args = build_agent_parser().parse_args(["--cwd", str(project)])
     agent, *_ = make_agent(args)
     assert "MARKER-ALPHA" in agent.session.system
 
 
 def test_make_agent_honours_no_instructions(project, monkeypatch, tmp_path, no_global):
     from bkht.coder import session as session_module
-    from bkht.coder.cli import build_parser, make_agent
+    from bkht.coder.cli import build_agent_parser, make_agent
 
     monkeypatch.setattr(session_module, "STATE_DIR", tmp_path / "state")
     (project / "CLAUDE.md").write_text("MARKER-ALPHA")
 
-    args = build_parser().parse_args(["--cwd", str(project), "--no-instructions"])
+    args = build_agent_parser().parse_args(["--cwd", str(project), "--no-instructions"])
     agent, *_ = make_agent(args)
     assert "MARKER-ALPHA" not in agent.session.system
 
