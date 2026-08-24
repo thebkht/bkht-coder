@@ -19,6 +19,20 @@ AUTO = "auto"
 PLAN = "plan"
 MODES = (ASK, AUTO, PLAN)
 
+
+def cycle(mode: str) -> str:
+    """The next mode round, wrapping.
+
+    One order, defined once: the shortcut at the prompt and anything else that
+    walks the modes have to agree about what comes after `auto`, and an unknown
+    mode has to land somewhere rather than raise at a keypress.
+    """
+    try:
+        return MODES[(MODES.index(mode) + 1) % len(MODES)]
+    except ValueError:
+        return ASK
+
+
 MAX_PREVIEW_LINES = 40
 
 

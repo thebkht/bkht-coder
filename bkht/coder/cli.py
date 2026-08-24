@@ -10,7 +10,7 @@ from functools import partial
 from pathlib import Path
 from typing import NamedTuple
 
-from . import banner, markdown, narrate, terminal
+from . import banner, lineedit, markdown, narrate, terminal
 from .agent import Agent
 from .approval import ask_tty
 from . import doctor
@@ -18,7 +18,7 @@ from .doctor import running_from, version
 from .context import file_tree
 from .instructions import load_instructions, render, summarize as summarize_instructions
 from .parsing import ToolCall
-from .permissions import ASK, AUTO, PLAN, Permissions
+from .permissions import ASK, AUTO, PLAN, Permissions, cycle as next_mode
 from .prompts import system_prompt
 from .prompt import Reader
 from .provider import (
@@ -519,6 +519,10 @@ def header(agent, permissions, workspace) -> str:
 
 HINT = "/help for commands, /exit to leave."
 
+#: The prompt itself. A single mark, so the input starts as near the left edge
+#: as it can: what is being typed is the only thing on that row worth reading.
+PROMPT = "› "
+
 
 def home_relative(path) -> str:
     """``~/project`` where that is the same place, for a column with an edge."""
@@ -574,7 +578,13 @@ def divider() -> str:
 
 
 def read_line(reader, prompt: str, stream=None) -> str:
-    """Read one line with the hint parked on the row beneath it.
+    """Read one line, however this reader draws one.
+
+    A reader with its own editor draws its own frame -- rules above and below
+    the input, and a footer naming the permission mode -- and is left to it.
+    What follows is for the readline and ``input()`` paths, which cannot.
+
+    The hint is parked on the row beneath the input.
 
     Under the input is where it belongs -- it is about what you are typing, and
     proximity is what says so. Under the input is also where the cursor is, so
@@ -585,14 +595,17 @@ def read_line(reader, prompt: str, stream=None) -> str:
     hint is for the moment you are typing; left behind, it would sit stranded
     in the scrollback above an answer it says nothing about.
     """
+    if getattr(reader, "cycles", False):
+        return reader.read(prompt)
+
     stream = sys.stdout if stream is None else stream
     if not terminal.interactive(stream):
-        return reader.read(prompt)
+        return reader.read(paint(prompt, ACCENT + BOLD, stream))
 
     stream.write(f"\n{paint(HINT, DIM, stream)}{terminal.CURSOR_UP}\r")
     stream.flush()
     try:
-        return reader.read(prompt)
+        return reader.read(paint(prompt, ACCENT + BOLD, stream))
     finally:
         stream.write(terminal.CLEAR_LINE)
         stream.flush()
@@ -605,16 +618,27 @@ def interactive(agent, snapshots, permissions, workspace, listener,
         agent, snapshots, permissions, workspace,
         use_instructions=use_instructions, jobs=jobs,
     )
-    reader = Reader(repl, enabled=terminal.interactive())
+    # The footer is a callable, not a string: the mode it names is the thing
+    # Shift+Tab changes, and the editor redraws it on the same keypress.
+    reader = Reader(
+        repl,
+        enabled=terminal.interactive(),
+        footer=lambda: lineedit.footer(permissions.mode),
+        cycle=lambda: setattr(permissions, "mode", next_mode(permissions.mode)),
+    )
     # Printed as it comes back: the greeting dims and bolds its own parts now,
     # and a paint() around the whole of it would flatten both.
     print(greeting(agent, permissions, workspace, loaded=loaded))
 
     while True:
         try:
-            if rule := divider():
+            # The editor opens with a rule of its own; a divider above it
+            # would be the same line drawn twice.
+            if rule := (divider() if not reader.cycles else ""):
                 print(rule)
-            line = read_line(reader, paint("> ", ACCENT + BOLD))
+            elif reader.cycles:
+                print()
+            line = read_line(reader, PROMPT)
         except EOFError:
             print()
             return 0

@@ -118,6 +118,14 @@ class Editor:
                     self._redraw(prompt)
                     continue
                 return line
+        except KeyboardInterrupt:
+            # Ctrl-C abandons the line, so the frame around it goes too --
+            # left behind, it would sit in the scrollback still offering to
+            # cycle a mode for a prompt that no longer exists.
+            self._erase()
+            self.stdout.write("\n")
+            self.stdout.flush()
+            raise
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, saved)
 

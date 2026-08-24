@@ -175,7 +175,9 @@ def test_the_hint_is_drawn_below_the_line_being_typed(monkeypatch):
     assert drawn.startswith("\n")
     assert cli.HINT in drawn
     assert drawn.index(cli.HINT) < drawn.index(terminal.CURSOR_UP)
-    assert typed == ["> "]
+    # read_line paints the prompt now: the editor path needs the plain text,
+    # so the colour cannot be put on by the caller any more.
+    assert typed == [terminal.paint("> ", terminal.ACCENT + terminal.BOLD, stream)]
 
 
 def test_the_hint_is_cleared_once_the_line_is_submitted(monkeypatch):

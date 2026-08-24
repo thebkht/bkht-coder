@@ -1,9 +1,14 @@
 """Reading a line at the prompt, with history and slash completion.
 
 ``input()`` gives none of this: no recall of the last thing you asked, no
-completion, and a typo means retyping the whole line. ``readline`` gives all
-three for the cost of importing it -- but it does not exist on Windows, so
-every entry point here degrades to plain ``input()`` rather than requiring one.
+completion, and a typo means retyping the whole line. Two things can give all
+three -- :mod:`~bkht.coder.lineedit`, which draws and edits the line itself, and
+``readline``, which does it for us but cannot answer Shift+Tab or keep a live
+footer under the input.
+
+So the editor is what a terminal gets, readline is what everything else gets,
+and ``input()`` alone is what is left on a Windows box without either. Each
+step down loses a feature and none of them loses a prompt.
 """
 
 from __future__ import annotations
@@ -11,6 +16,7 @@ from __future__ import annotations
 import atexit
 from pathlib import Path
 
+from . import lineedit
 from .session import STATE_DIR
 
 HISTORY = STATE_DIR / "history"
@@ -46,11 +52,41 @@ class Completer:
 class Reader:
     """One prompt line at a time, with whatever the platform can give us."""
 
-    def __init__(self, repl=None, history: Path | None = None, enabled: bool = True) -> None:
+    def __init__(
+        self, repl=None, history: Path | None = None, enabled: bool = True,
+        footer=None, cycle=None,
+    ) -> None:
         self.history = HISTORY if history is None else history
         self.readline = None
-        if enabled:
+        self.editor = None
+        if not enabled:
+            return
+        if lineedit.available():
+            self._edit(repl, footer, cycle)
+        else:
             self._setup(repl)
+
+    @property
+    def cycles(self) -> bool:
+        """True when Shift+Tab reaches us, and so when the footer may offer it."""
+        return self.editor is not None
+
+    def _edit(self, repl, footer, cycle) -> None:
+        """Our own editor, which is the only path that can see Shift+Tab."""
+        self.editor = lineedit.Editor(
+            completions=(lambda: commands(repl)) if repl is not None else None,
+            footer=footer,
+            cycle=cycle,
+            history=self._recall(),
+        )
+        atexit.register(self.save)
+
+    def _recall(self) -> list[str]:
+        """The history file as a list, or an empty one if it cannot be read."""
+        try:
+            return self.history.read_text(encoding="utf-8").splitlines()[-HISTORY_LIMIT:]
+        except (OSError, UnicodeDecodeError):
+            return []
 
     def _setup(self, repl) -> None:
         try:
@@ -78,14 +114,19 @@ class Reader:
         atexit.register(self.save)
 
     def save(self) -> None:
-        if self.readline is None:
-            return
+        """Write the history back, in the one format both paths read."""
         try:
             self.history.parent.mkdir(parents=True, exist_ok=True)
-            self.readline.write_history_file(str(self.history))
+            if self.editor is not None:
+                lines = self.editor.history[-HISTORY_LIMIT:]
+                self.history.write_text("\n".join(lines) + "\n" if lines else "", encoding="utf-8")
+            elif self.readline is not None:
+                self.readline.write_history_file(str(self.history))
         except (OSError, ValueError):
             pass
 
     def read(self, prompt: str = "> ") -> str:
         """Read one line. Raises EOFError on Ctrl-D, as ``input`` does."""
+        if self.editor is not None:
+            return self.editor.read(prompt)
         return input(prompt)
