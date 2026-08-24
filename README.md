@@ -591,3 +591,15 @@ uv run pytest -q -m live        # end-to-end against a running Ollama
 The live suite includes an accuracy corpus (`tests/corpus/`) of diffs with
 planted bugs and known-good code. It reports recall and precision, so a prompt
 change can be judged rather than guessed at.
+
+## Contributing
+
+Issues and pull requests are welcome — `CONTRIBUTING.md` covers the setup, the
+two test suites, and how a prompt change gets judged against the corpus rather
+than guessed at. Security issues go through a
+[private advisory](https://github.com/thebkht/bkht-coder/security/advisories/new)
+instead; `SECURITY.md` says what is in scope and what `--auto` gives up.
+
+## License
+
+MIT. See `LICENSE`.
