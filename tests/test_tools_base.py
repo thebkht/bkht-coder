@@ -9,7 +9,6 @@ from bkht.coder.tools.base import (
     Tool,
     ToolError,
     ToolResult,
-    Workspace,
     output_budget,
     output_chars,
     set_output_budget,

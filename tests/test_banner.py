@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from bkht.coder import banner, cli, terminal, usage
+from bkht.coder import banner, cli, terminal
 
 
 class FakeTTY(io.StringIO):

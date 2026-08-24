@@ -56,9 +56,9 @@ def test_each_finding_shows_location_category_and_scenario():
 
 def test_plausible_findings_are_marked_and_confirmed_ones_are_not():
     text = terminal(result([HIGH, LOW]), colour=False)
-    lines = [l for l in text.splitlines() if ":40" in l or ":12" in l]
-    assert any("(plausible)" in l for l in lines)
-    assert not any("(plausible)" in l and ":12" in l for l in lines)
+    lines = [line for line in text.splitlines() if ":40" in line or ":12" in line]
+    assert any("(plausible)" in line for line in lines)
+    assert not any("(plausible)" in line and ":12" in line for line in lines)
 
 
 def test_colour_is_optional():

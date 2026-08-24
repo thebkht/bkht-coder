@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Iterator
 
-from bkht.coder.provider import Chunk, ProviderError
+from bkht.coder.provider import Chunk
 
 
 class FakeProvider:

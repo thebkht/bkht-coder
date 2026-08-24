@@ -9,7 +9,6 @@ from bkht.coder.review.reviewer import (
     CONFIRMED,
     PLAUSIBLE,
     Finding,
-    ReviewResult,
     Reviewer,
     coerce_finding,
     file_context,

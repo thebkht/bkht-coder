@@ -91,7 +91,7 @@ Examples:
 
 {FOOTER}"""
 
-SESSIONS_HELP = f"""\
+SESSIONS_HELP = """\
 coder sessions
 List saved sessions, newest first.
 

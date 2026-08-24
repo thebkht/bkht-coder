@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Callable
 
 MAX_OUTPUT_LINES = 400
 # The ceiling, not the working limit. 30,000 characters is roughly 7,500 tokens,

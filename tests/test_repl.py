@@ -3,7 +3,7 @@
 import pytest
 
 from bkht.coder.agent import Agent
-from bkht.coder.permissions import ASK, AUTO, PLAN, Permissions
+from bkht.coder.permissions import ASK, PLAN, Permissions
 from bkht.coder.repl import Repl
 from bkht.coder.session import Session, Snapshots
 from bkht.coder.tools import build_registry
