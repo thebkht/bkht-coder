@@ -1,7 +1,7 @@
 <#
     One-line installer for bkht-coder, Windows edition.
 
-        irm https://thebkht.com/install.sh.ps1 | iex
+        irm https://thebkht.com/install.ps1 | iex
 
     Installs uv, Ollama and the model if they are missing, then puts `coder` on
     PATH. Every step is skipped when it is already satisfied, so re-running
