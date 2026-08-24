@@ -2,7 +2,7 @@
 
 import pytest
 
-from bkht.coder.permissions import ASK, AUTO, PLAN, Permissions, preview, truncate
+from bkht.coder.permissions import ASK, AUTO, PLAN, Permissions, cycle, preview, truncate
 from bkht.coder.session import Snapshots
 from bkht.coder.tools import build_registry
 
@@ -241,3 +241,15 @@ def test_a_sound_edit_shows_only_the_diff(package):
         workspace,
     )
     assert "does not define" not in body
+
+
+def test_the_modes_cycle_in_order_and_wrap():
+    assert cycle(ASK) == AUTO
+    assert cycle(AUTO) == PLAN
+    assert cycle(PLAN) == ASK
+
+
+def test_cycling_from_nonsense_lands_on_the_careful_mode():
+    # Shift+Tab is not a place to raise: whatever the mode was, the next one
+    # has to be a mode, and the safe one is the one to arrive at.
+    assert cycle("banana") == ASK

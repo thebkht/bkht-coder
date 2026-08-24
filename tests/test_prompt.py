@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bkht.coder import prompt
 from bkht.coder.prompt import Completer, Reader, commands
 from bkht.coder.repl import Repl
 
@@ -58,3 +59,26 @@ def test_a_disabled_reader_touches_no_files(tmp_path):
     history = tmp_path / "history"
     Reader(repl=None, history=history, enabled=False).save()
     assert not history.exists()
+
+
+def test_a_terminal_gets_the_editor_and_the_shortcut(tmp_path, monkeypatch):
+    monkeypatch.setattr(prompt.lineedit, "available", lambda *a, **k: True)
+    reader = Reader(repl=None, history=tmp_path / "history")
+    assert reader.cycles is True
+    assert reader.editor is not None
+
+
+def test_without_raw_mode_the_shortcut_is_not_offered(tmp_path, monkeypatch):
+    monkeypatch.setattr(prompt.lineedit, "available", lambda *a, **k: False)
+    reader = Reader(repl=None, history=tmp_path / "history")
+    assert reader.cycles is False
+
+
+def test_the_editor_writes_history_the_readline_path_can_read(tmp_path, monkeypatch):
+    monkeypatch.setattr(prompt.lineedit, "available", lambda *a, **k: True)
+    history = tmp_path / "nested" / "history"
+    reader = Reader(repl=None, history=history)
+    reader.editor.history.append("add a --verbose flag")
+    reader.save()
+
+    assert Reader(repl=None, history=history).editor.history == ["add a --verbose flag"]
