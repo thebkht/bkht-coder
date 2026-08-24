@@ -1,18 +1,36 @@
 [project]
 name = "bkht-coder"
 version = "0.1.0"
-description = "A coding agent that runs against local Ollama"
+description = "A coding agent that runs entirely on a local Ollama -- nothing leaves the machine"
 readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Bakhtiyor Ganijon" }]
+keywords = ["coding-agent", "ollama", "llm", "cli", "local-first"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Code Generators",
+]
 dependencies = [
     "httpx>=0.27",
 ]
+
+[project.urls]
+Homepage = "https://github.com/thebkht/bkht-coder"
+Repository = "https://github.com/thebkht/bkht-coder"
+Issues = "https://github.com/thebkht/bkht-coder/issues"
 
 [project.scripts]
 coder = "bkht.coder.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [build-system]
 requires = ["hatchling"]
@@ -27,3 +45,10 @@ pythonpath = ["tests"]
 markers = [
     "live: requires a reachable Ollama server",
 ]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+# Ruff's default rule set, pinned so a ruff upgrade cannot silently widen CI.
+select = ["E4", "E7", "E9", "F"]
