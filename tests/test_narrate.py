@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from bkht.coder import narrate
 from bkht.coder.narrate import intent
 from bkht.coder.parsing import ToolCall
 
@@ -43,3 +44,42 @@ def test_long_arguments_are_cut_to_one_line():
 
 def test_a_multiline_argument_stays_on_one_line():
     assert "\n" not in intent(ToolCall("bash", {"command": "a\nb\nc"}))
+
+
+# --- what came back -----------------------------------------------------------
+
+
+def call(name: str, **arguments) -> ToolCall:
+    return ToolCall(name=name, arguments=arguments)
+
+
+def test_grep_counts_matches_and_the_files_they_are_in():
+    content = "a.py:1: x\na.py:9: x\nb.py:3: x"
+    assert narrate.outcome(call("grep"), content) == "3 matches in 2 files"
+
+
+def test_one_match_is_not_pluralised():
+    assert narrate.outcome(call("grep"), "a.py:1: x") == "1 match in 1 file"
+
+
+def test_read_file_counts_lines():
+    assert narrate.outcome(call("read_file"), "one\ntwo\nthree") == "3 lines"
+
+
+def test_glob_counts_paths():
+    assert narrate.outcome(call("glob"), "a.py\nb.py") == "2 paths"
+
+
+def test_a_one_line_answer_is_repeated_as_it_stands():
+    # `edit_file` answers in a sentence; a count of it would say less.
+    assert narrate.outcome(call("edit_file"), "Edited bkht/coder/cli.py") == (
+        "Edited bkht/coder/cli.py"
+    )
+
+
+def test_a_long_single_line_becomes_a_count():
+    assert narrate.outcome(call("bash"), "x" * 200) == "200 characters"
+
+
+def test_nothing_at_all_says_so():
+    assert narrate.outcome(call("bash"), "") == "nothing"

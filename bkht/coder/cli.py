@@ -205,6 +205,16 @@ class TerminalListener:
         elif self.verbose:
             for line in result.content.splitlines()[:20]:
                 self._say(paint(f"  {line}", DIM, self.stream))
+        elif self.rich:
+            # What came back, in a count. Without it the transcript showed the
+            # call and never its result, so a model writing out a file it had
+            # lost to compaction looked exactly like one that had read it.
+            #
+            # Chrome, so it stops at the edge of a terminal: a pipe gets the
+            # tool lines it has always got, because something downstream is
+            # parsing them.
+            if said := narrate.outcome(call, result.content):
+                self._say(paint(f"  {said}", DIM, self.stream))
         self.status.note("thinking")
 
     def on_retry(self, reason: str) -> None:

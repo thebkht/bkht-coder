@@ -193,8 +193,8 @@ def test_every_block_of_a_turn_is_given_a_line_of_its_own():
     )
 
     assert blocks(stream) == [
-        "● read_file(a.py)",
-        "● grep(def)",
+        "● read_file(a.py)\n  1 line",
+        "● grep(def)\n  1 match",
         "Here is the answer.",
         "2s (↑10 ↓5)",
     ]
@@ -243,3 +243,28 @@ def test_a_genuine_format_failure_still_says_so():
     reporter, stream = listener()
     reporter.on_retry("retrying: no tool call and no answer")
     assert "no tool call and no answer" in stream.getvalue()
+
+
+def test_a_tool_result_is_summarised_under_its_call():
+    # The call used to be printed and the result never was, so a model writing
+    # out a file it had lost to compaction was indistinguishable, on screen,
+    # from one that had really read it.
+    listen, stream = listener(live=True)
+    with listen.turn():
+        listen.on_tool_result(
+            ToolCall("grep", {"pattern": "def"}),
+            ToolResult.success("a.py:1: def x\nb.py:2: def y"),
+        )
+    assert "2 matches in 2 files" in stream.getvalue()
+
+
+def test_a_failed_call_says_why_and_not_what_it_returned():
+    listen, stream = listener(live=True)
+    with listen.turn():
+        listen.on_tool_result(
+            ToolCall("read_file", {"path": "gone.py"}),
+            ToolResult.failure("no such file"),
+        )
+    written = stream.getvalue()
+    assert "! no such file" in written
+    assert "line" not in written
