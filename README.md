@@ -17,23 +17,38 @@ coder --model qwen2.5-coder:7b
 ```
 
 Slash commands: `/tools`, `/context`, `/clear`, `/undo`, `/diff`, `/review`,
-`/instructions`, `/skills`, `/jobs`, `/permissions`, `/model`, `/mode`,
-`/config`, `/doctor`, `/help`, `/exit`. `!cmd` shells out, and `exit` on its
-own leaves.
+`/instructions`, `/skills`, `/jobs`, `/sessions`, `/permissions`, `/model`,
+`/mode`, `/config`, `/doctor`, `/help`, `/exit`. `!cmd` shells out, and `exit`
+on its own leaves.
 
 On a terminal the session streams: prose appears as the model writes it, a
 status line shows elapsed time and tokens while it is quiet, and each tool call
-is announced in words above the call itself. Approvals take a single key --
-`y`, `n`, `a` to remember this call, or `d` to see the whole diff rather than
-the first forty lines. Arrow keys recall earlier prompts, Tab completes slash
-commands, and shift+tab cycles the permission mode -- which the line under the
-prompt names as you type. Redirect the output and all of that goes away: piped
-runs print the same plain transcript they always did.
+is announced in words above the call itself, with a count of what came back
+under it. Approvals take a single key — `y`, `n`, `a` to remember this call,
+or `d` to see the whole diff rather than the first forty lines. **Esc stops a
+running turn**, and so does Ctrl-C. Redirect the output and all of that goes
+away: piped runs print the same plain transcript they always did.
+
+The prompt takes more than one line. Paste a forty-line block and it arrives as
+one prompt rather than forty; **alt+enter** or a trailing `\` opens a line, and
+the arrows move within the buffer before they reach back into the history. A
+paste longer than six lines folds into a `[Pasted text #1 +230 lines]` chip and
+is put back when the line is sent. **Ctrl-V** attaches an image from the
+clipboard — terminals cannot deliver one in a paste, so it has a key of its
+own — and says at once whether the model you are running can actually see it.
+Tab completes slash commands, and shift+tab cycles the permission mode, which
+the line under the prompt names as you type.
 
 State lives in `~/.bkht-coder/`: sessions under `sessions/`, prompt
 history in `history`, remembered approvals in `permissions.json`, skills that
-apply everywhere under `skills/`, background job logs under `jobs/`, slash
-commands under `commands/`, and persistent settings in `config.json`.
+apply everywhere under `skills/`, background job logs under `jobs/`, pasted
+images under `images/`, slash commands under `commands/`, and persistent
+settings in `config.json`.
+
+Claude Code and Codex keep transcripts on the same machine, and `coder sessions
+--agent all` lists theirs beside its own for the directory you are in;
+`coder session claude/1be46299` reads one. Theirs are read-only — their agent
+holds state this one has never seen, so there is nothing honest to resume.
 
 ## Requirements
 
@@ -678,16 +693,52 @@ repeatedly was worse than not summarizing at all — each pass cost a full model
 call and threw away the model's record of what it had already read, so it read
 it again, and the turn spun until the iteration cap.
 
-An exact repeat of a tool call is refused rather than run (`agent.py`). Freeing
-context necessarily costs the model some of what it read, and a model that has
-lost a file reaches for it again — spending the window that made it forget, and
-losing the file again. The refusal names what to do instead, and the model takes
-it: in practice it switches to `offset`/`limit` and pages through.
+An exact repeat of a tool call is not run again (`agent.py`). Freeing context
+necessarily costs the model some of what it read, and a model that has lost a
+file reaches for it again — spending the window that made it forget, and losing
+the file again. What comes back instead is **the result the call returned the
+first time**, replayed out of the history a few messages up.
 
-And a turn that runs out of iterations or retries is asked for a final answer in
-prose before it ends, so a bounded turn reports what it found instead of nothing.
+Handing it back is the whole point, and it took a bad session to see why. A
+refusal that returned nothing left the model owing an answer it had just been
+told it could not have, and a model in that position writes down what it
+remembers: it reported the contents of a file it had never been shown, in the
+confident register of a real reading. Replaying costs nothing and removes the
+reason to invent. Only calls that actually ran are replayed — one refused
+permission never happened.
+
+Every bound leaves through the same door: a turn that runs out is asked for a
+final answer in prose, so it reports what it found instead of nothing. There
+are five ways to run out.
+
+| `stopped`       | What it means                                       |
+| --------------- | --------------------------------------------------- |
+| `answered`      | The model stopped calling tools and wrote prose      |
+| `iteration-cap` | 25 round trips                                       |
+| `retry-cap`     | Three rounds in a row where nothing worked           |
+| `looping`       | Three calls it had already made, answered each time  |
+| `time-cap`      | Ten minutes                                          |
+
+`looping` and `time-cap` are the newer two, and both come from one bad session.
+Nothing had bounded the clock: the iteration cap counts round trips and the
+retry cap counts only rounds where *every* call failed, so a turn making
+distinct, successful calls that went nowhere was bounded by neither. That one
+ran 1180 seconds and answered nothing.
 
 If turns are still hitting the iteration cap, `--num-ctx` is the flag to raise.
+
+A command containing an obvious placeholder — `YOUR_GITHUB_TOKEN`, `<your
+token>` — is refused before it runs. A model without a credential writes the
+sentence that usually surrounds one, and the shell runs it: the request in that
+same session authenticated as nobody, and the turn spent what was left of
+itself diagnosing a credentials problem it had invented. The rule is narrow,
+because redirection and markup in a `grep` have to keep working.
+
+And the workspace search that opens each turn is skipped when the request names
+something the workspace does not contain — a URL, an issue number, a run id.
+Asked about GitHub run 33185669396 it matched `.github/` and `review/`, both
+real directories, and pointed the turn at the workflow file, which says what
+the job would do and nothing at all about what it did.
 
 ## Development
 
