@@ -1,0 +1,27 @@
+# A working example for anyone mirroring this repository to GitLab. It is inert
+# on GitHub, which reads .github/workflows/ and never this file.
+#
+# The job needs a runner tagged `ollama` -- one with the server up and the model
+# pulled. Findings exit 1 under --ci, so `allow_failure` decides whether a
+# review blocks the merge request or only annotates it.
+
+review:
+  stage: test
+  tags: [ollama]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  variables:
+    # --base resolves a merge base, which GitLab's default shallow clone lacks.
+    GIT_DEPTH: 0
+  before_script:
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - export PATH="$HOME/.local/bin:$PATH"
+    - uv sync
+  # --ci is detected from GITLAB_CI; the report lands in gl-code-quality-report.json.
+  script:
+    - uv run coder review --base "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --ci
+  allow_failure: true
+  artifacts:
+    when: always
+    reports:
+      codequality: gl-code-quality-report.json

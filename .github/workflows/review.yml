@@ -1,0 +1,37 @@
+name: Review
+
+# Off by default. Review needs a reachable Ollama and a ~9 GB model, which is
+# the same reason ci.yml excludes the `live` suite -- a hosted runner cannot do
+# it. Label a pull request `coder-review` to ask for one, or run it by hand.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: coder review
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'coder-review')
+    runs-on: [self-hosted, ollama]
+    steps:
+      # --base resolves a merge base, which a shallow clone does not have.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync
+
+      # --ci is detected from GITHUB_ACTIONS anyway; it is spelled out here so
+      # the annotations are not a surprise to whoever reads this file next.
+      - name: Review
+        run: uv run coder review --base "origin/${{ github.base_ref || github.event.repository.default_branch }}" --ci
