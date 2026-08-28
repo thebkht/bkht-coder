@@ -443,3 +443,33 @@ def test_config_with_a_verb_it_does_not_know_prints_usage(repl):
     r, lines = repl
     r.dispatch("/config wibble")
     assert "Usage: /config" in lines[-1]
+
+
+# --- /sessions ----------------------------------------------------------------
+
+
+def test_sessions_lists_every_agent_by_default(repl):
+    # Bare `/sessions` asks the interesting question -- what was tried in this
+    # directory, by whatever was open at the time -- so it does not narrow to
+    # our own sessions unless it is asked to.
+    r, lines = repl
+    assert r.dispatch("/sessions").handled is True
+    assert lines, "it should have said something"
+
+
+def test_sessions_rejects_an_agent_it_does_not_know(repl):
+    r, lines = repl
+    r.dispatch("/sessions borg")
+    assert "Usage: /sessions" in "\n".join(lines)
+
+
+def test_sessions_takes_a_named_agent(repl):
+    r, lines = repl
+    assert r.dispatch("/sessions coder").handled is True
+    assert "borg" not in "\n".join(lines)
+
+
+def test_sessions_is_offered_in_the_help(repl):
+    r, lines = repl
+    r.dispatch("/help")
+    assert "/sessions" in "\n".join(lines)

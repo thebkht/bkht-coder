@@ -106,3 +106,79 @@ def test_every_supported_platform_names_a_helper(platform, monkeypatch):
     monkeypatch.setattr(clipboard.sys, "platform", platform)
     monkeypatch.setattr(clipboard.shutil, "which", lambda name: None)
     assert clipboard.helper_missing() != ""
+
+
+# --- what the user is told ----------------------------------------------------
+
+
+class Model:
+    def __init__(self, sees: bool) -> None:
+        self.model = "qwen2.5-coder:14b"
+        self._sees = sees
+
+    def can_see(self) -> bool:
+        return self._sees
+
+
+def spoken(fn, *args) -> str:
+    import io
+
+    stream = io.StringIO()
+    fn(*args, stream)
+    return stream.getvalue()
+
+
+def test_a_model_that_cannot_see_says_so_at_paste_time():
+    # Said when the image is attached, not after the answer comes back: a model
+    # that ignores a picture answers from the text, and that reads exactly like
+    # an answer about the picture.
+    from bkht.coder.cli import announce_image
+
+    said = spoken(announce_image, Model(sees=False), "/tmp/one.png")
+    assert "cannot see images" in said
+    assert "/tmp/one.png" in said, "it must still say where the file went"
+    assert "qwen2.5vl" in said, "and name a model that can"
+
+
+def test_a_model_that_can_see_just_confirms():
+    from bkht.coder.cli import announce_image
+
+    said = spoken(announce_image, Model(sees=True), "/tmp/one.png")
+    assert "cannot see" not in said
+    assert "/tmp/one.png" in said
+
+
+def test_a_provider_with_no_opinion_is_treated_as_blind():
+    # `can_see` is newer than the provider interface, and a backend without it
+    # must not have its silence read as yes.
+    from bkht.coder.cli import announce_image
+
+    said = spoken(announce_image, type("P", (), {"model": "old"})(), "/tmp/one.png")
+    assert "cannot see images" in said
+
+
+def test_an_empty_clipboard_says_so_rather_than_nothing(monkeypatch):
+    # A keypress that appears to do nothing is worse than no keypress at all.
+    from bkht.coder import cli
+
+    monkeypatch.setattr(cli.clipboard, "helper_missing", lambda: "")
+    monkeypatch.setattr(cli.clipboard, "read_image", lambda: None)
+    said = spoken(lambda stream: cli.attach_image(stream))
+    assert "no image on the clipboard" in said
+
+
+def test_a_missing_helper_names_what_to_install(monkeypatch):
+    from bkht.coder import cli
+
+    monkeypatch.setattr(cli.clipboard, "helper_missing", lambda: "xclip")
+    said = spoken(lambda stream: cli.attach_image(stream))
+    assert "xclip" in said
+
+
+def test_text_on_the_clipboard_is_not_saved_as_an_image(monkeypatch):
+    from bkht.coder import cli
+
+    monkeypatch.setattr(cli.clipboard, "helper_missing", lambda: "")
+    monkeypatch.setattr(cli.clipboard, "read_image", lambda: b"just copied text")
+    stream_said = spoken(lambda stream: cli.attach_image(stream))
+    assert "no image on the clipboard" in stream_said

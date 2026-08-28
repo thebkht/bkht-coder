@@ -91,3 +91,4 @@ def test_summarize_names_each_command(project):
     write_command(project, "audit", text="Audit the error handling.")
     text = summarize(discover(project))
     assert "/audit" in text and "Audit the error handling." in text
+
