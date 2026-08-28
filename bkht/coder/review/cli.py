@@ -10,11 +10,12 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from .. import config
 from ..agent import Agent
 from ..context import file_tree
 from ..permissions import ASK, AUTO, Permissions, ask_terminal
 from ..prompts import system_prompt
-from ..provider import OllamaProvider, for_review
+from ..provider import build, for_review
 from ..session import Session, Snapshots
 from ..tools import build_registry
 from ..tools.base import set_output_budget
@@ -189,6 +190,10 @@ def report(result, args, kind: str) -> None:
 def run(args) -> int:
     """Execute ``coder review``. Returns the process exit status."""
     root = Path(args.cwd).expanduser().resolve()
+    # Here rather than only at the call site, so a review run straight from
+    # Python gets the configured model too. It fills flags nobody typed and
+    # nothing else, so calling it twice changes nothing.
+    config.load(root).apply(args)
 
     try:
         files = gather(root, args)
@@ -204,7 +209,10 @@ def run(args) -> int:
     # review passes start calling tools.
     set_output_budget(args.num_ctx)
     provider = for_review(
-        OllamaProvider(model=args.model, host=args.host, num_ctx=args.num_ctx)
+        build(
+            getattr(args, "provider", "ollama"),
+            model=args.model, host=args.host, num_ctx=args.num_ctx,
+        )
     )
     listener, kind = choose_listener(args)
     reviewer = Reviewer(

@@ -28,6 +28,7 @@ something the user just asked for and a silent failure would be a lie.
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -349,3 +350,95 @@ def render(settings: Settings) -> str:
         f"  {key:<{width}}  {value:<24}  {source}"
         for key, value, source in settings.listing()
     )
+
+
+USAGE = """\
+Usage: coder config [list]
+       coder config get <key>
+       coder config set <key> <value> [--workspace]
+       coder config unset <key> [--workspace]
+       coder config path"""
+
+
+def run(args) -> int:
+    """Execute ``coder config``. Returns the process exit status.
+
+    Every failure is the user's own typing -- an unknown key, a value the key
+    cannot hold -- so it goes to stderr with a message that names what would
+    have worked, and exits non-zero for anything reading the status.
+    """
+    root = Path(args.cwd).expanduser().resolve()
+    scope = WORKSPACE if args.workspace else GLOBAL
+    action = args.action or "list"
+    rest = list(args.rest)
+
+    try:
+        if action == "list":
+            return _list(root, as_json=args.json)
+        if action == "path":
+            return _paths(root)
+        if action == "get":
+            return _get(root, rest)
+        if action == "set":
+            return _set(root, scope, rest)
+        if action == "unset":
+            return _unset(root, scope, rest)
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"error: unknown action {action!r}.\n{USAGE}", file=sys.stderr)
+    return 2
+
+
+def _announce(settings: Settings) -> None:
+    if settings.error:
+        print(f"warning: {settings.error}", file=sys.stderr)
+
+
+def _list(root: Path, as_json: bool = False) -> int:
+    settings = load(root)
+    _announce(settings)
+    print(json.dumps(settings.payload(), indent=2) if as_json else render(settings))
+    return 0
+
+
+def _paths(root: Path) -> int:
+    for scope in SCOPES:
+        path = path_for(scope, root)
+        print(f"  {scope:<10}  {path}{'' if path.exists() else '  (not written yet)'}")
+    return 0
+
+
+def _get(root: Path, rest: list[str]) -> int:
+    if len(rest) != 1:
+        raise ConfigError(f"get takes one key.\n{USAGE}")
+    key = rest[0]
+    if key not in BY_NAME:
+        raise ConfigError(f"unknown setting {key!r}. Known: {', '.join(BY_NAME)}.")
+    settings = load(root)
+    _announce(settings)
+    print(format_value(settings.values[key]))
+    return 0
+
+
+def _set(root: Path, scope: str, rest: list[str]) -> int:
+    if len(rest) < 2:
+        raise ConfigError(f"set takes a key and a value.\n{USAGE}")
+    # Joined rather than indexed: a value with a space in it -- a host with a
+    # path, a model name someone quoted oddly -- should not be silently halved.
+    key, value = rest[0], " ".join(rest[1:])
+    stored = set_value(key, value, scope=scope, root=root)
+    print(f"{key} = {format_value(stored)}  ({scope}: {path_for(scope, root)})")
+    return 0
+
+
+def _unset(root: Path, scope: str, rest: list[str]) -> int:
+    if len(rest) != 1:
+        raise ConfigError(f"unset takes one key.\n{USAGE}")
+    key = rest[0]
+    if unset(key, scope=scope, root=root):
+        print(f"Unset {key} in the {scope} config. Now {format_value(load(root).values[key])}.")
+    else:
+        print(f"{key} was not set in the {scope} config.")
+    return 0

@@ -291,3 +291,151 @@ def test_the_payload_is_json_shaped(home, project):
 def test_a_missing_attribute_is_still_an_attribute_error():
     with pytest.raises(AttributeError):
         Settings(values={}).nonsense
+
+
+# --- the command ------------------------------------------------------------
+
+
+def coder(capsys, *argv):
+    """Run `coder ...` and return its exit status with what it printed."""
+    from bkht.coder.cli import main
+
+    status = main(list(argv))
+    captured = capsys.readouterr()
+    return status, captured.out, captured.err
+
+
+def test_config_lists_every_setting(home, project, capsys):
+    status, out, _ = coder(capsys, "config", "--cwd", str(project))
+    assert status == 0
+    for spec in config.FIELDS:
+        assert spec.name in out
+
+
+def test_config_set_then_get(home, project, capsys):
+    coder(capsys, "config", "set", "model", "qwen2.5-coder:7b", "--cwd", str(project))
+    status, out, _ = coder(capsys, "config", "get", "model", "--cwd", str(project))
+    assert (status, out.strip()) == (0, "qwen2.5-coder:7b")
+
+
+def test_config_set_names_the_file_it_wrote(home, project, capsys):
+    status, out, _ = coder(capsys, "config", "set", "num_ctx", "8192", "--cwd", str(project))
+    assert status == 0
+    assert str(home) in out
+
+
+def test_config_set_workspace_writes_the_workspace_file(home, project, capsys):
+    coder(capsys, "config", "set", "--workspace", "num_ctx", "8192", "--cwd", str(project))
+    assert json.loads((project / config.WORKSPACE_NAME).read_text()) == {"num_ctx": 8192}
+
+
+def test_config_list_says_where_each_value_came_from(home, project, capsys):
+    coder(capsys, "config", "set", "--workspace", "num_ctx", "8192", "--cwd", str(project))
+    _, out, _ = coder(capsys, "config", "--cwd", str(project))
+    line = next(row for row in out.splitlines() if row.strip().startswith("num_ctx"))
+    assert "8192" in line and config.WORKSPACE in line
+
+
+def test_config_json_is_machine_readable(home, project, capsys):
+    _, out, _ = coder(capsys, "config", "--json", "--cwd", str(project))
+    assert json.loads(out)["provider"] == {"value": "ollama", "source": "default"}
+
+
+def test_config_unset_falls_back_to_the_layer_below(home, project, capsys):
+    coder(capsys, "config", "set", "model", "a-model", "--cwd", str(project))
+    status, out, _ = coder(capsys, "config", "unset", "model", "--cwd", str(project))
+    assert status == 0
+    assert config.DEFAULT_MODEL in out
+
+
+def test_config_unset_says_when_there_was_nothing_to_unset(home, project, capsys):
+    status, out, _ = coder(capsys, "config", "unset", "model", "--cwd", str(project))
+    assert (status, "was not set" in out) == (0, True)
+
+
+def test_config_path_names_both_files(home, project, capsys):
+    _, out, _ = coder(capsys, "config", "path", "--cwd", str(project))
+    assert str(home) in out
+    assert str(project / config.WORKSPACE_NAME) in out
+
+
+def test_a_bad_value_exits_two_and_says_what_would_work(home, project, capsys):
+    status, _, err = coder(capsys, "config", "set", "num_ctx", "12", "--cwd", str(project))
+    assert status == 2
+    assert str(config.MIN_USEFUL_NUM_CTX) in err
+    assert not home.exists()
+
+
+def test_an_unknown_key_exits_two(home, project, capsys):
+    status, _, err = coder(capsys, "config", "get", "nonsense", "--cwd", str(project))
+    assert status == 2
+    assert "unknown setting" in err
+
+
+def test_an_unknown_action_exits_two_with_the_usage(home, project, capsys):
+    status, _, err = coder(capsys, "config", "frobnicate", "--cwd", str(project))
+    assert status == 2
+    assert "coder config" in err
+
+
+def test_set_without_a_value_exits_two(home, project, capsys):
+    status, _, err = coder(capsys, "config", "set", "model", "--cwd", str(project))
+    assert status == 2
+    assert "key and a value" in err
+
+
+def test_a_value_with_spaces_survives(home, project, capsys):
+    coder(capsys, "config", "set", "model", "a model", "--cwd", str(project))
+    _, out, _ = coder(capsys, "config", "get", "model", "--cwd", str(project))
+    assert out.strip() == "a model"
+
+
+def test_an_unreadable_file_is_warned_about_not_swallowed(home, project, capsys):
+    home.parent.mkdir(parents=True, exist_ok=True)
+    home.write_text("{not json", encoding="utf-8")
+    status, _, err = coder(capsys, "config", "--cwd", str(project))
+    assert status == 0
+    assert "warning" in err
+
+
+# --- reaching a session -----------------------------------------------------
+
+
+def test_a_configured_model_reaches_the_parsed_arguments(home, project):
+    from bkht.coder.cli import build_agent_parser, configured
+
+    write(home, model="qwen2.5-coder:7b", num_ctx=8192, mode="plan")
+    args = configured(build_agent_parser().parse_args(["--cwd", str(project)]))
+
+    assert (args.model, args.num_ctx) == ("qwen2.5-coder:7b", 8192)
+    assert args.plan is True
+
+
+def test_a_flag_still_beats_a_configured_value(home, project):
+    from bkht.coder.cli import build_agent_parser, configured
+
+    write(home, model="qwen2.5-coder:7b")
+    args = configured(
+        build_agent_parser().parse_args(["--cwd", str(project), "--model", "other"])
+    )
+    assert args.model == "other"
+
+
+def test_a_configured_mode_becomes_the_sessions_mode(home, project):
+    from bkht.coder.cli import build_agent_parser, configured, resolve_mode
+    from bkht.coder.permissions import AUTO
+
+    write(home, mode="auto")
+    args = configured(build_agent_parser().parse_args(["--cwd", str(project)]))
+    assert resolve_mode(args) == AUTO
+
+
+def test_an_unreadable_config_does_not_stop_a_session_starting(home, project, capsys):
+    from bkht.coder.cli import build_agent_parser, configured
+
+    home.parent.mkdir(parents=True, exist_ok=True)
+    home.write_text("{not json", encoding="utf-8")
+
+    args = configured(build_agent_parser().parse_args(["--cwd", str(project)]))
+    assert args.model == config.DEFAULT_MODEL
+    assert str(home) in capsys.readouterr().err

@@ -30,6 +30,8 @@ def title() -> str:
 
 
 #: Flags every entry point takes, so they are described in one place only.
+#: Each of them overrides the matching key in the config files; `coder config`
+#: shows what those are set to and where each value came from.
 COMMON = """\
   --model <name>          Ollama model to use
   --host <url>            Ollama server URL
@@ -62,6 +64,8 @@ Commands:
   session <last|id>              Show a saved session
   session resume [last|id]       Continue a saved session
 
+  config [get|set|unset]         Show or change settings that survive a restart
+
   review [range]                 Review changes, a branch, or a commit range
   doctor                         Check that this install can run a turn
   help                           Show this help
@@ -90,6 +94,58 @@ Examples:
       Review this branch against its merge base with main
 
 {FOOTER}"""
+
+CONFIG_HELP = """\
+coder config
+Show or change the settings that survive a restart.
+
+Settings resolve lowest to highest: the built-in default, then your personal
+file, then this workspace's, then any flag you typed -- so a flag always wins
+for the run you are in, and a workspace can pin what a project needs.
+
+  ~/.bkht-coder/config.json      personal defaults, everywhere
+  .bkht-coder/config.json        this workspace only, written with --workspace
+
+`provider` names the model backend. `ollama` is the only one there is today.
+
+Usage:
+  coder config [list] [flags]
+  coder config get <key>
+  coder config set <key> <value> [flags]
+  coder config unset <key> [flags]
+  coder config path
+
+Settings:
+  provider                Model backend; only `ollama` today
+  model                   Model to run
+  host                    Server URL
+  num_ctx                 Context window to request
+  temperature             Sampling temperature
+  mode                    Permission mode: ask, auto, plan
+  scout                   Search the workspace before each task
+  max_iterations          Cap on loop iterations per task
+  instructions            Read AGENTS.md and CLAUDE.md
+  skills                  Load skills, and offer the skill tool
+
+Flags:
+  --workspace             Write .bkht-coder/config.json, not the personal file
+  --json                  Emit the settings as JSON
+  --cwd <path>            Workspace root; defaults to the current directory
+  -h, --help              Display this help and exit
+
+Examples:
+  coder config
+      Every setting, its value, and which layer it came from
+
+  coder config set model qwen2.5-coder:7b
+      Use the smaller model everywhere from now on
+
+  coder config set --workspace num_ctx 8192
+      Pin a smaller window for this project only
+
+  coder config unset model
+      Fall back to whatever the next layer down says
+"""
 
 SESSIONS_HELP = """\
 coder sessions

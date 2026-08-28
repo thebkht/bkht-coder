@@ -172,7 +172,7 @@ def run_review(repo, monkeypatch, script, *argv):
     args = parse(*argv)
     args.cwd = str(repo)
     monkeypatch.setattr(
-        "bkht.coder.review.cli.OllamaProvider", lambda **kw: FakeProvider(script)
+        "bkht.coder.review.cli.build", lambda name, **kw: FakeProvider(script)
     )
     return review_cli.run(args)
 
@@ -228,7 +228,7 @@ def test_one_dimension_runs_one_pass(repo, monkeypatch, capsys):
     args = parse("--dimension", "correctness", "--no-verify", "--quiet")
     args.cwd = str(repo)
     provider = FakeProvider(["[]"])
-    monkeypatch.setattr("bkht.coder.review.cli.OllamaProvider", lambda **kw: provider)
+    monkeypatch.setattr("bkht.coder.review.cli.build", lambda name, **kw: provider)
 
     review_cli.run(args)
     assert len(provider.calls) == 1

@@ -10,7 +10,7 @@ from functools import partial
 from pathlib import Path
 from typing import NamedTuple
 
-from . import banner, lineedit, markdown, narrate, terminal
+from . import banner, config, lineedit, markdown, narrate, terminal
 from .agent import Agent
 from .approval import ask_tty
 from . import doctor
@@ -21,13 +21,7 @@ from .parsing import ToolCall
 from .permissions import ASK, AUTO, PLAN, Permissions, cycle as next_mode
 from .prompts import system_prompt
 from .prompt import Reader
-from .provider import (
-    DEFAULT_HOST,
-    DEFAULT_MODEL,
-    DEFAULT_NUM_CTX,
-    DEFAULT_TEMPERATURE,
-    OllamaProvider,
-)
+from .provider import DEFAULT_NUM_CTX, build as build_provider
 from .repl import Repl
 from .review import cli as review_cli
 from .session import Session, Snapshots
@@ -226,17 +220,20 @@ class TerminalListener:
 
 def add_common_arguments(parser) -> None:
     """Flags shared by the agent and by `coder review`."""
-    parser.add_argument("--model", default=DEFAULT_MODEL, help="Ollama model to use.")
-    parser.add_argument("--host", default=DEFAULT_HOST, help="Ollama server URL.")
-    parser.add_argument("--num-ctx", type=int, default=DEFAULT_NUM_CTX, help="Context window to request.")
+    # Unset defaults to None rather than to the built-in value, so that
+    # `config.Settings.apply` can tell a flag the user typed from one argparse
+    # filled in -- without that distinction a config file could never win.
+    parser.add_argument("--model", default=None, help="Ollama model to use.")
+    parser.add_argument("--host", default=None, help="Ollama server URL.")
+    parser.add_argument("--num-ctx", type=int, default=None, help="Context window to request.")
     parser.add_argument(
-        "--temperature", type=float, default=DEFAULT_TEMPERATURE,
+        "--temperature", type=float, default=None,
         help="Sampling temperature. Low keeps tool calls well-formed.",
     )
     parser.add_argument("--cwd", default=".", help="Workspace root. Defaults to the current directory.")
-    parser.add_argument("--auto", action="store_true", help="Allow every tool call without prompting.")
-    parser.add_argument("--no-instructions", action="store_true", help="Ignore AGENTS.md and CLAUDE.md.")
-    parser.add_argument("--no-skills", action="store_true", help="Ignore skills, and omit the skill tool.")
+    parser.add_argument("--auto", action="store_true", default=None, help="Allow every tool call without prompting.")
+    parser.add_argument("--no-instructions", action="store_true", default=None, help="Ignore AGENTS.md and CLAUDE.md.")
+    parser.add_argument("--no-skills", action="store_true", default=None, help="Ignore skills, and omit the skill tool.")
 
 
 def add_agent_arguments(parser) -> None:
@@ -248,10 +245,10 @@ def add_agent_arguments(parser) -> None:
         "--resume", nargs="?", const=saved.LAST, default=None, metavar="last|ID",
         help="Continue a saved session. Defaults to the newest for this directory.",
     )
-    parser.add_argument("--plan", action="store_true", help="Read-only: refuse every change to the workspace.")
+    parser.add_argument("--plan", action="store_true", default=None, help="Read-only: refuse every change to the workspace.")
     parser.add_argument("--verbose", action="store_true", help="Stream raw model output and tool results.")
-    parser.add_argument("--no-scout", action="store_true", help="Do not search the workspace before each task.")
-    parser.add_argument("--max-iterations", type=int, default=25, help="Cap on loop iterations per task.")
+    parser.add_argument("--no-scout", action="store_true", default=None, help="Do not search the workspace before each task.")
+    parser.add_argument("--max-iterations", type=int, default=None, help="Cap on loop iterations per task.")
     add_common_arguments(parser)
 
 
@@ -287,6 +284,12 @@ def build_parser() -> argparse.ArgumentParser:
     add_common_arguments(checker)
     doctor.add_arguments(checker)
 
+    settings = subparsers.add_parser(
+        "config", help="Show or change the settings that survive a restart.",
+        page=usage.CONFIG_HELP,
+    )
+    add_config_arguments(settings)
+
     lister = subparsers.add_parser(
         "sessions", help="List saved sessions for this workspace.",
         page=usage.SESSIONS_HELP,
@@ -303,6 +306,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_agent_arguments(parser)
     return parser
+
+
+def add_config_arguments(parser) -> None:
+    """Flags for `coder config`.
+
+    The verb and its arguments are positionals rather than sub-subcommands: the
+    grammar is small enough that argparse's own would only get in the way, and
+    a written help page says what it is anyway.
+    """
+    parser.add_argument("action", nargs="?", default="list", help="list, get, set, unset, or path.")
+    parser.add_argument("rest", nargs="*", help="The key, and the value for `set`.")
+    parser.add_argument("--workspace", action="store_true", help="Write this workspace's config, not the personal one.")
+    parser.add_argument("--json", action="store_true", help="Emit the settings as JSON.")
+    parser.add_argument("--cwd", default=".", help="Workspace root. Defaults to the current directory.")
 
 
 def saved_cli_arguments(parser) -> None:
@@ -331,6 +348,12 @@ def build_agent_parser() -> argparse.ArgumentParser:
 
 
 def resolve_mode(args) -> str:
+    """Which permission mode this run starts in.
+
+    Both switches are unset when neither was typed *and* nothing was configured,
+    which is what `ask` means. ``config.Settings.apply`` has already turned a
+    configured mode into whichever of the two says it.
+    """
     if args.auto and args.plan:
         raise SystemExit("--auto and --plan contradict each other; pick one.")
     if args.auto:
@@ -338,6 +361,25 @@ def resolve_mode(args) -> str:
     if args.plan:
         return PLAN
     return ASK
+
+
+def configured(args):
+    """Fill in whatever the user did not type, from the config files.
+
+    Called on every path that parses arguments, so that `doctor` and `review`
+    keep reading concrete values out of ``args`` and never learn that settings
+    can come from anywhere else.
+
+    A file that could not be read is announced rather than swallowed, for the
+    same reason an unreadable permissions file is: a session that believes it
+    is running the model you configured, and is not, is the one case where the
+    next surprise is unattributable.
+    """
+    settings = config.load(Path(args.cwd).expanduser().resolve())
+    if settings.error:
+        print(paint(settings.error, YELLOW, sys.stderr), file=sys.stderr)
+    settings.apply(args)
+    return args
 
 
 class Loaded(NamedTuple):
@@ -363,6 +405,10 @@ class Loaded(NamedTuple):
 
 def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
     """Wire up provider, tools, permissions, session, jobs, and agent."""
+    # Here rather than at the call site, so that every caller -- `main`, the
+    # tests, anything embedding this later -- gets the configured values. It
+    # only fills flags nobody typed, so calling it twice changes nothing.
+    configured(args)
     root = Path(args.cwd).expanduser().resolve()
     mode = resolve_mode(args)
     snapshots = Snapshots()
@@ -396,7 +442,8 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
     # the user would be surprised by a prompt they thought they had answered.
     if permissions.rules is not None and permissions.rules.error:
         print(paint(permissions.rules.error, YELLOW, sys.stderr), file=sys.stderr)
-    provider = OllamaProvider(
+    provider = build_provider(
+        getattr(args, "provider", "ollama"),
         model=args.model, host=args.host, num_ctx=args.num_ctx,
         temperature=args.temperature,
     )
@@ -674,7 +721,10 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
     if argv[:1] == ["review"]:
-        return review_cli.run(build_parser().parse_args(argv))
+        return review_cli.run(configured(build_parser().parse_args(argv)))
+
+    if argv[:1] == ["config"]:
+        return config.run(build_parser().parse_args(argv))
 
     if argv[:1] == ["help"] or argv[:1] == ["--help"] or argv[:1] == ["-h"]:
         print(usage.HELP)
@@ -702,7 +752,7 @@ def main(argv: list[str] | None = None) -> int:
             )
 
     if argv[:1] == ["doctor"]:
-        args = build_parser().parse_args(argv)
+        args = configured(build_parser().parse_args(argv))
         return doctor.report(
             Path(args.cwd).expanduser().resolve(),
             model=args.model, host=args.host, num_ctx=args.num_ctx,
