@@ -190,20 +190,36 @@ def malformed_call(error: str, tool_names: list[str]) -> str:
     )
 
 
-def repeated_call(name: str) -> str:
+def repeated_call(name: str, earlier: str = "") -> str:
     """Sent when the model makes a call it has already made this turn.
 
-    Refused rather than run. Repeating a call byte-for-byte cannot produce a new
-    result, so running it again only spends the window that made the model
-    forget in the first place. The message says what to do differently, because
-    "no" on its own is what the model already believes it is doing.
+    Not run again -- repeating a call byte-for-byte cannot produce a new result,
+    and running it would only spend the window that made the model forget in the
+    first place. But the earlier result is handed back with it.
+
+    Handing it back is the whole point. A refusal that returned nothing left the
+    model needing an answer it had been told it could not have, and a model in
+    that position writes down what it remembers instead: it reported file
+    contents it had never been given, in the confident register of a real
+    reading. Replaying costs nothing -- the text is already in the history a few
+    messages up -- and it removes the reason to invent.
     """
+    if not earlier:
+        return (
+            f"You already ran `{name}` with exactly these arguments in this turn, so "
+            "this call was not run again -- it cannot tell you anything new.\n"
+            "Do something different: read a different part of the file with `offset` "
+            "and `limit`, search for what you are missing with `grep`, or answer with "
+            "what you already have."
+        )
     return (
-        f"You already ran `{name}` with exactly these arguments in this turn, so "
-        "this call was not run again -- it cannot tell you anything new.\n"
-        "Do something different: read a different part of the file with `offset` "
-        "and `limit`, search for what you are missing with `grep`, or answer with "
-        "what you already have."
+        f"You already ran `{name}` with exactly these arguments in this turn. It was "
+        "not run again -- it cannot tell you anything new -- so here is what it "
+        "returned the first time:\n\n"
+        f"{earlier}\n\n"
+        "That is the whole result. Do not describe output you have not been given. "
+        "If it is not enough, do something different: read another part of the file "
+        "with `offset` and `limit`, search with `grep`, or answer with what you have."
     )
 
 

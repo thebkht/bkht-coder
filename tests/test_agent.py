@@ -403,10 +403,12 @@ def test_a_refused_repeat_says_what_to_do_instead(loop):
     assert "offset" in refusal and "grep" in refusal
 
 
-def test_repeating_one_call_ends_the_turn_at_the_retry_cap(loop):
+def test_repeating_one_call_ends_the_turn_as_looping(loop):
+    # Named apart from the retry cap because it is a different diagnosis: the
+    # model is being answered every time and asking again anyway.
     agent, _ = loop([call("read_file", path="src/util.py")] * 20, max_iterations=20)
     outcome = agent.run("loop forever")
-    assert outcome.stopped == "retry-cap"
+    assert outcome.stopped == "looping"
     assert outcome.iterations < 20, "stopped by the repeat guard, not the iteration cap"
 
 
@@ -468,3 +470,23 @@ def test_a_capped_turn_that_still_will_not_answer_reports_the_cap(loop):
     outcome = agent.run("summarize it")
     assert outcome.stopped == "iteration-cap"
     assert outcome.answer == ""
+
+
+def test_a_refused_repeat_hands_back_what_the_call_returned(loop):
+    # The refusal used to return nothing, which left the model owing an answer
+    # it had been told it could not have -- and a model in that position writes
+    # down what it remembers instead of admitting it has nothing.
+    agent, _ = loop([call("read_file", path="src/util.py")] * 2 + ["done"])
+    agent.run("what does helper do?")
+    refusal = agent.session.messages[-2]["content"]
+    assert "def helper" in refusal, "the first result should be replayed verbatim"
+    assert "Do not describe output you have not been given" in refusal
+
+
+def test_a_call_that_was_never_run_is_not_replayed(loop):
+    # A refused or malformed call never happened; handing back a result for it
+    # would be inventing one, which is the thing this is meant to stop.
+    agent, _ = loop([call("no_such_tool")] * 2 + ["done"])
+    agent.run("go")
+    refusal = agent.session.messages[-2]["content"]
+    assert "returned the first time" not in refusal

@@ -26,10 +26,19 @@ from .parsing import ToolCall
 from .provider import Provider, ProviderError, Reply, collect
 from .retrieval import scout, terms
 from .session import Session
-from .tools.base import Registry, ToolError, ToolResult, validate_arguments
+from .tools.base import Registry, ToolError, ToolResult, truncate, validate_arguments
 
 MAX_ITERATIONS = 25
 MAX_RETRIES = 2
+
+#: How many times a turn may ask for a call it has already made before the turn
+#: is declared stuck. Two is a model that lost something and reached for it
+#: again, which is ordinary; a third is a model going round.
+MAX_REPLAYS = 2
+
+#: How much of a replayed result to hand back. Generous, because the point is
+#: to remove the reason to invent one, and a truncated answer is a reason.
+REPLAY_LIMIT = 4000
 
 
 class Listener(Protocol):
@@ -65,7 +74,8 @@ class Outcome:
     raw: str = ""  # the final reply before tool-call JSON was stripped
     iterations: int = 0
     tool_calls: int = 0
-    stopped: str = "answered"  # answered | iteration-cap | retry-cap | denied
+    #: answered | iteration-cap | retry-cap | looping | denied | provider-error
+    stopped: str = "answered"
     errors: list[str] = field(default_factory=list)
     #: What this turn cost, for the line printed under the answer. Per-turn,
     #: which is what makes it different from the running totals the session
@@ -104,9 +114,10 @@ class Agent:
         # None means no scouting. The review passes drive their own conversation
         # from a diff they already have, so retrieval would only be noise there.
         self.scout_root = Path(scout_root) if scout_root else None
-        # Both reset at the top of every turn; see _loop.
+        # All reset at the top of every turn; see _loop.
         self._summarized = False
-        self._made: set[tuple[str, str]] = set()
+        self._made: dict[tuple[str, str], str] = {}
+        self._replays = 0
 
     def run(self, user_message: str) -> Outcome:
         """Run the loop until the model answers, or a bound is hit."""
@@ -174,8 +185,10 @@ class Agent:
         retries = 0
         # Summarizing is allowed once per turn; see _compact_if_needed.
         self._summarized = False
-        # Every call already made this turn, so an exact repeat can be refused.
-        self._made: set[tuple[str, str]] = set()
+        # Every call already made this turn, with what it returned, so an exact
+        # repeat can be answered from here rather than run again.
+        self._made: dict[tuple[str, str], str] = {}
+        self._replays = 0
 
         for _ in range(self.max_iterations):
             outcome.iterations += 1
@@ -236,6 +249,16 @@ class Agent:
                     if result.error.startswith("permission denied"):
                         outcome.stopped = "denied"
                         return outcome
+
+            # A model that keeps asking for calls it has already made is going
+            # round, not working. The replay gives it back what it asked for, so
+            # a second one is still ordinary -- a third means the answers are not
+            # what it is short of, and no further iteration will change that.
+            if self._replays > MAX_REPLAYS:
+                outcome.stopped = "looping"
+                outcome.errors.append("model kept asking for calls it had already made")
+                self._final_answer(outcome)
+                return outcome
 
             # A round where every call failed is a retry, and retries are bounded
             # so a model stuck on a bad format cannot spin to the iteration cap.
@@ -343,8 +366,10 @@ class Agent:
         # ends the turn instead of the iteration cap.
         signature = (call.name, json.dumps(call.arguments, sort_keys=True))
         if signature in self._made:
-            return ToolResult.failure(prompts.repeated_call(call.name))
-        self._made.add(signature)
+            self._replays += 1
+            return ToolResult.failure(
+                prompts.repeated_call(call.name, self._made[signature])
+            )
 
         tool = self.registry.get(call.name)
         if tool is None:
@@ -367,8 +392,14 @@ class Agent:
                 return ToolResult.failure(f"permission denied: {decision.reason}")
 
         try:
-            return tool.run(**arguments)
+            result = tool.run(**arguments)
         except ToolError as exc:
             return ToolResult.failure(str(exc))
         except Exception as exc:  # a tool bug must not kill the session
             return ToolResult.failure(f"{tool.name} failed unexpectedly: {exc}")
+
+        # Remembered only once it has actually run, and only its own text: a
+        # call that was refused permission or failed to validate never happened,
+        # and should not be replayed as though it had.
+        self._made[signature] = truncate(result.as_message(), max_chars=REPLAY_LIMIT)
+        return result
