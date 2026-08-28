@@ -56,10 +56,15 @@ CONTINUATION = "  "
 #: because the thing itself is not text and has no business being in a buffer.
 IMAGE_CHIP = "[Image #{number}]"
 
-#: A paste longer than this is folded into a chip. Redrawing five hundred lines
-#: inside a four-row block on every keystroke is not editing, it is flicker;
-#: and the point of pasting a file is rarely to edit it afterwards.
-PASTE_LINES = 6
+#: A paste longer than this is folded. Redrawing five hundred lines inside the
+#: block on every keystroke is not editing, it is flicker; and the point of
+#: pasting a file is rarely to edit it afterwards.
+PASTE_LINES = 4
+
+#: What is left in place of the lines a fold takes out. Both ends of the paste
+#: are kept around it: a count alone says something was pasted, and the ends
+#: say which thing.
+ELISION = "⋮ +{hidden} lines"
 
 
 def available(stdin=None, stdout=None) -> bool:
@@ -117,7 +122,7 @@ class Editor:
         self.draft = ""  # what was being typed before they started
         self.pasting = False  # between the bracketed-paste markers
         self.paste_at = 0  # where the current paste began in the buffer
-        self.pastes: dict[int, str] = {}  # chip number -> the text it stands for
+        self.pastes: dict[int, tuple[str, str]] = {}  # number -> (chip, full text)
         self.images: list[str] = []  # paths pasted into the line being written
         #: Called with a path once an image is attached, so the session can say
         #: whether the model will actually look at it. Here rather than in the
@@ -335,28 +340,36 @@ class Editor:
         self._insert(IMAGE_CHIP.format(number=len(self.images)))
         self.on_image(path)
 
+    def _chip(self, text: str) -> str:
+        """A long paste as the three lines that stand for it on screen.
+
+        Its first line, a count of what is not shown, and its last. Both ends
+        rather than a count alone: a count says something was pasted, and the
+        ends say which thing -- which is what you need when the reason you
+        pasted it is to talk about it.
+        """
+        lines = text.split("\n")
+        return "\n".join([lines[0], ELISION.format(hidden=len(lines) - 2), lines[-1]])
+
     def _fold_paste(self) -> None:
-        """Replace a long paste with a chip standing for it.
+        """Fold a long paste down to the lines that stand for it.
 
         The text is kept, not lost -- :meth:`_submit` puts it back. What is
         avoided is holding five hundred lines in a block that is redrawn on
         every keypress, and asking someone to find their cursor in it.
         """
         text = self.buffer[self.paste_at : self.cursor]
-        lines = text.count("\n") + 1
-        if lines <= PASTE_LINES:
+        if text.count("\n") + 1 <= PASTE_LINES:
             return
-        number = len(self.pastes) + 1
-        self.pastes[number] = text
-        chip = f"[Pasted text #{number} +{lines} lines]"
+        chip = self._chip(text)
+        self.pastes[len(self.pastes) + 1] = (chip, text)
         self.buffer = self.buffer[: self.paste_at] + chip + self.buffer[self.cursor :]
         self.cursor = self.paste_at + len(chip)
 
     def _unfold(self, line: str) -> str:
-        """A submitted line with every chip replaced by what it stood for."""
-        for number, text in self.pastes.items():
-            lines = text.count("\n") + 1
-            line = line.replace(f"[Pasted text #{number} +{lines} lines]", text)
+        """A submitted line with every folded paste put back in full."""
+        for chip, text in self.pastes.values():
+            line = line.replace(chip, text)
         return line
 
     # --- editing ------------------------------------------------------------

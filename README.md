@@ -32,8 +32,9 @@ away: piped runs print the same plain transcript they always did.
 The prompt takes more than one line. Paste a forty-line block and it arrives as
 one prompt rather than forty; **alt+enter** or a trailing `\` opens a line, and
 the arrows move within the buffer before they reach back into the history. A
-paste longer than six lines folds into a `[Pasted text #1 +230 lines]` chip and
-is put back when the line is sent. **Ctrl-V** attaches an image from the
+paste longer than four lines folds to its first line, a `⋮ +230 lines` marker
+and its last, and is put back in full when the line is sent — both ends,
+because a count alone says something was pasted and the ends say which thing. **Ctrl-V** attaches an image from the
 clipboard — terminals cannot deliver one in a paste, so it has a key of its
 own — and says at once whether the model you are running can actually see it.
 Tab completes slash commands, and shift+tab cycles the permission mode, which
@@ -726,6 +727,21 @@ distinct, successful calls that went nowhere was bounded by neither. That one
 ran 1180 seconds and answered nothing.
 
 If turns are still hitting the iteration cap, `--num-ctx` is the flag to raise.
+
+There is a `gh` tool now, and a `glab` one, each registered only when its CLI
+is on the PATH. They read: a run and its logs, a pull or merge request and its
+diff, an issue. Anything that would write — `pr merge`, `run rerun`, an `api`
+call with `--method POST` — is refused by the tool rather than left to the
+permission gate, because merging a pull request is not a thing to approve one
+keypress at a time in the middle of a turn that was only supposed to read a
+log. The shell tool is still there, behind the gate, for when somebody means
+it. The command is split into an argument list and run without a shell, so a
+`;` in it is a `;`.
+
+They exist because of the same session. `gh` was installed and logged in the
+whole time, and the model wrote a `curl` with a placeholder token instead —
+nothing had told it the capability was there. Naming a capability is most of
+what makes it get used.
 
 A command containing an obvious placeholder — `YOUR_GITHUB_TOKEN`, `<your
 token>` — is refused before it runs. A model without a credential writes the

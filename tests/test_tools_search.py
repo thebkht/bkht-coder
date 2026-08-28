@@ -69,13 +69,20 @@ def test_read_only_registry_tool_set(registry):
     # codebase_search is registered because the agent's opening scout already
     # shows the model a result from it; a tool it has seen the output of has to
     # exist, or it calls a name that does not resolve and loses a turn to it.
-    assert registry.names() == [
-        "codebase_search",
-        "glob",
-        "grep",
-        "list_files",
-        "read_file",
-    ]
+    assert {"codebase_search", "glob", "grep", "list_files", "read_file"} <= set(
+        registry.names()
+    )
+
+
+def test_a_read_only_registry_holds_nothing_that_mutates(registry):
+    # The set is not asserted exactly any more: `gh` and `glab` join it when
+    # they are installed, so an exact list would pass or fail on what happens
+    # to be on the machine. What has to hold is the property.
+    assert [name for name in registry.names() if registry.get(name).mutating] == []
+
+
+def test_the_mutating_tools_are_absent_by_name(registry):
+    assert not {"write_file", "edit_file", "bash", "background"} & set(registry.names())
 
 
 # --- the walk itself ------------------------------------------------------

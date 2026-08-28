@@ -47,6 +47,15 @@ def build_registry(
 
     register_retrieval_tool(registry, workspace)
 
+    # Reading a CI log is not a mutation, so these are offered in plan mode too.
+    # Each registers only when its CLI is installed: a tool the model can see
+    # and cannot use is a turn spent finding that out.
+    from .github import register_github_tool
+    from .gitlab import register_gitlab_tool
+
+    register_github_tool(registry)
+    register_gitlab_tool(registry)
+
     if skills:
         from .skills import register_skill_tool
 

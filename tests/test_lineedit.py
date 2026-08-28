@@ -258,10 +258,12 @@ def test_ctrl_k_kills_to_the_end_of_the_line_only():
     assert ed.buffer == "one\n"
 
 
-def test_a_long_paste_is_folded_into_a_chip():
+def test_a_long_paste_is_folded_to_its_first_and_last_lines():
+    # Both ends, not a count alone: a count says something was pasted, and the
+    # ends say which thing.
     ed = editor()
     paste(ed, "\n".join(f"line {n}" for n in range(40)))
-    assert ed.buffer == "[Pasted text #1 +40 lines]"
+    assert ed.buffer == "line 0\n⋮ +38 lines\nline 39"
 
 
 def test_a_folded_paste_is_put_back_when_the_line_is_sent():
@@ -279,11 +281,27 @@ def test_a_short_paste_is_left_alone():
     assert ed.pastes == {}
 
 
-def test_history_remembers_the_chip_not_the_whole_file():
+def test_a_paste_at_the_threshold_is_still_shown_whole():
+    ed = editor()
+    body = "\n".join(f"line {n}" for n in range(lineedit.PASTE_LINES))
+    paste(ed, body)
+    assert ed.buffer == body
+
+
+def test_a_folded_paste_grows_the_block_by_three_rows_not_forty():
+    ed = editor()
+    paste(ed, "\n".join(f"line {n}" for n in range(40)))
+    ed._redraw("> ")
+    # rule, three lines, rule -- and no footer on this editor.
+    assert ed.drawn == 5
+
+
+def test_history_remembers_the_fold_not_the_whole_file():
+    # Up should not paste forty lines back into a block that folded them.
     ed = editor()
     paste(ed, "\n".join(f"line {n}" for n in range(40)))
     type(ed, "\r")
-    assert ed.history == ["[Pasted text #1 +40 lines]"]
+    assert ed.history == ["line 0\n⋮ +38 lines\nline 39"]
 
 
 # --- images -------------------------------------------------------------------
