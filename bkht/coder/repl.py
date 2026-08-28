@@ -11,14 +11,14 @@ import subprocess
 import sys
 from dataclasses import dataclass
 
-from . import highlight
+from . import config, highlight
 from .commands import discover as user_commands, summarize as summarize_commands
 from .instructions import load_instructions, render
 from .permissions import MODES
 from .provider import DEFAULT_NUM_CTX
 from .rules import DECISIONS
 from .skills import discover as discover_skills
-from .tools.base import ToolError, validate_arguments
+from .tools.base import ToolError, set_output_budget, validate_arguments
 from .tools.shell import NO_SHELL, resolve_shell
 
 HELP = """\
@@ -34,6 +34,7 @@ Commands
   /review [base]      review uncommitted changes, or this branch against base
   /model [name]       show or switch the Ollama model
   /mode [ask|auto|plan]   show or switch the permission mode (or shift+tab)
+  /config [set|unset] show or change the settings that outlive this session
   /permissions        list remembered decisions, or `remember`/`revoke` one
   /doctor             check that this install can run a turn
   /help               this list
@@ -317,6 +318,97 @@ class Repl:
         self.permissions.mode = argument
         self.out(f"Permission mode is now {argument}.")
         return Command()
+
+    CONFIG_USAGE = (
+        "Usage: /config\n"
+        "       /config set <key> <value> [--workspace]\n"
+        "       /config unset <key> [--workspace]"
+    )
+
+    def do_config(self, argument: str) -> Command:
+        """Show the settings in force, or change one for good.
+
+        `/model` and `/mode` change this session and forget it at the prompt;
+        this writes the change down. Which is also why it says, every time,
+        whether the running session took the new value or whether it starts
+        applying at the next one -- a setting that was stored but is not in
+        force is exactly the kind of thing that gets debugged twice.
+        """
+        words = argument.split()
+        scope = config.WORKSPACE if "--workspace" in words else config.GLOBAL
+        words = [word for word in words if word != "--workspace"]
+        root = self.workspace.root
+
+        if not words:
+            settings = config.load(root)
+            if settings.error:
+                self.out(settings.error)
+            self.out(config.render(settings))
+            return Command()
+
+        verb, rest = words[0], words[1:]
+        try:
+            if verb == "set":
+                if len(rest) < 2:
+                    raise config.ConfigError(f"set takes a key and a value.\n{self.CONFIG_USAGE}")
+                # Joined, so a value with a space in it is not silently halved.
+                key = rest[0]
+                config.set_value(key, " ".join(rest[1:]), scope=scope, root=root)
+            elif verb == "unset":
+                if len(rest) != 1:
+                    raise config.ConfigError(f"unset takes one key.\n{self.CONFIG_USAGE}")
+                key = rest[0]
+                if not config.unset(key, scope=scope, root=root):
+                    self.out(f"{key} was not set in the {scope} config.")
+                    return Command()
+            else:
+                self.out(self.CONFIG_USAGE)
+                return Command()
+        except config.ConfigError as exc:
+            self.out(str(exc))
+            return Command()
+
+        # Read back rather than assumed: unsetting a workspace value leaves
+        # whatever the global file or the default says, and that is the value
+        # the session should now be running.
+        value = config.load(root).values[key]
+        self.out(
+            f"{key} is now {config.format_value(value)} ({scope} config). "
+            + self._adopt(key, value)
+        )
+        return Command()
+
+    def _adopt(self, key: str, value) -> str:
+        """Apply a setting to the running session, and say whether it took.
+
+        Three of them cannot be applied: the provider is constructed once, and
+        instructions and skills are baked into the system prompt before the
+        first turn. Saying so is better than a silent no-op -- and better than
+        rebuilding half a session under the user, which is what a restart is
+        for.
+        """
+        if not config.BY_NAME[key].live:
+            return "Takes effect in the next session."
+
+        provider = self.agent.provider
+        if key == "model":
+            provider.model = value
+            self.agent.session.model = value
+        elif key == "host":
+            provider.host = str(value).rstrip("/")
+        elif key == "num_ctx":
+            provider.num_ctx = value
+            # The tool-output cap is a share of the window, so it moves with it.
+            set_output_budget(value)
+        elif key == "temperature":
+            provider.temperature = value
+        elif key == "mode":
+            self.permissions.mode = value
+        elif key == "scout":
+            self.agent.scout_root = self.workspace.root if value else None
+        elif key == "max_iterations":
+            self.agent.max_iterations = value
+        return "Applied to this session."
 
     PERMISSIONS_USAGE = (
         "Usage: /permissions\n"

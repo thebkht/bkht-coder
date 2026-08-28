@@ -62,7 +62,7 @@ def test_exit_quits(repl):
 def test_help_lists_every_command(repl):
     r, lines = repl
     r.dispatch("/help")
-    for name in ("/tools", "/context", "/clear", "/undo", "/diff", "/model", "/mode", "/exit"):
+    for name in ("/tools", "/context", "/clear", "/undo", "/diff", "/model", "/mode", "/config", "/exit"):
         assert name in lines[0]
 
 
@@ -376,3 +376,70 @@ def test_doctor_runs_against_this_sessions_settings(repl):
     r, lines = repl
     r.dispatch("/doctor")
     assert any("num_ctx" in line for line in lines)
+
+
+def test_config_lists_every_setting_with_its_source(repl):
+    r, lines = repl
+    r.dispatch("/config")
+    text = lines[-1]
+    for key in ("provider", "model", "num_ctx", "max_iterations"):
+        assert key in text
+    assert "default" in text
+
+
+def test_config_set_persists_and_reaches_the_running_session(repl):
+    from bkht.coder import config
+
+    r, lines = repl
+    r.dispatch("/config set model qwen2.5-coder:7b")
+    assert config.load(r.workspace.root).values["model"] == "qwen2.5-coder:7b"
+    assert r.agent.provider.model == "qwen2.5-coder:7b"
+    assert r.agent.session.model == "qwen2.5-coder:7b"
+    assert "Applied to this session." in lines[-1]
+
+
+def test_config_set_mode_flips_the_live_permission_mode(repl):
+    r, _ = repl
+    r.dispatch("/config set mode plan")
+    assert r.permissions.mode == PLAN
+
+
+def test_config_set_provider_says_it_waits_for_the_next_session(repl):
+    r, lines = repl
+    r.dispatch("/config set provider ollama")
+    assert "next session" in lines[-1]
+
+
+def test_config_set_workspace_writes_beside_the_project(repl):
+    from bkht.coder import config
+
+    r, _ = repl
+    r.dispatch("/config set --workspace num_ctx 8192")
+    written = r.workspace.root / config.WORKSPACE_NAME
+    assert written.is_file()
+    assert r.agent.provider.num_ctx == 8192
+
+
+def test_config_unset_restores_the_default(repl):
+    from bkht.coder import config
+
+    r, lines = repl
+    r.dispatch("/config set model qwen2.5-coder:7b")
+    r.dispatch("/config unset model")
+    assert config.load(r.workspace.root).values["model"] == config.BY_NAME["model"].default
+    r.dispatch("/config unset model")
+    assert "was not set" in lines[-1]
+
+
+def test_config_rejects_a_value_the_key_cannot_hold(repl):
+    r, lines = repl
+    r.dispatch("/config set num_ctx enormous")
+    assert "num_ctx" in lines[-1]
+    r.dispatch("/config set nonesuch 1")
+    assert "nonesuch" in lines[-1]
+
+
+def test_config_with_a_verb_it_does_not_know_prints_usage(repl):
+    r, lines = repl
+    r.dispatch("/config wibble")
+    assert "Usage: /config" in lines[-1]
