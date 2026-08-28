@@ -61,10 +61,10 @@ IMAGE_CHIP = "[Image #{number}]"
 #: pasting a file is rarely to edit it afterwards.
 PASTE_LINES = 4
 
-#: What is left in place of the lines a fold takes out. Both ends of the paste
-#: are kept around it: a count alone says something was pasted, and the ends
-#: say which thing.
-ELISION = "⋮ +{hidden} lines"
+#: What is left in place of a paste a fold takes out. One line, numbered, with
+#: the count that says how much it stands for: the block is there to be talked
+#: about, not read, and a chip that stays one row keeps it that way.
+PASTE_CHIP = "[Pasted text #{number}, {lines} lines]"
 
 
 def available(stdin=None, stdout=None) -> bool:
@@ -120,6 +120,7 @@ class Editor:
         self.caret = 0  # which of those rows the cursor was left on
         self.recall = 0  # how far up the history the arrows have walked
         self.draft = ""  # what was being typed before they started
+        self.pending = ""  # an escape sequence cut in half by the end of a read
         self.pasting = False  # between the bracketed-paste markers
         self.paste_at = 0  # where the current paste began in the buffer
         self.pastes: dict[int, tuple[str, str]] = {}  # number -> (chip, full text)
@@ -142,6 +143,7 @@ class Editor:
         self.caret = 0
         self.recall = len(self.history)
         self.draft = ""
+        self.pending = ""
         self.pasting = False
         self.paste_at = 0
         self.pastes = {}
@@ -168,7 +170,7 @@ class Editor:
                     continue
                 line = self._consume(keys, prompt)
                 if line is None:
-                    self._redraw(prompt)
+                    self._paint(prompt)
                     continue
                 return line
         except KeyboardInterrupt:
@@ -190,12 +192,19 @@ class Editor:
         A chunk rather than a key: a paste arrives as one read, and so does
         anything typed faster than the loop goes round.
         """
+        keys, self.pending = self.pending + keys, ""
         index = 0
         while index < len(keys):
             key = keys[index]
             index += 1
             if key == ESC:
                 sequence, index = self._escape(keys, index)
+                if sequence is None:
+                    # The read ended mid-sequence. Held rather than acted on:
+                    # half of `[201~` taken for text is a paste that never
+                    # ends and a block that never folds.
+                    self.pending = keys[index:]
+                    break
                 self._control(sequence)
                 continue
             if key in ("\r", "\n"):
@@ -236,12 +245,16 @@ class Editor:
                 self._insert(key)
         return None
 
-    def _escape(self, keys: str, index: int) -> tuple[str, int]:
+    def _escape(self, keys: str, index: int) -> tuple[str | None, int]:
         """The rest of an escape sequence, and where it ended.
 
         Terminated by the first byte that can end one -- a letter, or ``~`` --
         so an unknown sequence is swallowed whole rather than leaving its tail
-        to be typed into the line.
+        to be typed into the line. ``None`` when a sequence that had started ran
+        out with the chunk: it is not wrong, it is not all here yet, and the
+        caller holds what there is until the rest arrives. A lone ESC at the
+        end is not held -- that is the Escape key, and waiting on it would eat
+        the next thing typed.
         """
         if index >= len(keys):
             return "", index
@@ -250,7 +263,9 @@ class Editor:
         end = index + 1
         while end < len(keys) and not (keys[end].isalpha() or keys[end] == "~"):
             end += 1
-        return keys[index : end + 1], min(end + 1, len(keys))
+        if end >= len(keys):
+            return None, index - 1
+        return keys[index : end + 1], end + 1
 
     def _control(self, sequence: str) -> None:
         if sequence == PASTE_START:
@@ -340,16 +355,14 @@ class Editor:
         self._insert(IMAGE_CHIP.format(number=len(self.images)))
         self.on_image(path)
 
-    def _chip(self, text: str) -> str:
-        """A long paste as the three lines that stand for it on screen.
+    def _chip(self, number: int, text: str) -> str:
+        """A long paste as the one line that stands for it on screen.
 
-        Its first line, a count of what is not shown, and its last. Both ends
-        rather than a count alone: a count says something was pasted, and the
-        ends say which thing -- which is what you need when the reason you
-        pasted it is to talk about it.
+        Numbered, so a prompt carrying two of them can say which is which, and
+        counted, so the line says how much it stands for. The text itself is
+        put back on the way out; on screen it is a single row.
         """
-        lines = text.split("\n")
-        return "\n".join([lines[0], ELISION.format(hidden=len(lines) - 2), lines[-1]])
+        return PASTE_CHIP.format(number=number, lines=text.count("\n") + 1)
 
     def _fold_paste(self) -> None:
         """Fold a long paste down to the lines that stand for it.
@@ -361,8 +374,9 @@ class Editor:
         text = self.buffer[self.paste_at : self.cursor]
         if text.count("\n") + 1 <= PASTE_LINES:
             return
-        chip = self._chip(text)
-        self.pastes[len(self.pastes) + 1] = (chip, text)
+        number = len(self.pastes) + 1
+        chip = self._chip(number, text)
+        self.pastes[number] = (chip, text)
         self.buffer = self.buffer[: self.paste_at] + chip + self.buffer[self.cursor :]
         self.cursor = self.paste_at + len(chip)
 
@@ -459,6 +473,19 @@ class Editor:
             columns = terminal.visible(prefix) + len(line)
             counts.append(max(1, -(-columns // width)))
         return counts
+
+    def _paint(self, prompt: str) -> None:
+        """Redraw, unless a paste is still arriving.
+
+        A long paste comes in over several reads, and painting each one draws
+        a taller block than the last. Once the block is taller than the window
+        the terminal scrolls, the cursor-up erase can no longer reach the top
+        of what was drawn, and every frame is left behind -- one paste ends up
+        looking like six. Nothing is drawn until the paste ends and folds.
+        """
+        if self.pasting:
+            return
+        self._redraw(prompt)
 
     def _redraw(self, prompt: str) -> None:
         width = max(20, terminal.width())

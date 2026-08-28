@@ -258,12 +258,27 @@ def test_ctrl_k_kills_to_the_end_of_the_line_only():
     assert ed.buffer == "one\n"
 
 
-def test_a_long_paste_is_folded_to_its_first_and_last_lines():
-    # Both ends, not a count alone: a count says something was pasted, and the
-    # ends say which thing.
+def test_a_long_paste_is_folded_to_one_numbered_line():
     ed = editor()
     paste(ed, "\n".join(f"line {n}" for n in range(40)))
-    assert ed.buffer == "line 0\n⋮ +38 lines\nline 39"
+    assert ed.buffer == "[Pasted text #1, 40 lines]"
+
+
+def test_a_second_paste_gets_its_own_number():
+    ed = editor()
+    body = "\n".join(f"line {n}" for n in range(40))
+    paste(ed, body)
+    paste(ed, body)
+    assert ed.buffer == "[Pasted text #1, 40 lines][Pasted text #2, 40 lines]"
+
+
+def test_both_folded_pastes_are_put_back_in_order():
+    ed = editor()
+    first = "\n".join(f"one {n}" for n in range(40))
+    second = "\n".join(f"two {n}" for n in range(40))
+    paste(ed, first)
+    paste(ed, second)
+    assert type(ed, "\r") == first + second
 
 
 def test_a_folded_paste_is_put_back_when_the_line_is_sent():
@@ -288,12 +303,12 @@ def test_a_paste_at_the_threshold_is_still_shown_whole():
     assert ed.buffer == body
 
 
-def test_a_folded_paste_grows_the_block_by_three_rows_not_forty():
+def test_a_folded_paste_grows_the_block_by_one_row_not_forty():
     ed = editor()
     paste(ed, "\n".join(f"line {n}" for n in range(40)))
     ed._redraw("> ")
-    # rule, three lines, rule -- and no footer on this editor.
-    assert ed.drawn == 5
+    # rule, the chip, rule -- and no footer on this editor.
+    assert ed.drawn == 3
 
 
 def test_history_remembers_the_fold_not_the_whole_file():
@@ -301,7 +316,42 @@ def test_history_remembers_the_fold_not_the_whole_file():
     ed = editor()
     paste(ed, "\n".join(f"line {n}" for n in range(40)))
     type(ed, "\r")
-    assert ed.history == ["line 0\n⋮ +38 lines\nline 39"]
+    assert ed.history == ["[Pasted text #1, 40 lines]"]
+
+
+def test_a_paste_split_across_two_reads_still_folds():
+    # The end marker can be cut in half by the end of a read. Half of `[201~`
+    # taken for text is a paste that never ends and a block that never folds.
+    ed = editor()
+    body = "\n".join(f"line {n}" for n in range(40))
+    chunk = f"\x1b[200~{body}\x1b[201~"
+    cut = len(chunk) - 3
+    type(ed, chunk[:cut])
+    type(ed, chunk[cut:])
+    assert ed.buffer == "[Pasted text #1, 40 lines]"
+    assert not ed.pasting
+
+
+def test_nothing_is_drawn_while_a_paste_is_still_arriving():
+    # Each frame is taller than the last; once the block outgrows the window
+    # the erase cannot reach the top and every frame is left behind.
+    out = io.StringIO()
+    ed = editor(stdout=out)
+    type(ed, "\x1b[200~" + "\n".join(f"line {n}" for n in range(40)))
+    out.truncate(0)
+    out.seek(0)
+    ed._paint("> ")
+    assert out.getvalue() == ""
+    type(ed, "\x1b[201~")
+    ed._paint("> ")
+    assert out.getvalue() != ""
+
+
+def test_escape_alone_does_not_swallow_the_next_key():
+    ed = editor()
+    type(ed, "\x1b")
+    type(ed, "a")
+    assert ed.buffer == "a"
 
 
 # --- images -------------------------------------------------------------------

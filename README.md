@@ -32,10 +32,10 @@ away: piped runs print the same plain transcript they always did.
 The prompt takes more than one line. Paste a forty-line block and it arrives as
 one prompt rather than forty; **alt+enter** or a trailing `\` opens a line, and
 the arrows move within the buffer before they reach back into the history. A
-paste longer than four lines folds to its first line, a `⋮ +230 lines` marker
-and its last, and is put back in full when the line is sent — both ends,
-because a count alone says something was pasted and the ends say which thing. **Ctrl-V** attaches an image from the
-clipboard — terminals cannot deliver one in a paste, so it has a key of its
+paste longer than four lines folds to a single `[Pasted text #1, 230 lines]`
+chip and is put back in full when the line is sent — numbered, so a prompt
+carrying two of them can say which is which. **Ctrl-V** attaches an image
+from the clipboard — terminals cannot deliver one in a paste, so it has a key of its
 own — and says at once whether the model you are running can actually see it.
 Tab completes slash commands, and shift+tab cycles the permission mode, which
 the line under the prompt names as you type.
