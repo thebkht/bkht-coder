@@ -15,7 +15,7 @@ from ..agent import Agent
 from ..context import file_tree
 from ..permissions import ASK, AUTO, Permissions, ask_terminal
 from ..prompts import system_prompt
-from ..provider import build, for_review
+from ..provider import DEFAULT_PROVIDER, build, for_review
 from ..session import Session, Snapshots
 from ..tools import build_registry
 from ..tools.base import set_output_budget
@@ -210,7 +210,7 @@ def run(args) -> int:
     set_output_budget(args.num_ctx)
     provider = for_review(
         build(
-            getattr(args, "provider", "ollama"),
+            getattr(args, "provider", DEFAULT_PROVIDER),
             model=args.model, host=args.host, num_ctx=args.num_ctx,
         )
     )

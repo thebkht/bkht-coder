@@ -164,10 +164,11 @@ wins over anything on disk.
 
 | Flag                | Default                  | What it does                                                     |
 | ------------------- | ------------------------ | ---------------------------------------------------------------- |
-| `--model`           | `qwen2.5-coder:14b`      | Ollama model tag                                                 |
-| `--host`            | `http://localhost:11434` | Ollama server URL                                                |
+| `--provider`        | `ollama`                 | Backend: `ollama`, `claude-code`, `codex`                        |
+| `--model`           | `qwen2.5-coder:14b`      | Model tag, or the backend's own default                          |
+| `--host`            | `http://localhost:11434` | Ollama server URL (`ollama` only)                                |
 | `--num-ctx`         | `16384`                  | Context window requested from Ollama (values ≤ 4096 are refused) |
-| `--temperature`     | `0.2`                    | Sampling temperature; low keeps tool calls well-formed           |
+| `--temperature`     | `0.2`                    | Sampling temperature; low keeps tool calls well-formed (`ollama` only) |
 | `--cwd`             | `.`                      | Workspace root the tools are confined to                         |
 | `--max-iterations`  | `25`                     | Cap on agent loop iterations per task                            |
 | `--no-instructions` | off                      | Ignore `AGENTS.md` / `CLAUDE.md`                                 |
@@ -212,14 +213,47 @@ The keys are `provider`, `model`, `host`, `num_ctx`, `temperature`, `mode`,
 flag, so nothing becomes configurable that was not already. A bad file is not
 fatal: the settings fall back to their defaults and the reason is printed once.
 
-`provider` accepts `ollama` and nothing else today. It exists because it is the
-seam a hosted backend lands on — adding one is a new provider class and a new
-entry in the registry, not a change to how arguments are handled.
-
 The same thing works mid-session: `/config` lists, `/config set <key> <value>`
 writes and applies the change to the running agent where it can, and says so
 plainly when it cannot — `provider`, `instructions` and `skills` wait for the
 next session. Add `--workspace` to either to write the repo's file instead.
+
+## Borrowing a bigger model
+
+`ollama` is the default and the only backend that keeps the work on this
+machine. Two others exist for when a task is past what a 14b local model can
+do, and both use a login you already have rather than an API key:
+
+```
+coder config set provider claude-code    # the `claude` command
+coder config set provider codex          # the `codex` command
+coder --provider claude-code "..."       # or just for this run
+```
+
+Switching brings that backend's own model and window with it — `claude-code`
+runs `opus` at 1M, `codex` runs `gpt-5.5` at 400k — unless you have pinned a
+`model` yourself, in which case yours is kept and a wrong one fails loudly
+rather than being quietly replaced.
+
+**They are transports, not agents.** Claude Code and Codex are each a complete
+coding agent, and none of that is wanted here: coder has a permission gate, a
+snapshot store and `/undo`, and an edit made behind those is an edit you cannot
+take back. So both are launched with their own tooling shut off — `--tools ""`
+for Claude Code, a read-only sandbox for Codex, neither reading your settings
+for them — and asked only to produce text. Every tool call in that text is
+executed by coder, through the same prompt you would have seen locally.
+
+Two things are true of both and of neither by accident. The work leaves the
+machine, which is the thing the Ollama default exists to avoid. And each turn
+launches a process, because these tools keep no conversation between calls —
+which costs a second and is otherwise free, since coder resends its whole
+history every turn anyway.
+
+`coder doctor` checks whichever backend is configured: with `ollama` it probes
+the server, the pulled weights and this machine's memory, and with the other
+two it checks that the command is installed. Whether the login is still good is
+not checked, because asking would spend your own quota to find out; a lapsed
+login shows up on the first turn, in the tool's own words.
 
 ## Project instructions
 

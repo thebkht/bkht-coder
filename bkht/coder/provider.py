@@ -23,6 +23,10 @@ import httpx
 
 from .parsing import ToolCall, parse_tool_calls, strip_json
 
+#: The backend a session runs on unless it is told otherwise. Local, because
+#: that is the promise this project makes; the others are opt-in.
+DEFAULT_PROVIDER = "ollama"
+
 DEFAULT_HOST = "http://localhost:11434"
 DEFAULT_MODEL = "qwen2.5-coder:14b"
 # Measured on a 16 GB M-series machine with qwen2.5-coder:14b (Q4, ~9 GB of
@@ -59,6 +63,17 @@ MIN_USEFUL_NUM_CTX = 4096
 # repeats it verbatim on every retry, and the retry exists to get a different
 # answer.
 DEFAULT_TEMPERATURE = 0.2
+
+# The two agent CLIs coder can borrow a model from, and the window each one
+# reports. Unlike `num_ctx` on Ollama these are not something a request asks
+# for -- the window is a property of the model, and coder only needs the number
+# to know when a history is getting close to it. Set `num_ctx` lower to have
+# long sessions compact themselves sooner.
+DEFAULT_CLAUDE_CODE_MODEL = "opus"
+CLAUDE_CODE_NUM_CTX = 1_000_000
+
+DEFAULT_CODEX_MODEL = "gpt-5.5"
+CODEX_NUM_CTX = 400_000
 
 # Ollama unloads a model after five idle minutes by default. A turn that has to
 # reload 9 GB of weights before its first token spends longer waiting than
@@ -251,24 +266,53 @@ class OllamaProvider:
         return True
 
 
+def _ollama():
+    return OllamaProvider
+
+
+def _claude_code():
+    from .external import ClaudeCodeProvider
+
+    return ClaudeCodeProvider
+
+
+def _codex():
+    from .external import CodexProvider
+
+    return CodexProvider
+
+
 #: Every backend that can be named in ``config.provider``, by that name.
 #:
-#: One entry, which is the point: the indirection in this file was always meant
-#: to make a hosted backend a new class rather than a refactor, and this is
-#: where that class gets wired in. Until one exists, `ollama` is the only
-#: provider that validates -- and the error for anything else names what is
-#: actually available rather than failing at the first turn.
-BACKENDS = {"ollama": OllamaProvider}
+#: The values are loaders rather than classes so that naming a backend is what
+#: imports it. The error for a name that is not here lists what is, rather than
+#: failing at the first turn.
+BACKENDS = {"ollama": _ollama, "claude-code": _claude_code, "codex": _codex}
+
+#: The defaults that depend on which backend is running.
+#:
+#: A model tag, a server URL and a window size all mean something different to a
+#: local server than to a hosted API, so `provider` cannot be switched on its
+#: own without these moving with it. ``config`` reads this for any of the three
+#: the user has not set themselves, which is what makes switching one command
+#: rather than four. An empty host means "wherever the backend goes by default".
+DEFAULTS = {
+    "ollama": {"model": DEFAULT_MODEL, "host": DEFAULT_HOST, "num_ctx": DEFAULT_NUM_CTX},
+    "claude-code": {
+        "model": DEFAULT_CLAUDE_CODE_MODEL, "host": "", "num_ctx": CLAUDE_CODE_NUM_CTX,
+    },
+    "codex": {"model": DEFAULT_CODEX_MODEL, "host": "", "num_ctx": CODEX_NUM_CTX},
+}
 
 
-def build(name: str = "ollama", **options) -> Provider:
+def build(name: str = DEFAULT_PROVIDER, **options) -> Provider:
     """The provider called ``name``, constructed with ``options``."""
-    backend = BACKENDS.get(name)
-    if backend is None:
+    loader = BACKENDS.get(name)
+    if loader is None:
         raise ProviderError(
             f"unknown provider {name!r}; available: {', '.join(sorted(BACKENDS))}"
         )
-    return backend(**options)
+    return loader()(**options)
 
 
 def for_review(provider: Provider) -> Provider:

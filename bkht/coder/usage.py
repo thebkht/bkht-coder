@@ -33,10 +33,12 @@ def title() -> str:
 #: Each of them overrides the matching key in the config files; `coder config`
 #: shows what those are set to and where each value came from.
 COMMON = """\
-  --model <name>          Ollama model to use
-  --host <url>            Ollama server URL
+  --provider <name>       Backend: ollama, claude-code, codex
+  --model <name>          Model to use
+  --host <url>            Ollama server URL (ollama only)
   --num-ctx <n>           Context window to request
   --temperature <n>       Sampling temperature; low keeps tool calls valid
+                          (ollama only)
   --cwd <path>            Workspace root; defaults to the current directory
   --auto                  Allow every tool call without prompting
   --no-instructions       Ignore AGENTS.md and CLAUDE.md
@@ -106,7 +108,17 @@ for the run you are in, and a workspace can pin what a project needs.
   ~/.bkht-coder/config.json      personal defaults, everywhere
   .bkht-coder/config.json        this workspace only, written with --workspace
 
-`provider` names the model backend. `ollama` is the only one there is today.
+`provider` names the model backend:
+
+  ollama        a local server -- the default, and the only one that keeps
+                the work on this machine
+  claude-code   the `claude` command, using the login it already has
+  codex         the `codex` command, using the login it already has
+
+The other two are borrowed transports: their own file tools are switched off,
+and every change still goes through coder's permission gate. Switching provider
+brings that backend's own model and window with it unless you have pinned your
+own.
 
 Usage:
   coder config [list] [flags]
@@ -116,11 +128,11 @@ Usage:
   coder config path
 
 Settings:
-  provider                Model backend; only `ollama` today
+  provider                Model backend: ollama, claude-code, codex
   model                   Model to run
-  host                    Server URL
-  num_ctx                 Context window to request
-  temperature             Sampling temperature
+  host                    Server URL (ollama only)
+  num_ctx                 Context window to plan for
+  temperature             Sampling temperature (ollama only)
   mode                    Permission mode: ask, auto, plan
   scout                   Search the workspace before each task
   max_iterations          Cap on loop iterations per task

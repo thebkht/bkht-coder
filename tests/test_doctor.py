@@ -235,3 +235,37 @@ def test_asking_for_more_than_the_default_is_still_told_to_lower_it():
 
 def test_a_machine_too_small_for_any_window_is_sent_to_the_7b():
     assert "qwen2.5-coder:7b" in check_context(8192, 4).fix
+
+
+# --- a backend that is not a local server ------------------------------------
+
+
+def test_a_hosted_backend_replaces_the_three_ollama_checks(monkeypatch, tmp_path):
+    # Nothing about a local server describes a model reached through somebody
+    # else's command line, and a report that fails on a server the user is not
+    # running is a report they learn to ignore.
+    monkeypatch.setattr(doctor, "_tags", lambda host: pytest.fail("probed Ollama"))
+    checks = doctor.run_checks(tmp_path, provider="claude-code", model="opus")
+    names = [check.name for check in checks]
+    assert "ollama" not in names and "num_ctx" not in names
+    assert "backend" in names
+
+
+def test_an_installed_backend_passes(monkeypatch, tmp_path):
+    monkeypatch.setattr("bkht.coder.external.shutil.which", lambda name: f"/usr/bin/{name}")
+    check = doctor.check_backend("codex", "gpt-5.5")
+    assert check.status == doctor.OK
+    assert "codex" in check.detail and "gpt-5.5" in check.detail
+
+
+def test_a_missing_backend_fails_with_the_way_to_install_it(monkeypatch, tmp_path):
+    monkeypatch.setattr("bkht.coder.external.shutil.which", lambda name: None)
+    check = doctor.check_backend("claude-code", "opus")
+    assert check.status == doctor.FAIL
+    assert "claude.com/claude-code" in check.fix
+
+
+def test_a_backend_that_does_not_exist_fails_rather_than_raising(tmp_path):
+    check = doctor.check_backend("gemini", "whatever")
+    assert check.status == doctor.FAIL
+    assert "ollama" in check.detail

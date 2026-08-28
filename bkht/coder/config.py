@@ -14,10 +14,12 @@ Resolution runs lowest to highest -- built-in default, global file, workspace
 file, then the flag typed on the command line. A flag always wins, because the
 flag is the thing the user is holding.
 
-``provider`` is here before there is anything to switch to. The registry in
-``provider.py`` has one entry, so ``ollama`` is the only value that validates
-today; the key exists so that adding a hosted backend is a new class and a new
-dict entry rather than a change to how settings are read.
+``provider`` names the backend, and the three settings that mean something
+different to each backend -- the model tag, the server URL and the window size
+-- follow it. Switching to ``claude`` without also naming a model would
+otherwise ask Anthropic for a model tag that only a local Ollama has ever heard
+of, so any of those three the user has not set themselves is taken from the
+provider's own defaults instead of from a constant.
 
 Reading never raises. A config file that cannot be parsed leaves the session on
 its defaults and hands back a sentence to print -- refusing to start would take
@@ -36,9 +38,11 @@ from .agent import MAX_ITERATIONS
 from .permissions import ASK, AUTO, MODES, PLAN
 from .provider import (
     BACKENDS,
+    DEFAULTS,
     DEFAULT_HOST,
     DEFAULT_MODEL,
     DEFAULT_NUM_CTX,
+    DEFAULT_PROVIDER,
     DEFAULT_TEMPERATURE,
     MIN_USEFUL_NUM_CTX,
 )
@@ -76,11 +80,11 @@ class Field:
 
 
 FIELDS: tuple[Field, ...] = (
-    Field("provider", "str", "ollama", "Model backend. Only `ollama` today.", live=False),
+    Field("provider", "str", DEFAULT_PROVIDER, f"Model backend: {', '.join(sorted(BACKENDS))}.", live=False),
     Field("model", "str", DEFAULT_MODEL, "Model to run."),
     Field("host", "str", DEFAULT_HOST, "Server URL."),
-    Field("num_ctx", "int", DEFAULT_NUM_CTX, "Context window to request."),
-    Field("temperature", "float", DEFAULT_TEMPERATURE, "Sampling temperature."),
+    Field("num_ctx", "int", DEFAULT_NUM_CTX, "Context window to plan for."),
+    Field("temperature", "float", DEFAULT_TEMPERATURE, "Sampling temperature (Ollama only)."),
     Field("mode", "str", ASK, f"Permission mode: {', '.join(MODES)}."),
     Field("scout", "bool", True, "Search the workspace before each task."),
     Field("max_iterations", "int", MAX_ITERATIONS, "Cap on loop iterations per task."),
@@ -238,13 +242,21 @@ class Settings:
         that distinction a config file could never win over a flag that is
         always present.
         """
-        for name, dest in (
-            ("provider", "provider"), ("model", "model"), ("host", "host"),
-            ("num_ctx", "num_ctx"), ("temperature", "temperature"),
-            ("max_iterations", "max_iterations"),
-        ):
-            if getattr(args, dest, "missing") is None:
-                setattr(args, dest, self.values[name])
+        # `--provider` is resolved first, and it moves the three settings whose
+        # meaning depends on it. Otherwise `--provider claude-code` would run
+        # Claude Code against the model tag the config file picked for Ollama.
+        if getattr(args, "provider", "missing") is None:
+            args.provider = self.values["provider"]
+        chosen = getattr(args, "provider", self.values["provider"])
+        follows = {
+            key: value
+            for key, value in DEFAULTS.get(chosen, {}).items()
+            if self.source(key) == DEFAULT
+        }
+
+        for name in ("model", "host", "num_ctx", "temperature", "max_iterations"):
+            if getattr(args, name, "missing") is None:
+                setattr(args, name, follows.get(name, self.values[name]))
 
         # The negative switches carry only one bit: present means off, absent
         # means "whatever was configured". So they are filled from the inverse.
@@ -291,8 +303,21 @@ def load(root=None) -> Settings:
                 continue
             settings.sources[key] = scope
 
+    _follow_provider(settings)
     settings.error = "; ".join(problems)
     return settings
+
+
+def _follow_provider(settings: Settings) -> None:
+    """Re-default the settings whose meaning depends on the backend.
+
+    Only the ones still sitting on a built-in default are touched. A value the
+    user wrote down is theirs -- if they have pinned a model, switching provider
+    should fail loudly on that model rather than quietly run a different one.
+    """
+    for key, value in DEFAULTS.get(settings.values["provider"], {}).items():
+        if settings.source(key) == DEFAULT:
+            settings.values[key] = value
 
 
 def _write(path: Path, stored: dict) -> None:

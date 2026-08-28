@@ -199,4 +199,4 @@ def test_build_returns_the_named_backend():
 
 def test_build_names_what_is_available_when_the_backend_is_unknown():
     with pytest.raises(ProviderError, match="ollama"):
-        build("codex", model="m")
+        build("gemini", model="m")

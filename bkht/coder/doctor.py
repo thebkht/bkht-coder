@@ -22,6 +22,7 @@ import httpx
 
 from .instructions import load_instructions
 from .provider import DEFAULT_HOST, DEFAULT_MODEL, DEFAULT_NUM_CTX
+from .provider import DEFAULT_PROVIDER, ProviderError, build
 from .session import STATE_DIR
 from .skills import discover as discover_skills
 from .tools.shell import resolve_shell
@@ -162,6 +163,29 @@ def check_model(model: str, tags: list[str] | None) -> Check:
         f"{model} is not pulled",
         f"Run `ollama pull {model}`.",
     )
+
+
+def check_backend(name: str, model: str) -> Check:
+    """The one check that replaces the three Ollama ones for a hosted backend.
+
+    Nothing here sends a turn. Whether the tool is logged in cannot be asked
+    without spending the user's own quota to find out, and a report that costs
+    money to run is a report nobody runs -- so this answers the half that is
+    free, and a login that has lapsed surfaces on the first turn instead, in the
+    tool's own words.
+    """
+    try:
+        backend = build(name, model=model)
+    except ProviderError as exc:
+        return Check("backend", FAIL, str(exc), f"Run `coder config set provider {DEFAULT_PROVIDER}`.")
+
+    command = getattr(backend, "command", name)
+    if not backend.available():
+        return Check(
+            "backend", FAIL, f"{command} is not installed",
+            getattr(backend, "install_hint", ""),
+        )
+    return Check("backend", OK, f"{command} answers for {model}")
 
 
 def total_ram_gb() -> float | None:
@@ -307,25 +331,42 @@ def check_workspace(root: Path) -> Check:
     return Check("workspace", OK, str(root))
 
 
+def _model_checks(provider: str, model: str, host: str, num_ctx: int) -> list[Check]:
+    """The checks that only make sense for the backend actually in use.
+
+    Three of them are about a local server: whether it is up, whether the weights
+    are pulled, and whether this machine has the memory for the window. None of
+    that describes a model reached through somebody else's command line, and a
+    report that fails on a server the user is not using is a report that teaches
+    them to ignore it.
+    """
+    if provider != DEFAULT_PROVIDER:
+        return [check_backend(provider, model)]
+    tags, problem = _tags(host)
+    return [
+        check_server(host, tags, problem),
+        check_model(model, tags),
+        check_context(num_ctx, total_ram_gb()),
+    ]
+
+
 def run_checks(
     root: Path,
     model: str = DEFAULT_MODEL,
     host: str = DEFAULT_HOST,
     num_ctx: int = DEFAULT_NUM_CTX,
+    provider: str = DEFAULT_PROVIDER,
 ) -> list[Check]:
     """Every check, in the order a failing install should be read in.
 
     Which copy is running and where it was pointed come first: both can make
     every check below them describe a program the user is not actually running.
-    Then the server, because nothing under it means anything if it is down.
+    Then the model, because nothing under it means anything if it cannot answer.
     """
-    tags, problem = _tags(host)
     return [
         check_version(root),
         check_workspace(root),
-        check_server(host, tags, problem),
-        check_model(model, tags),
-        check_context(num_ctx, total_ram_gb()),
+        *_model_checks(provider, model, host, num_ctx),
         check_shell(),
         check_git(),
         check_state_dir(),
@@ -358,11 +399,12 @@ def report(
     model: str = DEFAULT_MODEL,
     host: str = DEFAULT_HOST,
     num_ctx: int = DEFAULT_NUM_CTX,
+    provider: str = DEFAULT_PROVIDER,
     as_json: bool = False,
     out=print,
 ) -> int:
     """Run every check and print it. Non-zero exit when one failed, for CI."""
-    checks = run_checks(root, model=model, host=host, num_ctx=num_ctx)
+    checks = run_checks(root, model=model, host=host, num_ctx=num_ctx, provider=provider)
     out(json.dumps([c.payload() for c in checks], indent=2) if as_json else render(checks))
     return 1 if any(check.failed for check in checks) else 0
 

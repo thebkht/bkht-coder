@@ -141,7 +141,29 @@ def test_bad_values_are_refused(key, raw):
 
 def test_the_unknown_provider_message_names_what_exists():
     with pytest.raises(ConfigError, match="ollama"):
-        config.parse("provider", "codex")
+        config.parse("provider", "gemini")
+
+
+def test_every_registered_backend_can_be_named():
+    for name in ("ollama", "claude-code", "codex"):
+        assert config.parse("provider", name) == name
+
+
+def test_switching_provider_brings_its_model_and_window_with_it(home, project):
+    # Otherwise `provider = claude-code` would ask Claude Code for a model tag
+    # only a local Ollama has ever heard of.
+    write(home, provider="claude-code")
+    settings = config.load(project)
+    assert settings.values["model"] == "opus"
+    assert settings.values["num_ctx"] == 1_000_000
+    assert settings.source("model") == config.DEFAULT
+
+
+def test_a_model_the_user_pinned_survives_a_provider_switch(home, project):
+    # A value they wrote down is theirs. Running a different model than the one
+    # they named would be worse than failing on the one they did.
+    write(home, provider="codex", model="qwen2.5-coder:7b")
+    assert config.load(project).values["model"] == "qwen2.5-coder:7b"
 
 
 def test_true_is_not_accepted_as_a_number():
@@ -439,3 +461,24 @@ def test_an_unreadable_config_does_not_stop_a_session_starting(home, project, ca
     args = configured(build_agent_parser().parse_args(["--cwd", str(project)]))
     assert args.model == config.DEFAULT_MODEL
     assert str(home) in capsys.readouterr().err
+
+
+def test_a_typed_provider_brings_its_model_with_it(home, project):
+    # `--provider claude-code` alone has to be enough. Without this it would run
+    # Claude Code against the model tag the file picked for Ollama.
+    args = namespace(provider="codex")
+    config.load(project).apply(args)
+    assert (args.model, args.num_ctx) == ("gpt-5.5", 400_000)
+
+
+def test_a_typed_provider_does_not_overrule_a_pinned_model(home, project):
+    write(home, model="qwen2.5-coder:7b")
+    args = namespace(provider="claude-code")
+    config.load(project).apply(args)
+    assert args.model == "qwen2.5-coder:7b"
+
+
+def test_a_typed_model_still_wins_over_the_backend_default(home, project):
+    args = namespace(provider="claude-code", model="sonnet")
+    config.load(project).apply(args)
+    assert args.model == "sonnet"

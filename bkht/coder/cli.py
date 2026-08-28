@@ -21,7 +21,8 @@ from .parsing import ToolCall
 from .permissions import ASK, AUTO, PLAN, Permissions, cycle as next_mode
 from .prompts import system_prompt
 from .prompt import Reader
-from .provider import DEFAULT_NUM_CTX, build as build_provider
+from .provider import BACKENDS, DEFAULT_NUM_CTX, DEFAULT_PROVIDER
+from .provider import build as build_provider
 from .repl import Repl
 from .review import cli as review_cli
 from .session import Session, Snapshots
@@ -223,7 +224,11 @@ def add_common_arguments(parser) -> None:
     # Unset defaults to None rather than to the built-in value, so that
     # `config.Settings.apply` can tell a flag the user typed from one argparse
     # filled in -- without that distinction a config file could never win.
-    parser.add_argument("--model", default=None, help="Ollama model to use.")
+    parser.add_argument(
+        "--provider", default=None, choices=sorted(BACKENDS),
+        help="Model backend to run the turn through.",
+    )
+    parser.add_argument("--model", default=None, help="Model to use.")
     parser.add_argument("--host", default=None, help="Ollama server URL.")
     parser.add_argument("--num-ctx", type=int, default=None, help="Context window to request.")
     parser.add_argument(
@@ -443,7 +448,7 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
     if permissions.rules is not None and permissions.rules.error:
         print(paint(permissions.rules.error, YELLOW, sys.stderr), file=sys.stderr)
     provider = build_provider(
-        getattr(args, "provider", "ollama"),
+        getattr(args, "provider", DEFAULT_PROVIDER),
         model=args.model, host=args.host, num_ctx=args.num_ctx,
         temperature=args.temperature,
     )
@@ -756,7 +761,7 @@ def main(argv: list[str] | None = None) -> int:
         return doctor.report(
             Path(args.cwd).expanduser().resolve(),
             model=args.model, host=args.host, num_ctx=args.num_ctx,
-            as_json=args.json,
+            provider=args.provider, as_json=args.json,
         )
 
     args = build_agent_parser().parse_args(argv)
