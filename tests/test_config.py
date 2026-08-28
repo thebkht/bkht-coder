@@ -482,3 +482,44 @@ def test_a_typed_model_still_wins_over_the_backend_default(home, project):
     args = namespace(provider="claude-code", model="sonnet")
     config.load(project).apply(args)
     assert args.model == "sonnet"
+
+
+# --- argv normalization -------------------------------------------------------
+#
+# argparse before CPython 3.12.7 drops a positional that follows a flag, which
+# made `config set --workspace <key> <value>` fail on a distro python while
+# passing everywhere else. These pin the reordering rather than the interpreter.
+
+
+def test_config_argv_moves_positionals_ahead_of_flags():
+    from bkht.coder.cli import config_argv
+
+    line = ["config", "set", "--workspace", "num_ctx", "8192", "--cwd", "/tmp/x"]
+    assert config_argv(line) == [
+        "config", "set", "num_ctx", "8192", "--workspace", "--cwd", "/tmp/x",
+    ]
+
+
+def test_config_argv_keeps_a_valued_flag_with_its_value():
+    from bkht.coder.cli import config_argv
+
+    # --cwd's value must not be mistaken for a positional and hoisted away
+    # from the flag it belongs to.
+    assert config_argv(["config", "--cwd", "/tmp/x", "get", "model"]) == [
+        "config", "get", "model", "--cwd", "/tmp/x",
+    ]
+
+
+def test_config_argv_leaves_an_already_ordered_line_alone():
+    from bkht.coder.cli import config_argv
+
+    line = ["config", "set", "num_ctx", "8192", "--workspace"]
+    assert config_argv(line) == line
+
+
+def test_config_set_takes_the_flag_before_the_key(home, project, capsys):
+    status, _, err = coder(
+        capsys, "config", "set", "--workspace", "num_ctx", "8192", "--cwd", str(project),
+    )
+    assert (status, err) == (0, "")
+    assert json.loads((project / config.WORKSPACE_NAME).read_text()) == {"num_ctx": 8192}

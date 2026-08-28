@@ -17,7 +17,11 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        python-version: ["3.12", "3.13"]
+        # 3.12.3 is pinned rather than written "3.12": it is the oldest
+        # interpreter this package claims to support, and argparse's behaviour
+        # differs there in ways that have already reached main. Left floating,
+        # this job silently stops testing the version most distros ship.
+        python-version: ["3.12.3", "3.13"]
     steps:
       - uses: actions/checkout@v4
 

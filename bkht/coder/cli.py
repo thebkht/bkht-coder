@@ -313,6 +313,11 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+#: The `coder config` flags that take a separate value, which `config_argv`
+#: has to keep attached to their flag when it reorders the line.
+CONFIG_VALUED_FLAGS = {"--cwd"}
+
+
 def add_config_arguments(parser) -> None:
     """Flags for `coder config`.
 
@@ -722,6 +727,38 @@ def resume_argv(rest: list[str]) -> list[str]:
     return ["--resume", rest[0] if named else saved.LAST, *rest[1 if named else 0:]]
 
 
+def config_argv(argv: list[str]) -> list[str]:
+    """`coder config ...` with its positionals moved ahead of its flags.
+
+    argparse before CPython 3.12.7 cannot fill an optional positional that
+    appears *after* a flag, and `config` is the one subcommand whose grammar is
+    positionals -- `set <key> <value>` -- rather than options. So
+    `config set --workspace num_ctx 8192` parsed here and died on a distro
+    python with "unrecognized arguments: num_ctx 8192".
+
+    Reordering rather than raising `requires-python`: the shape argparse has
+    always handled is positionals first, and every interpreter this package
+    claims to support can parse that.
+    """
+    head: list[str] = []
+    flags: list[str] = []
+    index = 1  # argv[0] is "config" itself
+    while index < len(argv):
+        token = argv[index]
+        if token.startswith("-"):
+            flags.append(token)
+            # The only `config` flag that takes a separate value. Written as a
+            # set so a second one cannot be added to the parser and forgotten
+            # here without the name being obvious.
+            if token in CONFIG_VALUED_FLAGS and index + 1 < len(argv):
+                index += 1
+                flags.append(argv[index])
+        else:
+            head.append(token)
+        index += 1
+    return ["config", *head, *flags]
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
@@ -729,7 +766,7 @@ def main(argv: list[str] | None = None) -> int:
         return review_cli.run(configured(build_parser().parse_args(argv)))
 
     if argv[:1] == ["config"]:
-        return config.run(build_parser().parse_args(argv))
+        return config.run(build_parser().parse_args(config_argv(argv)))
 
     if argv[:1] == ["help"] or argv[:1] == ["--help"] or argv[:1] == ["-h"]:
         print(usage.HELP)
