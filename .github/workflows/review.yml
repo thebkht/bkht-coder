@@ -1,12 +1,25 @@
 name: Review
 
-# Off by default. Review needs a reachable Ollama and a ~9 GB model, which is
-# the same reason ci.yml excludes the `live` suite -- a hosted runner cannot do
-# it. Label a pull request `coder-review` to ask for one, or run it by hand.
+# Off by default, and deliberately fenced in. Both reasons are about the runner.
+#
+# Review needs a reachable Ollama and a ~9 GB model, so it cannot run on a
+# hosted runner -- the same reason ci.yml excludes the `live` suite. And a
+# self-hosted runner is not ephemeral: whatever runs on it runs on the machine
+# itself, and stays there.
+#
+# That matters because `pull_request` checks out the pull request's own code,
+# which `uv sync` and `coder review` then execute. From a fork that is a
+# stranger's code running on your hardware -- and a label is not a gate, because
+# `synchronize` re-runs on every later push while the label stays put. So the
+# job additionally requires the branch to live in this repository, which takes
+# write access to create.
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -15,13 +28,17 @@ concurrency:
 jobs:
   review:
     name: coder review
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'coder-review')
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       contains(github.event.pull_request.labels.*.name, 'coder-review'))
     runs-on: [self-hosted, ollama]
     steps:
       # --base resolves a merge base, which a shallow clone does not have.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5

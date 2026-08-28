@@ -9,7 +9,10 @@ review:
   stage: test
   tags: [ollama]
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    # Only for a branch in this project. A fork's merge request is a stranger's
+    # code, and this job runs it -- `uv sync` and `coder review` both execute
+    # the checkout -- on a runner that is not ephemeral.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_PROJECT_ID == $CI_PROJECT_ID
   variables:
     # --base resolves a merge base, which GitLab's default shallow clone lacks.
     GIT_DEPTH: 0

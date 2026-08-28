@@ -492,9 +492,17 @@ rather than reporting into a log nobody reads. And `--fix` is skipped, because i
 asks which findings to fix and CI cannot answer.
 
 There is a workflow for each platform in this repository — `.github/workflows/review.yml`
-and `.gitlab-ci.yml`. Both need a runner with Ollama and the model on it, which
-is why neither runs by default: the GitHub one waits for a `coder-review` label,
-and the GitLab one is tagged `ollama`.
+and `.gitlab-ci.yml`. Both need a runner with Ollama and the model on it, so
+both are off by default: the GitHub one waits for a `coder-review` label, and
+the GitLab one is tagged `ollama`.
+
+Both also refuse to run for a pull request from a fork, and that restriction is
+the important one. A self-hosted runner is not ephemeral, and this job executes
+the branch it checks out — `uv sync` runs the build, `coder review` runs this
+package. From a fork that is a stranger's code on your own machine. A label does
+not fence it: once a maintainer applies one, every later push to the same branch
+re-runs the job with the label still attached. So the branch has to live in the
+repository, which takes write access to create.
 
 ## Checking what an edit means
 
