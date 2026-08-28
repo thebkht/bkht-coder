@@ -31,6 +31,7 @@ Commands
   /instructions [reload]  show the project instructions, or re-read them
   /skills             list the skills the model can open
   /jobs [stop <id>]   background processes this session started
+  /sessions [agent]   earlier sessions here, this agent's or another's
   /review [base]      review uncommitted changes, or this branch against base
   /model [name]       show or switch the Ollama model
   /mode [ask|auto|plan]   show or switch the permission mode (or shift+tab)
@@ -191,6 +192,23 @@ class Repl:
             num_ctx=getattr(provider, "num_ctx", DEFAULT_NUM_CTX),
             out=self.out,
         )
+        return Command()
+
+    def do_sessions(self, argument: str) -> Command:
+        """Earlier sessions in this directory, ours or another agent's.
+
+        Read-only, and there is no resume: another agent's session is held by
+        another agent, with its own tools and its own record of what it has
+        been allowed to do, and a conversation replayed without any of that is
+        not the same session.
+        """
+        from . import sessions as saved
+
+        agent = (argument or saved.ALL).strip().lower()
+        if agent not in saved.AGENTS:
+            self.out(f"Usage: /sessions [{'|'.join(saved.AGENTS)}]")
+            return Command()
+        saved.report(self.workspace.root, agent=agent, out=self.out)
         return Command()
 
     def do_jobs(self, argument: str) -> Command:

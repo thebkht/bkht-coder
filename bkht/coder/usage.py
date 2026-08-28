@@ -170,8 +170,15 @@ resumable up to its last complete message.
 Usage:
   coder sessions [flags]
 
+Claude Code and Codex keep their own transcripts on this machine. `--agent`
+reads those too, so what was already tried in a directory can be looked up
+whatever was open at the time. Theirs are read-only: their agent holds state
+this one has never seen, and a conversation replayed without it is not the
+same session.
+
 Flags:
   --all                   Every workspace, not just this one
+  --agent <name>          coder (default), claude, codex, or all
   --json                  Emit the listing as JSON
   --cwd <path>            Workspace root; defaults to the current directory
   -h, --help              Display this help and exit
@@ -182,6 +189,12 @@ Examples:
 
   coder sessions --all
       Every session on this machine, with the directory it belongs to
+
+  coder sessions --agent all
+      Every agent's sessions for this directory, newest first
+
+  coder session claude/1be46299
+      Read one of them
 """
 
 SESSION_HELP = f"""\

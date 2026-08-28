@@ -306,7 +306,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_config_arguments(settings)
 
     lister = subparsers.add_parser(
-        "sessions", help="List saved sessions for this workspace.",
+        "sessions", help="List saved sessions, this agent's or another's.",
         page=usage.SESSIONS_HELP,
     )
     saved_cli_arguments(lister)
@@ -315,17 +315,21 @@ def build_parser() -> argparse.ArgumentParser:
         "session", help="Show or resume one saved session.",
         page=usage.SESSION_HELP,
     )
-    opener.add_argument("target", nargs="?", default=saved.LAST, help="`last`, or a session id.")
+    opener.add_argument("target", nargs="?", default=saved.LAST, help="`last`, a session id, or `claude/<id>`.")
     opener.add_argument("--json", action="store_true", help="Emit the session as JSON.")
+    opener.add_argument("--agent", default=saved.CODER, choices=saved.AGENTS, help=argparse.SUPPRESS)
     opener.add_argument("--cwd", default=".", help="Workspace root. Defaults to the current directory.")
 
     add_agent_arguments(parser)
     return parser
 
 
-#: The `coder config` flags that take a separate value, which `config_argv`
-#: has to keep attached to their flag when it reorders the line.
-CONFIG_VALUED_FLAGS = {"--cwd"}
+#: The subcommand flags that take a separate value, which `config_argv` has to
+#: keep attached to their flag when it reorders the line. One set for every
+#: subcommand it reorders: a flag missing from here would have its value hoisted
+#: away from it and read as a positional, which is a worse bug than the one the
+#: reordering exists to fix.
+CONFIG_VALUED_FLAGS = {"--cwd", "--agent"}
 
 
 def add_config_arguments(parser) -> None:
@@ -346,6 +350,10 @@ def saved_cli_arguments(parser) -> None:
     """Flags for `coder sessions`, which needs a workspace and nothing else."""
     parser.add_argument("--all", action="store_true", help="Every workspace, not just this one.")
     parser.add_argument("--json", action="store_true", help="Emit the listing as JSON.")
+    parser.add_argument(
+        "--agent", default=saved.CODER, choices=saved.AGENTS,
+        help="Whose sessions to list. Other agents' are read-only.",
+    )
     parser.add_argument("--cwd", default=".", help="Workspace root. Defaults to the current directory.")
 
 
@@ -810,7 +818,7 @@ def resume_argv(rest: list[str]) -> list[str]:
 
 
 def config_argv(argv: list[str]) -> list[str]:
-    """`coder config ...` with its positionals moved ahead of its flags.
+    """A subcommand line with its positionals moved ahead of its flags.
 
     argparse before CPython 3.12.7 cannot fill an optional positional that
     appears *after* a flag, and `config` is the one subcommand whose grammar is
@@ -824,7 +832,7 @@ def config_argv(argv: list[str]) -> list[str]:
     """
     head: list[str] = []
     flags: list[str] = []
-    index = 1  # argv[0] is "config" itself
+    index = 1  # argv[0] is the subcommand name, which stays put
     while index < len(argv):
         token = argv[index]
         if token.startswith("-"):
@@ -838,7 +846,7 @@ def config_argv(argv: list[str]) -> list[str]:
         else:
             head.append(token)
         index += 1
-    return ["config", *head, *flags]
+    return [argv[0], *head, *flags]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -855,10 +863,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if argv[:1] == ["sessions"]:
-        args = build_parser().parse_args(argv)
+        args = build_parser().parse_args(config_argv(argv))
         return saved.report(
             Path(args.cwd).expanduser().resolve(),
-            as_json=args.json, everywhere=args.all,
+            as_json=args.json, everywhere=args.all, agent=args.agent,
         )
 
     if argv[:1] == ["session"]:
@@ -869,7 +877,11 @@ def main(argv: list[str] | None = None) -> int:
         if rest[:1] == ["resume"]:
             argv = resume_argv(rest[1:])
         else:
-            args = build_parser().parse_args(argv)
+            args = build_parser().parse_args(config_argv(argv))
+            # `claude/1be46299` names somebody else's transcript, which is read
+            # rather than resumed; anything else is one of ours.
+            if "/" in (args.target or ""):
+                return saved.show_agent(args.target, as_json=args.json)
             return saved.show(
                 Path(args.cwd).expanduser().resolve(),
                 args.target, as_json=args.json,

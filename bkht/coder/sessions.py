@@ -18,8 +18,17 @@ import sys
 import time
 from pathlib import Path
 
+from . import transcripts
 from .session import Session, find, sessions_for
 from .terminal import DIM, YELLOW, paint
+
+CODER = transcripts.CODER
+
+#: `--agent all`, meaning every agent that writes a transcript here.
+ALL = "all"
+
+#: What `--agent` accepts.
+AGENTS = (*transcripts.SOURCES, ALL)
 
 #: Transcript lines shown by `coder session <id>` before the rest is summarised.
 PREVIEW = 20
@@ -63,8 +72,18 @@ def _payload(info) -> dict:
 
 
 def report(root: Path, *, as_json: bool = False, everywhere: bool = False,
-           out=print) -> int:
-    """List saved sessions: this workspace's, or every one on the machine."""
+           agent: str = transcripts.CODER, out=print) -> int:
+    """List saved sessions: this workspace's, or every one on the machine.
+
+    ``agent`` widens it past this package. Claude Code and Codex both keep
+    JSONL transcripts on the same machine, and what was already tried in this
+    directory is a useful thing to be able to look up regardless of what was
+    open at the time.
+    """
+    if agent != transcripts.CODER:
+        return _report_agents(root, agent, as_json=as_json,
+                              everywhere=everywhere, out=out)
+
     found = sessions_for(None if everywhere else str(root))
 
     if as_json:
@@ -83,6 +102,82 @@ def report(root: Path, *, as_json: bool = False, everywhere: bool = False,
         out(line)
     out(paint(f"\n{len(found)} session{'s' if len(found) != 1 else ''}. "
               f"Resume one with `coder session resume <id>`.", DIM))
+    return 0
+
+
+def _report_agents(root: Path, agent: str, *, as_json: bool, everywhere: bool,
+                   out=print) -> int:
+    """The same listing, over every agent's transcripts rather than ours."""
+    sources = transcripts.SOURCES if agent == ALL else (agent,)
+    found = transcripts.discover(None if everywhere else root, sources=sources)
+
+    if as_json:
+        out(json.dumps([
+            {
+                "source": made.source, "id": made.id, "label": made.label,
+                "path": str(made.path), "cwd": made.cwd,
+                "created": made.started, "opening": made.opening,
+            }
+            for made in found
+        ], indent=2))
+        return 0
+
+    if not found:
+        scope = "on this machine" if everywhere else f"for {root}"
+        out(f"No {agent} sessions {scope}.")
+        return 0
+
+    for made in found:
+        opening = " ".join(made.opening.split())[:44]
+        line = f"  {made.label:<20}{ago(made.started):<11}{opening}"
+        if everywhere:
+            line = f"{line}  {made.cwd}"
+        out(line)
+    out(paint(f"\n{len(found)} session{'s' if len(found) != 1 else ''}. "
+              f"Read one with `coder session <label>`.", DIM))
+    return 0
+
+
+def show_agent(label: str, *, as_json: bool = False, out=print) -> int:
+    """Print one transcript from another agent. Read-only: there is no resume.
+
+    Resuming somebody else's session is not on offer and should not be. Their
+    agent holds state this one has never seen -- its own tools, its own
+    permission record, its own idea of what it has already been allowed to do --
+    and a conversation replayed without any of that is not the same session.
+    """
+    made = transcripts.find(label)
+    if made is None:
+        print(paint(f"No session matches {label!r}. Run `coder sessions --agent all` "
+                    "to see what there is.", YELLOW, sys.stderr), file=sys.stderr)
+        return 1
+
+    if as_json:
+        out(json.dumps({
+            "source": made.source, "id": made.id, "label": made.label,
+            "path": str(made.path), "cwd": made.cwd, "created": made.started,
+            "turns": [{"role": t.role, "text": t.text, "when": t.when} for t in made.turns],
+        }, indent=2))
+        return 0
+
+    out(f"{made.label} · {made.source} · {len(made.turns)} turns")
+    out(paint(f"{made.cwd}\n{made.path}", DIM))
+    if made.title:
+        out(paint(made.title, DIM))
+
+    if not made.turns:
+        out("\nNothing was said in this session.")
+        return 0
+
+    hidden = len(made.turns) - PREVIEW
+    out("")
+    if hidden > 0:
+        out(paint(f"  ... {hidden} earlier turn{'s' if hidden != 1 else ''}", DIM))
+    for turn in made.turns[-PREVIEW:]:
+        body = " ".join(turn.text.split())
+        if len(body) > 70:
+            body = body[:67] + "..."
+        out(f"  {turn.role:<11}{body}")
     return 0
 
 
