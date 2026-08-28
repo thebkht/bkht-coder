@@ -93,3 +93,13 @@ def test_a_dead_writer_disables_the_status_rather_than_raising():
     writer.close()
     status._draw()  # must not raise
     assert not status.enabled
+
+
+def test_the_line_offers_esc_when_the_turn_can_be_cancelled():
+    line = Status(writer=None, enabled=False, cancellable=True)
+    assert "esc to stop" in line.frame()
+
+
+def test_the_line_stays_quiet_about_esc_when_it_would_not_work():
+    line = Status(writer=None, enabled=False)
+    assert "esc" not in line.frame()

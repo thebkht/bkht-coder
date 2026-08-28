@@ -25,12 +25,16 @@ class Status:
     """A single line, rewritten in place, while a turn runs."""
 
     def __init__(self, writer=None, clock=time.monotonic, enabled: bool = True,
-                 interval: float = INTERVAL, colour: bool = True) -> None:
+                 interval: float = INTERVAL, colour: bool = True,
+                 cancellable: bool = False) -> None:
         self.writer = writer
         self.clock = clock
         self.enabled = enabled
         self.interval = interval
         self.colour = colour
+        #: Whether Esc will stop this turn -- said on the line, because a key
+        #: nobody is told about is a key nobody presses.
+        self.cancellable = cancellable
 
         self.label = "working"
         self.tokens = 0
@@ -129,6 +133,8 @@ class Status:
             parts.append(f"{seconds}s")
         if self.tokens:
             parts.append(f"{self.tokens:,} tok")
+        if self.cancellable:
+            parts.append("esc to stop")
         line = " · ".join(parts)
         limit = max(1, width() - 1)
         return line if len(line) <= limit else line[: limit - 1] + "…"

@@ -10,7 +10,7 @@ from functools import partial
 from pathlib import Path
 from typing import NamedTuple
 
-from . import banner, config, lineedit, markdown, narrate, terminal
+from . import banner, cancel, config, lineedit, markdown, narrate, terminal
 from .agent import Agent
 from .approval import ask_tty
 from . import doctor
@@ -441,8 +441,14 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
         jobs=jobs,
     )
     # The prompt pauses the status line for the whole exchange: without it the
-    # spinner repaints over the diff being approved.
-    pause = listener.status.pause if getattr(listener, "status", None) else None
+    # spinner repaints over the diff being approved. It pauses the Esc watch
+    # for the same stretch, or the keypress answering the question would be
+    # read by the thread waiting to cancel the turn instead.
+    watch = getattr(listener, "watch", None)
+    pause = _pauses(
+        listener.status.pause if getattr(listener, "status", None) else None,
+        watch.pause if watch is not None else None,
+    )
     permissions = Permissions(
         mode=mode, workspace=workspace,
         **({"prompt": partial(ask_tty, pause=pause)} if terminal.interactive() else {}),
@@ -541,6 +547,22 @@ def report(outcome, streamed: bool = False) -> int:
         )
         return 1
     return 0
+
+
+def _pauses(*managers):
+    """One context manager entering each of the given ones, in order."""
+    managers = [manager for manager in managers if manager is not None]
+    if not managers:
+        return None
+
+    @contextlib.contextmanager
+    def paused():
+        with contextlib.ExitStack() as stack:
+            for manager in managers:
+                stack.enter_context(manager())
+            yield
+
+    return paused
 
 
 def run_turn(agent, listener, task: str) -> int:
@@ -683,6 +705,14 @@ def interactive(agent, snapshots, permissions, workspace, listener,
         footer=lambda: lineedit.footer(permissions.mode),
         cycle=lambda: setattr(permissions, "mode", next_mode(permissions.mode)),
     )
+    # Esc stops a running turn. Held here rather than inside `run_turn`,
+    # because the approval prompt has to be able to borrow the terminal from
+    # it, and only the caller holding both can arrange that.
+    watch = cancel.Watch(enabled=cancel.available())
+    listener.watch = watch
+    if getattr(listener, "status", None) is not None:
+        listener.status.cancellable = watch.enabled
+
     # Printed as it comes back: the greeting dims and bolds its own parts now,
     # and a paint() around the whole of it would flatten both.
     print(greeting(agent, permissions, workspace, loaded=loaded))
@@ -710,7 +740,8 @@ def interactive(agent, snapshots, permissions, workspace, listener,
             continue
 
         try:
-            run_turn(agent, listener, command.task)
+            with watch.watching():
+                run_turn(agent, listener, command.task)
         except KeyboardInterrupt:
             # Abandon this task but keep the session; a long local turn is
             # exactly the thing a user needs to be able to interrupt.
