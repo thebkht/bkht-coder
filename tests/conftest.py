@@ -76,8 +76,9 @@ def isolated_state(tmp_path, monkeypatch):
     -- and in the rules' case, write -- whatever is on the machine running the
     tests.
     """
-    from bkht.coder import commands, rules, skills
+    from bkht.coder import commands, config, rules, skills
 
     monkeypatch.setattr(rules, "RULES_PATH", tmp_path / "permissions.json")
+    monkeypatch.setattr(config, "GLOBAL_PATH", tmp_path / "config.json")
     monkeypatch.setattr(skills, "GLOBAL_ROOT", tmp_path / "global-skills")
     monkeypatch.setattr(commands, "GLOBAL_ROOT", tmp_path / "global-commands")

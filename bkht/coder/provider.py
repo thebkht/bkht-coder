@@ -251,6 +251,26 @@ class OllamaProvider:
         return True
 
 
+#: Every backend that can be named in ``config.provider``, by that name.
+#:
+#: One entry, which is the point: the indirection in this file was always meant
+#: to make a hosted backend a new class rather than a refactor, and this is
+#: where that class gets wired in. Until one exists, `ollama` is the only
+#: provider that validates -- and the error for anything else names what is
+#: actually available rather than failing at the first turn.
+BACKENDS = {"ollama": OllamaProvider}
+
+
+def build(name: str = "ollama", **options) -> Provider:
+    """The provider called ``name``, constructed with ``options``."""
+    backend = BACKENDS.get(name)
+    if backend is None:
+        raise ProviderError(
+            f"unknown provider {name!r}; available: {', '.join(sorted(BACKENDS))}"
+        )
+    return backend(**options)
+
+
 def for_review(provider: Provider) -> Provider:
     """A copy of ``provider`` that samples deterministically.
 

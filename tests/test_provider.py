@@ -11,6 +11,7 @@ from bkht.coder.provider import (
     Chunk,
     OllamaProvider,
     ProviderError,
+    build,
     collect,
 )
 
@@ -188,3 +189,14 @@ def test_the_default_window_can_hold_a_file_and_still_think():
     """
     assert DEFAULT_NUM_CTX == 16384
     assert OllamaProvider().num_ctx == DEFAULT_NUM_CTX
+
+
+def test_build_returns_the_named_backend():
+    provider = build("ollama", model="m", host="http://h", num_ctx=8192)
+    assert isinstance(provider, OllamaProvider)
+    assert (provider.model, provider.num_ctx) == ("m", 8192)
+
+
+def test_build_names_what_is_available_when_the_backend_is_unknown():
+    with pytest.raises(ProviderError, match="ollama"):
+        build("codex", model="m")
