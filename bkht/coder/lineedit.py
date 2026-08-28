@@ -16,6 +16,11 @@ mode is unavailable (a pipe, Windows, an IDE console) nothing here runs and
 The block on screen is a rule, the input, a rule, and the footer. Rules rather
 than a box: a full border has to pad every row to the same width, which stops
 being simple the moment the text wraps.
+
+The input is one buffer that may contain newlines, not one line. That is what
+makes a pasted diff survivable: without bracketed paste a forty-line paste
+submits its first line and types the other thirty-nine into the prompts that
+follow, each of them a task the agent then tries to do.
 """
 
 from __future__ import annotations
@@ -34,6 +39,23 @@ ESC = "\x1b"
 #: Shift+Tab -- xterm and everything descended from it send CSI Z, a few older
 #: ones send ESC TAB -- so both are taken to mean the same thing.
 BACK_TAB = ("[Z", "\t")
+
+#: Bracketed paste. The terminal wraps pasted text in these, which is the only
+#: way to tell a newline that was pasted from one that was typed -- and the
+#: difference between them is the difference between one prompt and forty.
+PASTE_ON = "\x1b[?2004h"
+PASTE_OFF = "\x1b[?2004l"
+PASTE_START = "[200~"
+PASTE_END = "[201~"
+
+#: What continuation lines sit behind, so the text stays aligned under the
+#: first line rather than under the prompt mark.
+CONTINUATION = "  "
+
+#: A paste longer than this is folded into a chip. Redrawing five hundred lines
+#: inside a four-row block on every keystroke is not editing, it is flicker;
+#: and the point of pasting a file is rarely to edit it afterwards.
+PASTE_LINES = 6
 
 
 def available(stdin=None, stdout=None) -> bool:
@@ -84,6 +106,9 @@ class Editor:
         self.caret = 0  # which of those rows the cursor was left on
         self.recall = 0  # how far up the history the arrows have walked
         self.draft = ""  # what was being typed before they started
+        self.pasting = False  # between the bracketed-paste markers
+        self.paste_at = 0  # where the current paste began in the buffer
+        self.pastes: dict[int, str] = {}  # chip number -> the text it stands for
 
     # --- reading ------------------------------------------------------------
 
@@ -98,6 +123,9 @@ class Editor:
         self.caret = 0
         self.recall = len(self.history)
         self.draft = ""
+        self.pasting = False
+        self.paste_at = 0
+        self.pastes = {}
 
         fd = self.stdin.fileno()
         saved = termios.tcgetattr(fd)
@@ -108,6 +136,11 @@ class Editor:
             # Ctrl-C means, and it would decide it differently from the rest
             # of the session.
             tty.setcbreak(fd)
+            # Asked for and given back inside the same block that owns cbreak:
+            # a terminal left in bracketed paste after we stop reading would
+            # spill `[200~` into whatever runs next.
+            self.stdout.write(PASTE_ON)
+            self.stdout.flush()
             self._redraw(prompt)
             while True:
                 keys = decoder.decode(os.read(fd, 1024))
@@ -127,6 +160,8 @@ class Editor:
             self.stdout.flush()
             raise
         finally:
+            self.stdout.write(PASTE_OFF)
+            self.stdout.flush()
             termios.tcsetattr(fd, termios.TCSADRAIN, saved)
 
     def _consume(self, keys: str, prompt: str) -> str | None:
@@ -144,9 +179,18 @@ class Editor:
                 self._control(sequence)
                 continue
             if key in ("\r", "\n"):
+                # A newline that was pasted is text; one that was typed is the
+                # decision to send. Only the terminal knows which this is, and
+                # only while bracketed paste is on.
+                if self.pasting:
+                    self._insert("\n")
+                    continue
                 return self._submit(prompt)
             if key == "\t":
-                self._complete()
+                if self.pasting:
+                    self._insert("\t")
+                else:
+                    self._complete()
             elif key == "\x7f" or key == "\b":
                 self._backspace()
             elif key == "\x04":  # Ctrl-D
@@ -154,14 +198,16 @@ class Editor:
                     self._erase()
                     raise EOFError
             elif key == "\x01":  # Ctrl-A
-                self.cursor = 0
+                self.cursor = self._line_bounds()[0]
             elif key == "\x05":  # Ctrl-E
-                self.cursor = len(self.buffer)
+                self.cursor = self._line_bounds()[1]
             elif key == "\x0b":  # Ctrl-K
-                self.buffer = self.buffer[: self.cursor]
+                end = self._line_bounds()[1]
+                self.buffer = self.buffer[: self.cursor] + self.buffer[end:]
             elif key == "\x15":  # Ctrl-U
-                self.buffer = self.buffer[self.cursor :]
-                self.cursor = 0
+                start = self._line_bounds()[0]
+                self.buffer = self.buffer[:start] + self.buffer[self.cursor :]
+                self.cursor = start
             elif key == "\x17":  # Ctrl-W
                 self._kill_word()
             elif key >= " ":
@@ -185,7 +231,17 @@ class Editor:
         return keys[index : end + 1], min(end + 1, len(keys))
 
     def _control(self, sequence: str) -> None:
-        if sequence in BACK_TAB:
+        if sequence == PASTE_START:
+            self.pasting = True
+            self.paste_at = self.cursor
+        elif sequence == PASTE_END:
+            self.pasting = False
+            self._fold_paste()
+        elif sequence == "\r":
+            # Alt/Option+Enter arrives as ESC CR. `_escape` already hands it
+            # back whole; it just had nothing to land on before now.
+            self._insert("\n")
+        elif sequence in BACK_TAB:
             if self.cycle is not None:
                 self.cycle()
         elif sequence == "[D":
@@ -193,15 +249,82 @@ class Editor:
         elif sequence == "[C":
             self.cursor = min(len(self.buffer), self.cursor + 1)
         elif sequence == "[A":
-            self._history(-1)
+            if not self._vertical(-1):
+                self._history(-1)
         elif sequence == "[B":
-            self._history(1)
+            if not self._vertical(1):
+                self._history(1)
         elif sequence in ("[H", "OH", "[1~"):
-            self.cursor = 0
+            self.cursor = self._line_bounds()[0]
         elif sequence in ("[F", "OF", "[4~"):
-            self.cursor = len(self.buffer)
+            self.cursor = self._line_bounds()[1]
         elif sequence == "[3~":
             self.buffer = self.buffer[: self.cursor] + self.buffer[self.cursor + 1 :]
+
+    # --- lines ---------------------------------------------------------------
+    #
+    # The buffer is one string that may contain newlines, so "the line" is a
+    # slice of it rather than a thing in its own right. Kept as functions of
+    # the cursor rather than as state: a second copy of where the lines are is
+    # a second thing that can be wrong.
+
+    def _line_bounds(self, position: int | None = None) -> tuple[int, int]:
+        """Where the line holding ``position`` starts and ends."""
+        position = self.cursor if position is None else position
+        start = self.buffer.rfind("\n", 0, position) + 1
+        end = self.buffer.find("\n", position)
+        return start, len(self.buffer) if end == -1 else end
+
+    def _locate(self) -> tuple[int, int]:
+        """The cursor as ``(line index, column within that line)``."""
+        head = self.buffer[: self.cursor]
+        return head.count("\n"), self.cursor - (head.rfind("\n") + 1)
+
+    def _vertical(self, step: int) -> bool:
+        """Move a line up or down. False when there is no line to move to.
+
+        False rather than clamping, because the caller's fallback is history
+        recall: Up on the top line has to keep meaning "the previous prompt",
+        or a multi-line buffer would quietly cost you the history.
+        """
+        if "\n" not in self.buffer:
+            return False
+        start, end = self._line_bounds()
+        if step < 0:
+            if start == 0:
+                return False
+            target = self._line_bounds(start - 1)
+        else:
+            if end == len(self.buffer):
+                return False
+            target = self._line_bounds(end + 1)
+        column = self.cursor - start
+        self.cursor = min(target[0] + column, target[1])
+        return True
+
+    def _fold_paste(self) -> None:
+        """Replace a long paste with a chip standing for it.
+
+        The text is kept, not lost -- :meth:`_submit` puts it back. What is
+        avoided is holding five hundred lines in a block that is redrawn on
+        every keypress, and asking someone to find their cursor in it.
+        """
+        text = self.buffer[self.paste_at : self.cursor]
+        lines = text.count("\n") + 1
+        if lines <= PASTE_LINES:
+            return
+        number = len(self.pastes) + 1
+        self.pastes[number] = text
+        chip = f"[Pasted text #{number} +{lines} lines]"
+        self.buffer = self.buffer[: self.paste_at] + chip + self.buffer[self.cursor :]
+        self.cursor = self.paste_at + len(chip)
+
+    def _unfold(self, line: str) -> str:
+        """A submitted line with every chip replaced by what it stood for."""
+        for number, text in self.pastes.items():
+            lines = text.count("\n") + 1
+            line = line.replace(f"[Pasted text #{number} +{lines} lines]", text)
+        return line
 
     # --- editing ------------------------------------------------------------
 
@@ -255,33 +378,56 @@ class Editor:
 
     # --- drawing ------------------------------------------------------------
 
+    def _prefixes(self, prompt: str) -> list[str]:
+        """What sits in front of each line of the buffer.
+
+        The prompt mark leads the first line; the rest are indented to line up
+        under it, so a pasted block reads as one thing rather than as several
+        prompts stacked.
+        """
+        lines = self.buffer.split("\n")
+        painted = terminal.paint(prompt, terminal.ACCENT, self.stdout)
+        return [painted] + [CONTINUATION] * (len(lines) - 1)
+
     def _rows(self, prompt: str, width: int) -> list[str]:
         """The block as it should appear, top rule to footer."""
         rule = terminal.paint(banner.rule(width), DIM, self.stdout)
-        text = f"{terminal.paint(prompt, terminal.ACCENT, self.stdout)}{self.buffer}"
+        lines = self.buffer.split("\n")
+        prefixes = self._prefixes(prompt)
         footer = self.footer()
-        rows = [rule, text, rule]
+        rows = [rule, *(prefix + line for prefix, line in zip(prefixes, lines)), rule]
         if footer:
             rows.append(footer)
         return rows
 
-    def _wrapped(self, prompt: str, width: int) -> int:
-        """How many screen rows the input line takes up."""
-        columns = terminal.visible(prompt) + len(self.buffer)
-        return max(1, -(-columns // width)) if width else 1
+    def _wrapped(self, prompt: str, width: int) -> list[int]:
+        """How many screen rows each line of the buffer takes up.
+
+        A list rather than a total: the caret needs to know how many rows sit
+        above its own line, which a total cannot say.
+        """
+        if not width:
+            return [1] * (self.buffer.count("\n") + 1)
+        counts = []
+        for prefix, line in zip(self._prefixes(prompt), self.buffer.split("\n")):
+            columns = terminal.visible(prefix) + len(line)
+            counts.append(max(1, -(-columns // width)))
+        return counts
 
     def _redraw(self, prompt: str) -> None:
         width = max(20, terminal.width())
         self._home()
         rows = self._rows(prompt, width)
-        text_rows = self._wrapped(prompt, width)
+        counts = self._wrapped(prompt, width)
         self.stdout.write("\n".join(rows))
 
         # Where the caret belongs, counted from the top of the block: past the
-        # rule, then wherever the cursor sits in the (possibly wrapped) input.
-        offset = terminal.visible(prompt) + self.cursor
-        caret_row = 1 + offset // width
-        total = 1 + text_rows + 1 + (len(rows) - 3)
+        # rule, past whole lines above this one, then wherever the cursor sits
+        # in the (possibly wrapped) line it is actually on.
+        index, column = self._locate()
+        offset = terminal.visible(self._prefixes(prompt)[index]) + column
+        caret_row = 1 + sum(counts[:index]) + offset // width
+        total = 1 + sum(counts) + 1 + (len(rows) - 2 - len(counts))
         up = total - 1 - caret_row
         if up > 0:
             self.stdout.write(f"{ESC}[{up}A")
@@ -312,23 +458,35 @@ class Editor:
         self._erase()
         self.stdout.write(f"{terminal.paint(text, DIM, self.stdout)}\n")
 
-    def _submit(self, prompt: str) -> str:
+    def _submit(self, prompt: str) -> str | None:
         """Leave the finished line in the scrollback and hand it back.
 
         The rules and the footer are chrome for the moment you are typing; kept
         in the transcript they would say things about a line that has already
         been answered.
         """
+        # A line ending in a backslash is a line still being written -- the
+        # continuation every shell uses, and the one way to open a line that
+        # needs no terminal support at all.
+        if self.buffer.endswith("\\"):
+            self.buffer = self.buffer[:-1] + "\n"
+            self.cursor = len(self.buffer)
+            return None
+
         line = self.buffer
+        prefixes = self._prefixes(prompt)
         self.buffer, self.cursor, self.draft = "", 0, ""
         self._erase()
-        rendered = terminal.paint(prompt, terminal.ACCENT, self.stdout)
-        self.stdout.write(f"{rendered}{line}\n")
+        for prefix, text in zip(prefixes, line.split("\n")):
+            self.stdout.write(f"{prefix}{text}\n")
         self.stdout.flush()
         if line.strip():
+            # The chip is what was on screen, so the chip is what history
+            # replays; expanding it here would make Up paste the whole file
+            # back into a block that folded it for a reason.
             self.history.append(line)
         self.recall = len(self.history)
-        return line
+        return self._unfold(line)
 
 
 #: A colour per mode, because the footer is read at a glance rather than read.

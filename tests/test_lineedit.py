@@ -161,3 +161,126 @@ def test_each_mode_wears_its_own_colour():
 def test_an_unknown_mode_is_drawn_quietly_rather_than_not_at_all():
     tty = FakeTTY()
     assert "banana mode on" in lineedit.footer("banana", stream=tty)
+
+
+# --- multi-line ---------------------------------------------------------------
+
+
+def paste(ed: Editor, text: str) -> str | None:
+    """Type `text` the way a terminal in bracketed paste delivers it."""
+    return type(ed, f"\x1b[200~{text}\x1b[201~")
+
+
+def test_a_pasted_newline_is_text_not_a_submission():
+    ed = editor()
+    assert paste(ed, "one\ntwo\nthree") is None
+    assert ed.buffer == "one\ntwo\nthree"
+
+
+def test_enter_after_a_paste_submits_the_whole_block():
+    ed = editor()
+    paste(ed, "one\ntwo")
+    assert type(ed, "\r") == "one\ntwo"
+
+
+def test_a_typed_newline_still_submits():
+    ed = editor()
+    type(ed, "hello")
+    assert type(ed, "\r") == "hello"
+
+
+def test_alt_enter_opens_a_line():
+    ed = editor()
+    type(ed, "one\x1b\rtwo")
+    assert ed.buffer == "one\ntwo"
+
+
+def test_a_trailing_backslash_opens_a_line():
+    ed = editor()
+    assert type(ed, "one\\\r") is None
+    assert ed.buffer == "one\n"
+    assert type(ed, "two\r") == "one\ntwo"
+
+
+def test_a_pasted_tab_stays_a_tab():
+    ed = editor(completions=lambda: ("/help",))
+    paste(ed, "\tindented")
+    assert ed.buffer == "\tindented"
+
+
+def test_tab_outside_a_paste_still_completes():
+    ed = editor(completions=lambda: ("/help",))
+    type(ed, "/he\t")
+    assert ed.buffer == "/help"
+
+
+def test_up_and_down_move_between_lines():
+    ed = editor()
+    type(ed, "one\x1b\rtwo")
+    type(ed, "\x1b[A")
+    assert ed._locate() == (0, 3)
+    type(ed, "\x1b[B")
+    assert ed._locate() == (1, 3)
+
+
+def test_up_on_the_first_line_still_recalls_history():
+    ed = editor(history=["earlier"])
+    type(ed, "one\x1b\rtwo")
+    type(ed, "\x1b[A\x1b[A")  # onto line one, then past it
+    assert ed.buffer == "earlier"
+
+
+def test_the_column_is_kept_when_the_line_above_is_shorter():
+    ed = editor()
+    type(ed, "ab\x1b\rlonger")
+    type(ed, "\x1b[A")
+    assert ed.cursor == 2  # clamped to the end of "ab", not past it
+
+
+def test_ctrl_a_and_ctrl_e_act_on_the_current_line():
+    ed = editor()
+    type(ed, "one\x1b\rtwo")
+    type(ed, "\x01")
+    assert ed.cursor == 4
+    type(ed, "\x05")
+    assert ed.cursor == 7
+
+
+def test_ctrl_u_kills_to_the_start_of_the_line_only():
+    ed = editor()
+    type(ed, "one\x1b\rtwo\x15")
+    assert ed.buffer == "one\n"
+
+
+def test_ctrl_k_kills_to_the_end_of_the_line_only():
+    ed = editor()
+    type(ed, "one\x1b\rtwo\x01\x0b")
+    assert ed.buffer == "one\n"
+
+
+def test_a_long_paste_is_folded_into_a_chip():
+    ed = editor()
+    paste(ed, "\n".join(f"line {n}" for n in range(40)))
+    assert ed.buffer == "[Pasted text #1 +40 lines]"
+
+
+def test_a_folded_paste_is_put_back_when_the_line_is_sent():
+    ed = editor()
+    body = "\n".join(f"line {n}" for n in range(40))
+    paste(ed, body)
+    type(ed, " please review")
+    assert type(ed, "\r") == f"{body} please review"
+
+
+def test_a_short_paste_is_left_alone():
+    ed = editor()
+    paste(ed, "one\ntwo")
+    assert ed.buffer == "one\ntwo"
+    assert ed.pastes == {}
+
+
+def test_history_remembers_the_chip_not_the_whole_file():
+    ed = editor()
+    paste(ed, "\n".join(f"line {n}" for n in range(40)))
+    type(ed, "\r")
+    assert ed.history == ["[Pasted text #1 +40 lines]"]
