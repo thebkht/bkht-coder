@@ -18,7 +18,7 @@ from ..provider import OllamaProvider, for_review
 from ..session import Session, Snapshots
 from ..tools import build_registry
 from ..tools.base import set_output_budget
-from . import render
+from . import ci, render
 from .diff import GitError, collect_diff, collect_files
 from .reviewer import DIMENSIONS, ReviewListener, Reviewer
 
@@ -76,6 +76,28 @@ def add_arguments(parser) -> None:
     parser.add_argument("--output", help="Write a Markdown report to this path.")
     parser.add_argument("--fix", action="store_true", help="After reporting, offer to fix findings.")
     parser.add_argument("--quiet", action="store_true", help="Suppress progress output.")
+    parser.add_argument(
+        "--ci", nargs="?", const=ci.AUTO, default=None, choices=ci.KINDS,
+        help="CI output: log sections and native annotations. Detected from the environment by default.",
+    )
+    parser.add_argument("--code-quality", help="Write a GitLab Code Quality report to this path.")
+
+
+def choose_listener(args, env=None):
+    """The listener and the CI kind it was chosen for.
+
+    --quiet wins over everything: someone who asked for silence gets it even
+    inside a pipeline. Otherwise CI, when detected or forced, beats the
+    interactive progress that would only write escape codes into a log.
+    """
+    kind = ci.resolve(args.ci, env)
+    if args.quiet:
+        return ReviewListener(), kind
+    if kind:
+        return ci.listener_for(kind), kind
+    if args.json:
+        return ReviewListener(), None
+    return Progress(), None
 
 
 def gather(root: Path, args):
@@ -147,6 +169,23 @@ def fix(findings, provider, root: Path, mode: str = ASK, prompt=ask_terminal) ->
     return fixed
 
 
+def report(result, args, kind: str) -> None:
+    """Hand the findings to the platform, in the form it renders inline."""
+    if kind == ci.GITHUB:
+        ci.annotate(result)
+        written = ci.summary(result)
+        if written:
+            print(f"Wrote the report to {written}", file=sys.stderr)
+
+    path = args.code_quality
+    if not path and kind == ci.GITLAB:
+        # The name GitLab's `artifacts: reports: codequality:` examples all use.
+        path = Path(args.cwd).expanduser() / "gl-code-quality-report.json"
+    if path:
+        Path(path).expanduser().write_text(ci.code_quality(result), encoding="utf-8")
+        print(f"Wrote {path}", file=sys.stderr)
+
+
 def run(args) -> int:
     """Execute ``coder review``. Returns the process exit status."""
     root = Path(args.cwd).expanduser().resolve()
@@ -167,7 +206,7 @@ def run(args) -> int:
     provider = for_review(
         OllamaProvider(model=args.model, host=args.host, num_ctx=args.num_ctx)
     )
-    listener = ReviewListener() if (args.quiet or args.json) else Progress()
+    listener, kind = choose_listener(args)
     reviewer = Reviewer(
         provider,
         root,
@@ -176,6 +215,11 @@ def run(args) -> int:
         verify=not args.no_verify,
     )
     result = reviewer.review(files)
+    if kind:
+        # Close the last log section before anything else prints, or the report
+        # ends up folded inside it.
+        listener.finish()
+        report(result, args, kind)
 
     if args.json:
         print(render.as_json(result))
@@ -186,7 +230,7 @@ def run(args) -> int:
         Path(args.output).expanduser().write_text(render.markdown(result), encoding="utf-8")
         print(f"\nWrote {args.output}", file=sys.stderr)
 
-    if args.fix and result.findings:
+    if args.fix and result.findings and not kind:
         # Numbered here so the selection matches what was just printed.
         print("\nFindings:")
         for index, finding in enumerate(result.findings, start=1):
@@ -195,7 +239,11 @@ def run(args) -> int:
         if selected:
             fix(selected, provider, root, mode=AUTO if args.auto else ASK)
 
-    # Findings are a report, not a build failure, unless CI asked for JSON.
-    if args.json and result.findings:
+    if args.fix and kind:
+        print("Skipping --fix: it asks questions, and CI cannot answer.", file=sys.stderr)
+
+    # Findings are a report, not a build failure -- unless someone downstream is
+    # waiting on the exit status, which is what --json and CI both mean.
+    if (args.json or kind) and result.findings:
         return 1
     return 0
