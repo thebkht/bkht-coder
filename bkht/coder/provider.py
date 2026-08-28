@@ -172,6 +172,34 @@ def _native_tool_calls(message: dict) -> list[ToolCall]:
     return calls
 
 
+def _with_images(message: dict) -> dict:
+    """A message with its image paths turned into what Ollama takes.
+
+    Ollama wants base64 under `images` on the message itself. The session
+    carries paths instead, because a transcript is a file somebody may open and
+    a megabyte of base64 in it helps nobody. The conversion happens here, on the
+    way out, once per request.
+
+    An unreadable path is dropped rather than raised: a screenshot deleted
+    between being pasted and being sent should cost the image, not the turn.
+    """
+    paths = message.get("images")
+    if not paths:
+        return message
+    from .clipboard import encode
+
+    encoded = []
+    for path in paths:
+        try:
+            encoded.append(encode(path))
+        except OSError:
+            continue
+    sent = {key: value for key, value in message.items() if key != "images"}
+    if encoded:
+        sent["images"] = encoded
+    return sent
+
+
 class OllamaProvider:
     """Streams completions from a local Ollama server."""
 
@@ -195,9 +223,40 @@ class OllamaProvider:
         self.num_ctx = num_ctx
         self.temperature = temperature
         self.keep_alive = keep_alive
+        #: Asked of the server the first time it matters; see can_see.
+        self._vision: bool | None = None
         self.timeout = httpx.Timeout(
             timeout, connect=CONNECT_TIMEOUT, write=CONNECT_TIMEOUT
         )
+
+    def can_see(self) -> bool:
+        """Whether this model accepts images.
+
+        Asked of the server rather than guessed from the name: Ollama lists
+        `vision` among a model's capabilities, and a list of model names that
+        can see would be out of date the week after it was written.
+
+        Answered once and remembered. Anything that goes wrong -- no server, an
+        older Ollama with no `capabilities` -- is False, because the caller's
+        next move is to tell the user the picture will not be looked at, and
+        that is the true answer in every one of those cases.
+        """
+        if self._vision is None:
+            self._vision = self._ask_capabilities()
+        return self._vision
+
+    def _ask_capabilities(self) -> bool:
+        try:
+            response = httpx.post(
+                f"{self.host}/api/show",
+                json={"model": self.model},
+                timeout=CONNECT_TIMEOUT,
+            )
+            if response.status_code != 200:
+                return False
+            return "vision" in (response.json().get("capabilities") or [])
+        except (httpx.HTTPError, ValueError):
+            return False
 
     def chat(
         self, messages: list[dict], tools: list[dict] | None = None
@@ -208,7 +267,7 @@ class OllamaProvider:
 
         payload: dict[str, Any] = {
             "model": self.model,
-            "messages": messages,
+            "messages": [_with_images(message) for message in messages],
             "stream": True,
             "options": options,
             "keep_alive": self.keep_alive,

@@ -10,7 +10,7 @@ from functools import partial
 from pathlib import Path
 from typing import NamedTuple
 
-from . import banner, cancel, config, lineedit, markdown, narrate, terminal
+from . import banner, cancel, clipboard, config, lineedit, markdown, narrate, terminal
 from .agent import Agent
 from .approval import ask_tty
 from . import doctor
@@ -575,12 +575,12 @@ def _pauses(*managers):
     return paused
 
 
-def run_turn(agent, listener, task: str) -> int:
+def run_turn(agent, listener, task: str, images: list[str] | None = None) -> int:
     """One task, with the spinner and the gate bounded to it."""
     if listener is None:
-        return report(agent.run(task))
+        return report(agent.run(task, images=images))
     with listener.turn():
-        outcome = agent.run(task)
+        outcome = agent.run(task, images=images)
     listener.footer(outcome)
     return report(outcome, streamed=listener.streamed)
 
@@ -700,6 +700,45 @@ def read_line(reader, prompt: str, stream=None) -> str:
         stream.flush()
 
 
+def attach_image(stream=None) -> str | None:
+    """Take an image off the clipboard and save it. None when there is none.
+
+    The complaint, not the picture, is what this has to get right: a keypress
+    that silently does nothing is worse than no keypress at all, so a clipboard
+    with no image in it and a box with no helper installed say different things.
+    """
+    stream = sys.stdout if stream is None else stream
+    if missing := clipboard.helper_missing():
+        print(paint(f"  ! image paste needs {missing}", YELLOW, stream), file=stream)
+        return None
+    data = clipboard.read_image()
+    if not data or not clipboard.looks_like_png(data):
+        print(paint("  ! no image on the clipboard", DIM, stream), file=stream)
+        return None
+    try:
+        return str(clipboard.save(data))
+    except OSError as exc:
+        print(paint(f"  ! could not save the image: {exc}", YELLOW, stream), file=stream)
+        return None
+
+
+def announce_image(provider, path: str, stream=None) -> None:
+    """Say whether the model is going to look at what was just attached.
+
+    Said at the moment of pasting rather than after the answer comes back. A
+    model that cannot see silently ignores the picture and answers from the
+    text, which reads as an answer about the image -- and the user has no way
+    to know it was never looked at.
+    """
+    stream = sys.stdout if stream is None else stream
+    if getattr(provider, "can_see", lambda: False)():
+        print(paint(f"  attached {path}", DIM, stream), file=stream)
+        return
+    print(paint(f"  ! {provider.model} cannot see images.", YELLOW, stream), file=stream)
+    print(paint(f"    Saved to {path} -- the path is in the prompt.", DIM, stream), file=stream)
+    print(paint("    /model qwen2.5vl:7b for one that can.", DIM, stream), file=stream)
+
+
 def interactive(agent, snapshots, permissions, workspace, listener,
                 use_instructions=True, jobs=None, loaded=None) -> int:
     """The REPL. Ctrl-C abandons the current line; Ctrl-D leaves."""
@@ -714,6 +753,8 @@ def interactive(agent, snapshots, permissions, workspace, listener,
         enabled=terminal.interactive(),
         footer=lambda: lineedit.footer(permissions.mode),
         cycle=lambda: setattr(permissions, "mode", next_mode(permissions.mode)),
+        attach=attach_image,
+        on_image=lambda path: announce_image(agent.provider, path),
     )
     # Esc stops a running turn. Held here rather than inside `run_turn`,
     # because the approval prompt has to be able to borrow the terminal from
@@ -751,7 +792,7 @@ def interactive(agent, snapshots, permissions, workspace, listener,
 
         try:
             with watch.watching():
-                run_turn(agent, listener, command.task)
+                run_turn(agent, listener, command.task, images=reader.images())
         except KeyboardInterrupt:
             # Abandon this task but keep the session; a long local turn is
             # exactly the thing a user needs to be able to interrupt.

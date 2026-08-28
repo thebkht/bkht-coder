@@ -131,10 +131,10 @@ class Agent:
         self._made: dict[tuple[str, str], str] = {}
         self._replays = 0
 
-    def run(self, user_message: str) -> Outcome:
+    def run(self, user_message: str, images: list[str] | None = None) -> Outcome:
         """Run the loop until the model answers, or a bound is hit."""
         started = self.clock()
-        self.session.add_user(user_message)
+        self.session.add_user(user_message, images=images)
         self._note_language(user_message)
         self._scout(user_message)
         outcome = self.resume()

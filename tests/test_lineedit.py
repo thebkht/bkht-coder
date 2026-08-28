@@ -284,3 +284,40 @@ def test_history_remembers_the_chip_not_the_whole_file():
     paste(ed, "\n".join(f"line {n}" for n in range(40)))
     type(ed, "\r")
     assert ed.history == ["[Pasted text #1 +40 lines]"]
+
+
+# --- images -------------------------------------------------------------------
+
+
+def test_ctrl_v_puts_a_chip_in_the_line_and_keeps_the_path():
+    ed = editor(attach=lambda: "/tmp/one.png")
+    type(ed, "what is this? \x16")
+    assert ed.buffer == "what is this? [Image #1]"
+    assert ed.images == ["/tmp/one.png"]
+
+
+def test_a_second_image_is_numbered_after_the_first():
+    ed = editor(attach=lambda: "/tmp/x.png")
+    type(ed, "\x16 and \x16")
+    assert ed.buffer == "[Image #1] and [Image #2]"
+    assert len(ed.images) == 2
+
+
+def test_an_empty_clipboard_leaves_the_line_alone():
+    ed = editor(attach=lambda: None)
+    type(ed, "hello\x16")
+    assert ed.buffer == "hello"
+    assert ed.images == []
+
+
+def test_the_path_is_announced_when_it_is_attached():
+    said = []
+    ed = editor(attach=lambda: "/tmp/one.png", on_image=said.append)
+    type(ed, "\x16")
+    assert said == ["/tmp/one.png"]
+
+
+def test_ctrl_v_does_nothing_when_there_is_no_clipboard_to_ask():
+    ed = editor()
+    type(ed, "hello\x16")
+    assert ed.buffer == "hello"

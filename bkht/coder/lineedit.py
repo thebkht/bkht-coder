@@ -52,6 +52,10 @@ PASTE_END = "[201~"
 #: first line rather than under the prompt mark.
 CONTINUATION = "  "
 
+#: What an attached image looks like in the line. A chip, like a long paste,
+#: because the thing itself is not text and has no business being in a buffer.
+IMAGE_CHIP = "[Image #{number}]"
+
 #: A paste longer than this is folded into a chip. Redrawing five hundred lines
 #: inside a four-row block on every keystroke is not editing, it is flicker;
 #: and the point of pasting a file is rarely to edit it afterwards.
@@ -91,12 +95,17 @@ class Editor:
         footer: Callable[[], str] | None = None,
         cycle: Callable[[], None] | None = None,
         history: list[str] | None = None,
+        attach: Callable[[], str | None] | None = None,
+        on_image: Callable[[str], None] | None = None,
         stdin=None,
         stdout=None,
     ) -> None:
         self.completions = completions or (lambda: ())
         self.footer = footer or (lambda: "")
         self.cycle = cycle
+        #: Returns the path of an image taken off the clipboard, or None.
+        #: Injected so the editor never has to know what a clipboard is.
+        self.attach = attach
         self.history = history if history is not None else []
         self.stdin = sys.stdin if stdin is None else stdin
         self.stdout = sys.stdout if stdout is None else stdout
@@ -109,6 +118,11 @@ class Editor:
         self.pasting = False  # between the bracketed-paste markers
         self.paste_at = 0  # where the current paste began in the buffer
         self.pastes: dict[int, str] = {}  # chip number -> the text it stands for
+        self.images: list[str] = []  # paths pasted into the line being written
+        #: Called with a path once an image is attached, so the session can say
+        #: whether the model will actually look at it. Here rather than in the
+        #: caller because the answer belongs beside the keypress that earned it.
+        self.on_image = on_image or (lambda path: None)
 
     # --- reading ------------------------------------------------------------
 
@@ -126,6 +140,7 @@ class Editor:
         self.pasting = False
         self.paste_at = 0
         self.pastes = {}
+        self.images = []
 
         fd = self.stdin.fileno()
         saved = termios.tcgetattr(fd)
@@ -210,6 +225,8 @@ class Editor:
                 self.cursor = start
             elif key == "\x17":  # Ctrl-W
                 self._kill_word()
+            elif key == "\x16":  # Ctrl-V
+                self._attach()
             elif key >= " ":
                 self._insert(key)
         return None
@@ -301,6 +318,22 @@ class Editor:
         column = self.cursor - start
         self.cursor = min(target[0] + column, target[1])
         return True
+
+    def _attach(self) -> None:
+        """Take an image off the clipboard and put a chip in its place.
+
+        Ctrl-V and not the terminal's own paste: a terminal pasting an image
+        sends nothing at all, because there is no way to send one. So the
+        clipboard has to be asked directly, and it needs a key of its own.
+        """
+        if self.attach is None:
+            return
+        path = self.attach()
+        if not path:
+            return
+        self.images.append(path)
+        self._insert(IMAGE_CHIP.format(number=len(self.images)))
+        self.on_image(path)
 
     def _fold_paste(self) -> None:
         """Replace a long paste with a chip standing for it.

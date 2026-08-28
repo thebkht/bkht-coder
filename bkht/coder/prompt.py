@@ -54,7 +54,7 @@ class Reader:
 
     def __init__(
         self, repl=None, history: Path | None = None, enabled: bool = True,
-        footer=None, cycle=None,
+        footer=None, cycle=None, attach=None, on_image=None,
     ) -> None:
         self.history = HISTORY if history is None else history
         self.readline = None
@@ -62,7 +62,7 @@ class Reader:
         if not enabled:
             return
         if lineedit.available():
-            self._edit(repl, footer, cycle)
+            self._edit(repl, footer, cycle, attach, on_image)
         else:
             self._setup(repl)
 
@@ -71,12 +71,14 @@ class Reader:
         """True when Shift+Tab reaches us, and so when the footer may offer it."""
         return self.editor is not None
 
-    def _edit(self, repl, footer, cycle) -> None:
+    def _edit(self, repl, footer, cycle, attach=None, on_image=None) -> None:
         """Our own editor, which is the only path that can see Shift+Tab."""
         self.editor = lineedit.Editor(
             completions=(lambda: commands(repl)) if repl is not None else None,
             footer=footer,
             cycle=cycle,
+            attach=attach,
+            on_image=on_image,
             history=self._recall(),
         )
         atexit.register(self.save)
@@ -130,3 +132,7 @@ class Reader:
         if self.editor is not None:
             return self.editor.read(prompt)
         return input(prompt)
+
+    def images(self) -> list[str]:
+        """Paths attached to the line just read, and never to an earlier one."""
+        return list(self.editor.images) if self.editor is not None else []

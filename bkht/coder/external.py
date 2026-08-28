@@ -65,6 +65,13 @@ def render(messages: list[dict]) -> tuple[str, str]:
     for message in messages:
         role = message.get("role")
         content = (message.get("content") or "").strip()
+        # An image is named rather than sent. Both of these tools are perfectly
+        # able to open a file, and both are launched with their tooling shut
+        # off -- but a path in the prompt is a thing the user can ask them to
+        # look at, where a base64 blob in a text field is not.
+        if paths := message.get("images"):
+            named = "\n".join(f"[image] {path}" for path in paths)
+            content = f"{content}\n{named}".strip() if content else named
         if not content:
             continue
         if role == "system":
@@ -88,6 +95,16 @@ class CommandProvider:
 
     #: The executable, and the name to use when it is not on PATH.
     command = ""
+
+    def can_see(self) -> bool:
+        """True: both of these tools can open an image file for themselves.
+
+        Not the same "yes" the Ollama backend gives. Nothing is attached to the
+        request -- the path is named in the prompt, and the tool at the other
+        end reads it -- but from the user's side the picture does get looked at,
+        which is the question being asked.
+        """
+        return True
     install_hint = ""
 
     def __init__(

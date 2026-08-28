@@ -75,8 +75,19 @@ class Session:
         content = prompts.language_reminder(self.language)
         return [{"role": "user", "content": content}]
 
-    def add_user(self, content: str) -> None:
-        self._append({"role": "user", "content": content})
+    def add_user(self, content: str, images: list[str] | None = None) -> None:
+        """Record what the user said, and any images they pasted with it.
+
+        The paths travel on the message rather than in its text, so a provider
+        that can send pictures sends them and one that cannot is not handed a
+        wall of base64 it will try to read as prose. They are paths, not bytes:
+        a transcript is a file somebody may open, and the bytes are already on
+        disk under the state directory.
+        """
+        message = {"role": "user", "content": content}
+        if images:
+            message["images"] = list(images)
+        self._append(message)
 
     def add_assistant(self, content: str) -> None:
         self._append({"role": "assistant", "content": content})
