@@ -2,6 +2,7 @@
 
 import pytest
 
+from bkht.coder import retrieval
 from bkht.coder.retrieval import BUDGET_CHARS, scout, search, terms
 from bkht.coder.tools import build_registry
 from bkht.coder.tools.base import ToolError
@@ -155,3 +156,43 @@ def test_codebase_search_says_so_when_nothing_matches(project):
 def test_codebase_search_rejects_empty_terms(project):
     with pytest.raises(ToolError):
         search_tool(project).run(terms="   ")
+
+
+# --- requests that are not about this workspace -------------------------------
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "review github run 33185669396",
+        "why did run 4210 fail",
+        "look at issue #42",
+        "check https://example.com/thing",
+        "deploy 12345 broke the site",
+    ],
+)
+def test_a_request_naming_something_external_is_not_scouted(message):
+    assert retrieval.about_something_else(message) is True
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "add a --verbose flag",
+        "why does run_tests fail?",
+        "look at the workflow file",
+        "rename handle_undo to undo",
+        "fix the off-by-one in truncate",
+    ],
+)
+def test_an_ordinary_task_still_gets_its_search(message):
+    assert retrieval.about_something_else(message) is False
+
+
+def test_the_scout_says_nothing_about_a_ci_run(tmp_path):
+    # Every repository has a `.github`, so the keyword search matched one and
+    # pointed the turn at the workflow file -- which says what the job would do
+    # and nothing at all about what it did.
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "review.yml").write_text("name: review\n")
+    assert retrieval.scout(tmp_path, "review github run 33185669396") == ""

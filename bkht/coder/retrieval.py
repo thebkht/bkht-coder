@@ -271,12 +271,43 @@ def render(
     )
 
 
+#: A request that names something the workspace does not contain. Searching the
+#: files for "review github run 33185669396" matched `.github/` and `review/`,
+#: because both are real directories -- and then the turn went reading the
+#: workflow file, which says what the job would do and nothing about what it
+#: did. The answer was one `gh run view` away.
+#:
+#: Narrow on purpose: an identifier with a number attached, or a URL. A task
+#: that merely mentions running something still gets its search.
+EXTERNAL = re.compile(
+    r"""(?xi)
+    https?://                       # any URL
+    | \#\d{2,}                       # #1234
+    | \b(?:run|pr|pull|issue|build|job|pipeline|workflow|deploy|release)
+      \s+\#?\d{3,}\b                 # run 33185669396, issue 4210
+    """
+)
+
+
+def about_something_else(message: str) -> bool:
+    """True when the request names something outside this workspace.
+
+    The scout is a keyword match made before anything has read the request. On
+    a question about a CI run it will match something regardless -- every repo
+    has a `.github` -- and what it matches then is worse than nothing, because
+    it is the first thing in the turn and it points the wrong way.
+    """
+    return bool(EXTERNAL.search(message))
+
+
 def scout(root: Path, message: str) -> str:
     """Search the workspace for what ``message`` is about.
 
     Returns the rendered block, or ``""`` when there is nothing useful to say --
     which is the normal outcome for a conversational turn.
     """
+    if about_something_else(message):
+        return ""
     wanted = terms(message)
     if not wanted:
         return ""
