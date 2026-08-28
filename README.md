@@ -18,7 +18,8 @@ coder --model qwen2.5-coder:7b
 
 Slash commands: `/tools`, `/context`, `/clear`, `/undo`, `/diff`, `/review`,
 `/instructions`, `/skills`, `/jobs`, `/permissions`, `/model`, `/mode`,
-`/doctor`, `/help`, `/exit`. `!cmd` shells out, and `exit` on its own leaves.
+`/config`, `/doctor`, `/help`, `/exit`. `!cmd` shells out, and `exit` on its
+own leaves.
 
 On a terminal the session streams: prose appears as the model writes it, a
 status line shows elapsed time and tokens while it is quiet, and each tool call
@@ -32,7 +33,7 @@ runs print the same plain transcript they always did.
 State lives in `~/.bkht-coder/`: sessions under `sessions/`, prompt
 history in `history`, remembered approvals in `permissions.json`, skills that
 apply everywhere under `skills/`, background job logs under `jobs/`, slash
-commands under `commands/`.
+commands under `commands/`, and persistent settings in `config.json`.
 
 ## Requirements
 
@@ -156,8 +157,10 @@ coder --host "http://$(ip route show default | awk '{print $3}'):11434"
 
 ## Configuration
 
-There is no config file; everything is a flag, and the defaults are the ones
-described above.
+Every knob is a flag, and every flag has a default. A preference you keep
+retyping can be written down instead — see [Settings that
+persist](#settings-that-persist) below — and a flag you actually type still
+wins over anything on disk.
 
 | Flag                | Default                  | What it does                                                     |
 | ------------------- | ------------------------ | ---------------------------------------------------------------- |
@@ -185,6 +188,38 @@ A few environment variables are read by the **tooling**, not the agent:
 `OLLAMA_HOST` is Ollama's own variable — set it before `ollama serve` to change
 where the _server_ listens (e.g. `OLLAMA_HOST=0.0.0.0:11434`), then pass the
 matching URL to `coder --host`.
+
+## Settings that persist
+
+`coder config` writes the flags you would otherwise retype into a file:
+
+```
+coder config                              # every setting, and where it came from
+coder config get model
+coder config set model qwen2.5-coder:7b   # personal default, everywhere
+coder config set --workspace num_ctx 8192 # this repo only
+coder config unset model
+coder config path                         # where the two files are
+```
+
+Two files, layered the same way skills and slash commands are: personal
+defaults in `~/.bkht-coder/config.json`, and `<workspace>/.bkht-coder/config.json`
+in the repo to override them for one project. A flag on the command line beats
+both, so a written-down default never gets in the way of a one-off run.
+
+The keys are `provider`, `model`, `host`, `num_ctx`, `temperature`, `mode`,
+`scout`, `max_iterations`, `instructions` and `skills` — each one an existing
+flag, so nothing becomes configurable that was not already. A bad file is not
+fatal: the settings fall back to their defaults and the reason is printed once.
+
+`provider` accepts `ollama` and nothing else today. It exists because it is the
+seam a hosted backend lands on — adding one is a new provider class and a new
+entry in the registry, not a change to how arguments are handled.
+
+The same thing works mid-session: `/config` lists, `/config set <key> <value>`
+writes and applies the change to the running agent where it can, and says so
+plainly when it cannot — `provider`, `instructions` and `skills` wait for the
+next session. Add `--workspace` to either to write the repo's file instead.
 
 ## Project instructions
 
