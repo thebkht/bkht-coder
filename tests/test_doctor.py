@@ -93,6 +93,141 @@ def test_unknown_memory_is_not_reported_as_a_problem():
     assert check_context(8192, None).status == OK
 
 
+# --- what the server says a model costs -----------------------------------
+
+# Recorded from a live Ollama. Sizes are `/api/tags`, shapes are `/api/show`.
+TAGS = [
+    {"name": "qwen2.5-coder:7b", "size": 4683087561},
+    {"name": "qwen2.5-coder:14b", "size": 8988124298},
+    {"name": "llama3:8b", "size": 4661224676},
+]
+SHOW_7B = {
+    "model_info": {
+        "qwen2.block_count": 28,
+        "qwen2.attention.head_count": 28,
+        "qwen2.attention.head_count_kv": 4,
+        "qwen2.embedding_length": 3584,
+    }
+}
+SHOW_14B = {
+    "model_info": {
+        "qwen2.block_count": 48,
+        "qwen2.attention.head_count": 40,
+        "qwen2.attention.head_count_kv": 8,
+        "qwen2.embedding_length": 5120,
+    }
+}
+
+
+def test_the_weights_come_from_the_server_not_a_constant():
+    assert doctor.weights_gb("qwen2.5-coder:7b", TAGS) == pytest.approx(4.36, abs=0.01)
+    assert doctor.weights_gb("qwen2.5-coder:14b", TAGS) == pytest.approx(8.37, abs=0.01)
+    assert doctor.weights_gb("qwen2.5-coder:32b", TAGS) is None
+    assert doctor.weights_gb("qwen2.5-coder:7b", None) is None
+
+
+def test_the_kv_cache_is_derived_from_the_model_shape():
+    # The constant this replaces claimed one figure for both. It is out by 3.4x:
+    # the 14b has more layers and twice the KV heads, which is not the same
+    # thing as being twice the model.
+    assert doctor.kv_gb(SHOW_7B, 16384) == pytest.approx(0.875)
+    assert doctor.kv_gb(SHOW_14B, 16384) == pytest.approx(3.0)
+
+
+def test_an_unknown_architecture_falls_back_rather_than_raising():
+    assert doctor.kv_gb(None, 16384) is None
+    assert doctor.kv_gb({"model_info": {"mystery.block_count": 4}}, 16384) is None
+
+
+# --- the machine this report used to get wrong ----------------------------
+
+
+def _vram(monkeypatch, mib: str | None):
+    """A machine with a discrete card of the given size, or without one."""
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: None if mib is None else f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        doctor.subprocess,
+        "run",
+        lambda *a, **k: type("R", (), {"returncode": 0, "stdout": mib})(),
+    )
+
+
+def test_vram_is_read_from_the_card_and_the_largest_one_wins(monkeypatch):
+    # Ollama loads onto one card unless told otherwise, so two 8 GB cards are an
+    # 8 GB budget, not a 16 GB one.
+    _vram(monkeypatch, "8192\n")
+    assert doctor.gpu_vram_gb() == pytest.approx(8.0)
+    _vram(monkeypatch, "8192\n24564\n")
+    assert doctor.gpu_vram_gb() == pytest.approx(23.99, abs=0.01)
+
+
+def test_no_gpu_tool_means_no_discrete_card(monkeypatch):
+    _vram(monkeypatch, None)
+    assert doctor.gpu_vram_gb() is None
+
+
+def test_the_budget_prefers_the_card_and_says_which_it_read(monkeypatch):
+    _vram(monkeypatch, "8192\n")
+    budget = doctor.memory_budget()
+    assert budget.label == "VRAM" and budget.gb == pytest.approx(8.0)
+    # Subtracted, not scaled: 0.7 * 8 would leave 5.6 GB and reject the 7b at
+    # 16384, which is the configuration that actually works on that card.
+    assert budget.usable == pytest.approx(7.2)
+
+    _vram(monkeypatch, None)
+    monkeypatch.setattr(doctor, "total_ram_gb", lambda: 16.0)
+    unified = doctor.memory_budget()
+    assert unified.label == "memory" and unified.usable == pytest.approx(11.2)
+
+
+def test_an_eight_gb_card_in_a_large_box_is_not_told_it_has_the_box():
+    """The bug this whole check exists for.
+
+    32 GB of system RAM and an 8 GB card: the report read the 32, passed, and
+    left the user running a third of the weights on the CPU at a few tokens a
+    second. The binding number is the card.
+    """
+    card = doctor.Budget(8.0, "VRAM", dedicated=True)
+    check = check_context(
+        16384,
+        card,
+        doctor.weights_gb("qwen2.5-coder:14b", TAGS),
+        doctor.kv_gb(SHOW_14B, 1024),
+        [("qwen2.5-coder:7b", 5.24)],
+    )
+    assert check.status == WARN
+    assert "8 GB of VRAM" in check.detail
+    assert "--model qwen2.5-coder:7b" in check.fix
+
+
+def test_the_configuration_that_works_on_that_card_is_not_warned_about():
+    # 4.36 GB of weights and 0.875 GB of cache: fully resident, and the point of
+    # the whole exercise. A check that warned here would be noise.
+    check = check_context(
+        16384,
+        doctor.Budget(8.0, "VRAM", dedicated=True),
+        doctor.weights_gb("qwen2.5-coder:7b", TAGS),
+        doctor.kv_gb(SHOW_7B, 1024),
+    )
+    assert check.status == OK
+    assert "of 8 GB of VRAM" in check.detail
+
+
+def test_a_smaller_model_is_named_from_what_is_actually_pulled():
+    check = check_context(
+        16384, doctor.Budget(8.0, "VRAM", dedicated=True), 8.37, 3.0 / 16,
+        [("qwen2.5-coder:14b-q8", 20.0), ("qwen2.5-coder:7b", 5.24)],
+    )
+    # The largest one that fits, and never one that does not.
+    assert "--model qwen2.5-coder:7b" in check.fix
+
+
+def test_only_the_same_model_is_offered_as_an_alternative(monkeypatch):
+    monkeypatch.setattr(doctor, "_show", lambda host, model: SHOW_7B)
+    offered = doctor._alternatives("http://x", "qwen2.5-coder:14b", TAGS, 16384)
+    assert [tag for tag, _ in offered] == ["qwen2.5-coder:7b"]
+
+
 # --- which copy, and where it was pointed ---------------------------------
 
 

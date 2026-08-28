@@ -38,9 +38,21 @@ FAIL = "fail"
 # constraint is not RAM but what stays on the GPU: at 12 GB of 16 that machine
 # already spills to CPU and a warm turn goes from 0.9s to 11s. Hence a usable
 # fraction rather than the whole of it.
+#
+# These two are now only the fallback. The server knows what the weights weigh
+# and what shape the KV cache is, and is asked first -- a single footprint is
+# wrong the moment `--model` names anything but the 14b, and a single
+# per-context figure is off by 3.4x between the two models this project ships
+# with. They are still what the report degrades to when the server cannot say.
 MODEL_FOOTPRINT_GB = 8.0
 GB_PER_1K_CTX = 0.25
 USABLE_FRACTION = 0.7
+
+# A discrete card holds nothing but the display and the runtime, so its budget
+# is the whole of it less a fixed reserve -- subtracted, not scaled. Scaling
+# 8 GB by USABLE_FRACTION would leave 5.6 GB and reject a 7b at 16384, which is
+# precisely the configuration that works on that card.
+VRAM_HEADROOM_GB = 0.8
 
 
 @dataclass
@@ -61,6 +73,32 @@ class Check:
         if self.fix:
             record["fix"] = self.fix
         return record
+
+
+@dataclass(frozen=True)
+class Budget:
+    """How much memory a model may use here, and which memory that is.
+
+    Two machines wear the same number very differently. On unified memory the
+    model competes with everything else running, so only a fraction is really
+    available; a discrete card is the model's alone. Which one was measured
+    matters more than either number: an 8 GB card in a 32 GB box is the case
+    this report used to get wrong -- it read the 32, passed, and left the user
+    running two thirds of the weights on the CPU.
+    """
+
+    gb: float | None
+    label: str = "memory"
+    #: A GPU of its own, rather than memory shared with the rest of the machine.
+    dedicated: bool = False
+
+    @property
+    def usable(self) -> float | None:
+        if self.gb is None:
+            return None
+        if self.dedicated:
+            return max(self.gb - VRAM_HEADROOM_GB, 0.0)
+        return self.gb * USABLE_FRACTION
 
 
 def version() -> str:
@@ -114,8 +152,12 @@ def check_version(root: Path, origin: Path | None = None) -> Check:
     return Check("version", OK, label)
 
 
-def _tags(host: str) -> tuple[list[str] | None, str]:
-    """Model tags the server knows about, or why we could not ask."""
+def _tags(host: str) -> tuple[list[dict] | None, str]:
+    """Every model the server knows about, or why we could not ask.
+
+    Whole entries rather than names: each one carries the size of the weights,
+    which is the number this report used to hardcode.
+    """
     try:
         response = httpx.get(f"{host.rstrip('/')}/api/tags", timeout=PROBE_TIMEOUT)
         response.raise_for_status()
@@ -124,7 +166,29 @@ def _tags(host: str) -> tuple[list[str] | None, str]:
         return None, str(exc)
     except ValueError as exc:
         return None, f"the server answered, but not with JSON ({exc})"
-    return [str(entry.get("name", "")) for entry in models], ""
+    return [entry for entry in models if isinstance(entry, dict)], ""
+
+
+def _names(entries: list[dict] | None) -> list[str] | None:
+    """Just the tags, for the checks that only ask whether one is present."""
+    return None if entries is None else [str(entry.get("name", "")) for entry in entries]
+
+
+def _show(host: str, model: str) -> dict | None:
+    """One model's metadata, or nothing.
+
+    Every caller has a fallback, so a server too old to answer this degrades the
+    report rather than failing it.
+    """
+    try:
+        response = httpx.post(
+            f"{host.rstrip('/')}/api/show", json={"model": model}, timeout=PROBE_TIMEOUT
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def check_server(host: str, tags: list[str] | None, problem: str) -> Check:
@@ -207,30 +271,169 @@ def total_ram_gb() -> float | None:
         return None
 
 
-def _needed_gb(num_ctx: int) -> float:
-    return MODEL_FOOTPRINT_GB + (num_ctx / 1024) * GB_PER_1K_CTX
+def _smi(argv: list[str]) -> str | None:
+    """A GPU tool's output, or nothing if it is absent or unhappy."""
+    if shutil.which(argv[0]) is None:
+        return None
+    try:
+        completed = subprocess.run(
+            argv, capture_output=True, encoding="utf-8", timeout=PROBE_TIMEOUT
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return completed.stdout if completed.returncode == 0 else None
 
 
-def check_context(num_ctx: int, ram_gb: float | None) -> Check:
-    """The single most common cause of a session where every turn takes minutes."""
-    if ram_gb is None:
-        return Check("num_ctx", OK, f"{num_ctx} tokens (could not read this machine's RAM)")
+def gpu_vram_gb() -> float | None:
+    """The largest discrete GPU's memory in GB, or None where there is none.
 
-    needed = _needed_gb(num_ctx)
-    usable = ram_gb * USABLE_FRACTION
+    The largest, not the sum: Ollama loads a model onto one card unless it is
+    told otherwise, so adding two together would budget memory no single run can
+    reach. None means no discrete card was found, which is the Apple Silicon
+    case as much as the no-GPU one -- there the machine's memory is the answer.
+    """
+    output = _smi(
+        ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"]
+    )
+    if output:
+        sizes = []
+        for line in output.splitlines():
+            try:
+                sizes.append(float(line.strip()) / 1024)  # nvidia-smi reports MiB
+            except ValueError:
+                continue
+        if sizes:
+            return max(sizes)
+
+    output = _smi(["rocm-smi", "--showmeminfo", "vram", "--json"])
+    if output:
+        try:
+            payload = json.loads(output)
+        except ValueError:
+            payload = {}
+        sizes = []
+        for card in payload.values() if isinstance(payload, dict) else []:
+            for key, value in (card or {}).items():
+                if "total" in key.lower():
+                    try:
+                        sizes.append(float(value) / 1024**3)
+                    except (TypeError, ValueError):
+                        continue
+        if sizes:
+            return max(sizes)
+    return None
+
+
+def memory_budget() -> Budget:
+    """The memory that actually binds here, and its name."""
+    vram = gpu_vram_gb()
+    if vram is not None:
+        return Budget(vram, "VRAM", dedicated=True)
+    return Budget(total_ram_gb(), "memory")
+
+
+def weights_gb(model: str, entries: list[dict] | None) -> float | None:
+    """What one model's weights weigh, as the server reports them."""
+    for entry in entries or []:
+        if str(entry.get("name", "")) == model:
+            try:
+                return float(entry["size"]) / 1024**3
+            except (KeyError, TypeError, ValueError):
+                return None
+    return None
+
+
+def _info(show: dict | None, suffix: str):
+    """One field of a model's metadata, whatever family prefixes it.
+
+    The keys are named for the architecture -- `qwen2.block_count` here,
+    something else on the next model -- and the suffix is the part that is the
+    same everywhere.
+    """
+    for key, value in ((show or {}).get("model_info") or {}).items():
+        if str(key).split(".", 1)[-1] == suffix:
+            return value
+    return None
+
+
+def kv_gb(show: dict | None, num_ctx: int) -> float | None:
+    """The KV cache for ``num_ctx`` tokens, from the model's own metadata.
+
+    Two for the key and the value, two again for float16. This is the number the
+    single ``GB_PER_1K_CTX`` constant was standing in for, and it is not a
+    property of a model's parameter count: 14b's cache is 3.4x 7b's because it
+    has more layers and twice the KV heads, not because it is twice the model.
+    """
+    try:
+        head_dim = float(_info(show, "embedding_length")) / float(
+            _info(show, "attention.head_count")
+        )
+        layers = int(_info(show, "block_count"))
+        kv_heads = int(_info(show, "attention.head_count_kv"))
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+    return 2 * layers * kv_heads * head_dim * num_ctx * 2 / 1024**3
+
+
+def _needed_gb(
+    num_ctx: int,
+    weights: float = MODEL_FOOTPRINT_GB,
+    per_1k: float = GB_PER_1K_CTX,
+) -> float:
+    return weights + (num_ctx / 1024) * per_1k
+
+
+def check_context(
+    num_ctx: int,
+    budget: "Budget | float | None",
+    weights: float | None = None,
+    per_1k: float | None = None,
+    alternatives: list[tuple[str, float]] | None = None,
+) -> Check:
+    """The single most common cause of a session where every turn takes minutes.
+
+    ``weights`` and ``per_1k`` come from the server when it answered, and fall
+    back to the fitted constants when it did not. ``alternatives`` are the other
+    pulled tags of the same model and what each would cost here, so a machine
+    too small for any window can be sent to one that fits by name.
+    """
+    budget = budget if isinstance(budget, Budget) else Budget(budget)
+    weights = MODEL_FOOTPRINT_GB if weights is None else weights
+    per_1k = GB_PER_1K_CTX if per_1k is None else per_1k
+
+    if budget.gb is None:
+        return Check(
+            "num_ctx", OK, f"{num_ctx} tokens (could not read this machine's memory)"
+        )
+
+    needed = _needed_gb(num_ctx, weights, per_1k)
+    usable = budget.usable
     if needed <= usable:
-        return Check("num_ctx", OK, f"{num_ctx} tokens, about {needed:.0f} GB of {ram_gb:.0f} GB")
+        return Check(
+            "num_ctx",
+            OK,
+            f"{num_ctx} tokens, about {needed:.0f} GB of "
+            f"{budget.gb:.0f} GB of {budget.label}",
+        )
 
     # The largest power-of-two context that still fits, so the fix is a value to
     # paste rather than a direction to experiment in.
     fits = max(
-        (size for size in (4096, 8192, 16384, 32768) if _needed_gb(size) <= usable),
+        (
+            size
+            for size in (4096, 8192, 16384, 32768)
+            if _needed_gb(size, weights, per_1k) <= usable
+        ),
         default=None,
     )
     if fits is None:
+        # Named from what is actually pulled, so the advice stays true on a
+        # machine and a model set this code has never seen. The 7b is the
+        # fallback because it is what the README ships.
+        smaller = [tag for tag, cost in sorted(alternatives or [], key=lambda p: -p[1]) if cost <= usable]
         remedy = (
             "Even the smallest useful context is tight here; use "
-            "`--model qwen2.5-coder:7b`."
+            f"`--model {smaller[0] if smaller else 'qwen2.5-coder:7b'}`."
         )
     elif num_ctx <= DEFAULT_NUM_CTX:
         # Naming the trade rather than just the smaller number. Lowering the
@@ -250,7 +453,8 @@ def check_context(num_ctx: int, ram_gb: float | None) -> Check:
 
     return Check(
         "num_ctx", WARN,
-        f"{num_ctx} tokens wants roughly {needed:.0f} GB, and this machine has {ram_gb:.0f} GB",
+        f"{num_ctx} tokens wants roughly {needed:.0f} GB, and this machine has "
+        f"{budget.gb:.0f} GB of {budget.label}",
         "Past what stays on the GPU, the KV cache spills to CPU and every turn "
         f"pays for it. {remedy}",
     )
@@ -342,12 +546,46 @@ def _model_checks(provider: str, model: str, host: str, num_ctx: int) -> list[Ch
     """
     if provider != DEFAULT_PROVIDER:
         return [check_backend(provider, model)]
-    tags, problem = _tags(host)
+
+    entries, problem = _tags(host)
+    names = _names(entries)
+    weights = per_1k = None
+    alternatives: list[tuple[str, float]] = []
+    if entries is not None:
+        # Only worth asking once the server has answered at all; offline, every
+        # one of these would be the same connection error three more times.
+        weights = weights_gb(model, entries)
+        per_1k = kv_gb(_show(host, model), 1024)
+        alternatives = _alternatives(host, model, entries, num_ctx)
+
     return [
-        check_server(host, tags, problem),
-        check_model(model, tags),
-        check_context(num_ctx, total_ram_gb()),
+        check_server(host, names, problem),
+        check_model(model, names),
+        check_context(num_ctx, memory_budget(), weights, per_1k, alternatives),
     ]
+
+
+def _alternatives(
+    host: str, model: str, entries: list[dict], num_ctx: int
+) -> list[tuple[str, float]]:
+    """Other pulled sizes of the same model, and what each would cost here.
+
+    Same stem only. Offering to solve a memory problem by switching the user to
+    an unrelated model they happen to have pulled is offering to change the
+    answer, not the machine.
+    """
+    stem = model.split(":")[0]
+    found = []
+    for entry in entries:
+        tag = str(entry.get("name", ""))
+        if tag == model or tag.split(":")[0] != stem:
+            continue
+        weights = weights_gb(tag, entries)
+        if weights is None:
+            continue
+        per_1k = kv_gb(_show(host, tag), 1024) or GB_PER_1K_CTX
+        found.append((tag, _needed_gb(num_ctx, weights, per_1k)))
+    return found
 
 
 def run_checks(
