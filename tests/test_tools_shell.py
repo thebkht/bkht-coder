@@ -122,3 +122,35 @@ def test_description_names_the_active_shell(monkeypatch, project):
     tool = registry.get("powershell")
     assert "PowerShell" in tool.description
     assert registry.get("bash") is None
+
+
+# --- placeholders -------------------------------------------------------------
+
+
+def test_a_command_with_a_placeholder_token_is_refused(registry):
+    # In the session that prompted this the model ran
+    # `curl -H 'Authorization: token YOUR_GITHUB_TOKEN'`, which authenticated as
+    # nobody -- and then spent the rest of the turn diagnosing the credentials
+    # problem it had just invented.
+    with pytest.raises(ToolError) as raised:
+        bash(registry, "curl -H 'Authorization: token YOUR_GITHUB_TOKEN' https://api")
+    assert "YOUR_GITHUB_TOKEN" in str(raised.value)
+    assert "gh" in str(raised.value), "the message should name what to use instead"
+
+
+def test_an_angle_bracket_placeholder_is_refused(registry):
+    with pytest.raises(ToolError):
+        bash(registry, "curl -H 'Authorization: <your token>' https://api")
+
+
+def test_redirection_and_markup_are_not_placeholders(registry):
+    # One false alarm is enough to teach everybody to ignore the next true one,
+    # so the rule has to leave ordinary shell punctuation alone.
+    for command in (
+        "echo '<html>' > out.txt",
+        "grep '<stdio.h>' main.c",
+        "ls -la 2>&1",
+        "diff <(sort a) <(sort b)",
+        "gh run view 33185669396",
+    ):
+        assert bash(registry, command).ok, command

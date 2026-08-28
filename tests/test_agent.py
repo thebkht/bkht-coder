@@ -1,5 +1,7 @@
 """The loop: tool dispatch, malformed-call recovery, and the bounds."""
 
+import itertools
+
 import pytest
 
 from bkht.coder.agent import Agent, MAX_RETRIES
@@ -313,7 +315,10 @@ def test_tracking_can_be_switched_off(loop):
 
 
 def test_a_turn_reports_how_long_it_took(loop):
-    ticks = iter([10.0, 12.5, 13.0, 14.0])
+    # The first reading and the last are what the duration is made of; the ones
+    # between belong to the loop's own bookkeeping and it may take more of them
+    # than it does today, so the clock keeps answering rather than running out.
+    ticks = itertools.chain([10.0, 12.5, 13.0], itertools.repeat(14.0))
     agent, _ = loop(["Done."], clock=lambda: next(ticks))
     assert agent.run("go").seconds == pytest.approx(4.0)
 
@@ -490,3 +495,26 @@ def test_a_call_that_was_never_run_is_not_replayed(loop):
     agent.run("go")
     refusal = agent.session.messages[-2]["content"]
     assert "returned the first time" not in refusal
+
+
+def test_a_turn_that_runs_too_long_is_asked_to_answer(loop):
+    # Nothing else bounds the clock: the iteration cap counts round trips and
+    # the retry cap counts only rounds where every call failed, so a turn making
+    # distinct successful calls that go nowhere was bounded by neither.
+    ticks = itertools.count(0.0, 1_000.0)  # every reading a thousand seconds on
+    agent, _ = loop(
+        [call("read_file", path=f"src/{n}.py") for n in range(20)] + ["done"],
+        clock=lambda: next(ticks),
+        max_iterations=20,
+    )
+    outcome = agent.run("go")
+    assert outcome.stopped == "time-cap"
+    assert outcome.iterations < 20
+
+
+def test_the_clock_does_not_end_a_turn_before_it_starts(loop):
+    # The budget is checked between iterations, so the first one always runs.
+    ticks = itertools.count(0.0, 1_000.0)
+    agent, _ = loop(["Done."], clock=lambda: next(ticks))
+    outcome = agent.run("go")
+    assert outcome.stopped == "answered"

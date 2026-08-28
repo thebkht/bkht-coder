@@ -12,6 +12,7 @@ learns the answer through the tool name and description, so both carry it.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -24,6 +25,32 @@ MAX_TIMEOUT = 600
 NO_SHELL = (
     "no shell is available on this system. Install Git for Windows (which "
     "provides bash), or run coder inside WSL."
+)
+
+#: Text that is standing in for a value nobody supplied. A model that does not
+#: have a token writes the sentence that usually surrounds one and runs it --
+#: in the session that prompted this, `curl -H 'Authorization: token
+#: YOUR_GITHUB_TOKEN'`, which authenticated as nobody, failed, and sent the
+#: turn off diagnosing a credentials problem it had invented.
+#:
+#: Narrow on purpose. Each of these is a placeholder in every context a shell
+#: command puts it in, and none is a string a working command contains.
+PLACEHOLDERS = re.compile(
+    r"""(?xi)
+    \bYOUR_[A-Z0-9_]+\b        # YOUR_GITHUB_TOKEN, YOUR_API_KEY
+    | <your[ _-][^>]{1,40}>     # <your token>, <your-api-key>
+    | \bREPLACE_[A-Z0-9_]+\b   # REPLACE_ME
+    | \bxxxx+\b                # xxxxxxxx
+    """
+)
+
+PLACEHOLDER_REFUSED = (
+    "this command contains {found}, which is a placeholder rather than a value. "
+    "Running it would authenticate as nobody or address nothing, and the error "
+    "that came back would be about the placeholder rather than about the task.\n"
+    "Use a tool that already holds the credential (`gh` for GitHub, `git` for a "
+    "remote it has), read the value from the environment, or ask for it -- but "
+    "do not invent one."
 )
 
 
@@ -77,6 +104,8 @@ def register_shell_tools(registry, workspace: Workspace):
     def bash(command: str, timeout: int = DEFAULT_TIMEOUT) -> ToolResult:
         if not command.strip():
             raise ToolError("command must not be empty")
+        if found := PLACEHOLDERS.search(command):
+            raise ToolError(PLACEHOLDER_REFUSED.format(found=f"`{found.group()}`"))
         if timeout < 1 or timeout > MAX_TIMEOUT:
             raise ToolError(f"timeout must be between 1 and {MAX_TIMEOUT} seconds")
         if shell is None:

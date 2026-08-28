@@ -40,6 +40,16 @@ MAX_REPLAYS = 2
 #: to remove the reason to invent one, and a truncated answer is a reason.
 REPLAY_LIMIT = 4000
 
+#: How long one turn may run before it is asked to answer with what it has.
+#: Nothing else bounds the clock: the iteration cap counts round trips, and the
+#: retry cap only counts rounds where every call failed, so a turn making
+#: distinct successful calls that go nowhere is bounded by neither. One in the
+#: session that prompted this ran nineteen minutes and answered nothing.
+#:
+#: Checked between iterations, never mid-call, so it can overshoot by one round
+#: trip. Bounding the model's thinking is not this budget's job -- Esc is.
+MAX_SECONDS = 600.0
+
 
 class Listener(Protocol):
     """Receives loop events so the CLI can render them as they happen."""
@@ -96,6 +106,7 @@ class Agent:
         listener: Listener | None = None,
         permissions=None,
         max_iterations: int = MAX_ITERATIONS,
+        max_seconds: float = MAX_SECONDS,
         scout_root: Path | str | None = None,
         track_language: bool = True,
         clock=time.monotonic,
@@ -106,6 +117,7 @@ class Agent:
         self.listener = listener or NullListener()
         self.permissions = permissions
         self.max_iterations = max_iterations
+        self.max_seconds = max_seconds
         # Injected so a turn's duration can be asserted without sleeping.
         self.clock = clock
         # Off for the review passes, whose replies are JSON rather than prose:
@@ -190,7 +202,15 @@ class Agent:
         self._made: dict[tuple[str, str], str] = {}
         self._replays = 0
 
+        deadline = self.clock() + self.max_seconds
         for _ in range(self.max_iterations):
+            if outcome.iterations and self.clock() > deadline:
+                outcome.stopped = "time-cap"
+                outcome.errors.append(
+                    f"turn ran past {int(self.max_seconds)}s without answering"
+                )
+                self._final_answer(outcome)
+                return outcome
             outcome.iterations += 1
 
             try:
