@@ -44,6 +44,20 @@ def project(tmp_path: Path) -> Path:
     return tmp_path
 
 
+@pytest.fixture(autouse=True)
+def neutral_ci_environment(monkeypatch):
+    """Hide the runner's own CI variables from the suite.
+
+    `coder review` detects GitHub Actions and GitLab from the environment, and
+    the suite runs *inside* GitHub Actions. Without this a test asserting what a
+    plain run does would assert it on a machine where no run is plain -- and it
+    would pass on a laptop and fail only once pushed. Tests that want CI pass an
+    environment in explicitly.
+    """
+    for name in ("CI", "GITHUB_ACTIONS", "GITHUB_STEP_SUMMARY", "GITLAB_CI"):
+        monkeypatch.delenv(name, raising=False)
+
+
 def pytest_addoption(parser):
     parser.addoption(
         "--model",

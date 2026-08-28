@@ -325,6 +325,26 @@ def test_code_quality_can_be_pointed_anywhere(repo, canned, tmp_path):
     assert json.loads(target.read_text())
 
 
+def test_quiet_in_ci_still_reports(repo, canned, capsys, tmp_path):
+    # --quiet suppresses progress, not the report: it once returned a listener
+    # with no finish() while still taking the CI path, and crashed on it.
+    canned([HIGH])
+    target = tmp_path / "q.json"
+    assert run(repo, "--ci", "github", "--quiet", "--code-quality", str(target)) == 1
+    out = capsys.readouterr()
+    assert "::error file=calc.py,line=12" in out.out
+    assert "::group::" not in out.out and "::group::" not in out.err
+    assert json.loads(target.read_text())
+
+
+def test_finish_is_part_of_the_listener_protocol():
+    # run() calls it on whatever listener it was handed.
+    from bkht.coder.review.reviewer import ReviewListener
+
+    assert ReviewListener().finish() is None
+    assert review_cli.Progress().finish() is None
+
+
 def test_fix_is_skipped_in_ci(repo, canned, capsys):
     # --fix asks which findings to fix; there is nobody there to answer.
     canned([HIGH])

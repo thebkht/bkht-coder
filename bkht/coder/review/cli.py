@@ -215,10 +215,10 @@ def run(args) -> int:
         verify=not args.no_verify,
     )
     result = reviewer.review(files)
+    # Close the last log section before anything else prints, or the report ends
+    # up folded inside it. A no-op on the listeners that never opened one.
+    listener.finish()
     if kind:
-        # Close the last log section before anything else prints, or the report
-        # ends up folded inside it.
-        listener.finish()
         report(result, args, kind)
 
     if args.json:

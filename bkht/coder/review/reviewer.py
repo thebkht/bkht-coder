@@ -101,6 +101,15 @@ class ReviewListener:
     def on_verdict(self, finding: "Finding", refuted: bool, reason: str) -> None:
         pass
 
+    def finish(self) -> None:
+        """The review is over and the report is about to print.
+
+        On the protocol rather than on the CI listener that needed it: a
+        listener that opens something -- a log section, a progress line -- has
+        to be told when to close it, and a caller should not have to know which
+        listener it is holding to say so.
+        """
+
 
 def coerce_finding(obj: dict, dimension: str, valid_files: set[str]) -> Finding | None:
     """Build a :class:`Finding` from model JSON, or None if it is unusable.
