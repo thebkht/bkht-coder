@@ -166,6 +166,10 @@ Flags:
   --output <path>         Write a Markdown report to this path
   --fix                   After reporting, offer to fix findings
   --quiet                 Suppress progress output
+  --ci [<name>]           CI output: log sections and inline annotations.
+                          Detected from the environment; one of auto, github,
+                          gitlab, generic, off
+  --code-quality <path>   Write a GitLab Code Quality report to this path
 {COMMON}
   -h, --help              Display this help and exit
 
@@ -178,6 +182,9 @@ Examples:
 
   coder review HEAD~3..HEAD --json
       Review three commits and emit the findings as JSON
+
+  coder review --base main --ci
+      Annotate the diff on the pull request, and fail on a finding
 """
 
 DOCTOR_HELP = f"""\

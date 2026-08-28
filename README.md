@@ -464,6 +464,38 @@ report is worse than no report because it teaches you to ignore it.
 Review is read-only. `--fix` is a separate phase that goes through the normal
 agent loop and the normal permission gate.
 
+### In CI
+
+```sh
+coder review --base main --ci     # detected anyway; the flag forces it
+coder review --ci off             # ...and this suppresses it
+```
+
+Inside a pipeline the report is in the wrong place. Progress is written for a
+person watching a terminal, so a log file gets escape codes; and the findings
+land in stdout, which is not where anyone reviewing the change is looking. `--ci`
+fixes both. Progress becomes flat, collapsible log sections, and each finding is
+handed to the platform in the form it renders **on the line of the diff it is
+about**:
+
+- **GitHub Actions** — `::error`/`::warning`/`::notice` annotations on the pull
+  request, and the full Markdown report appended to the job summary.
+- **GitLab CI** — a `gl-code-quality-report.json` for the merge request widget,
+  which also annotates the diff. Point it elsewhere with `--code-quality`.
+
+It is detected from `GITHUB_ACTIONS`, `GITLAB_CI`, or a plain `CI`, so nothing
+needs configuring on either side; `--ci github` and `--ci gitlab` force a shape,
+and `--ci off` gets the interactive output back.
+
+Two behaviours change under `--ci`. A finding exits 1, so the job fails on one
+rather than reporting into a log nobody reads. And `--fix` is skipped, because it
+asks which findings to fix and CI cannot answer.
+
+There is a workflow for each platform in this repository — `.github/workflows/review.yml`
+and `.gitlab-ci.yml`. Both need a runner with Ollama and the model on it, which
+is why neither runs by default: the GitHub one waits for a `coder-review` label,
+and the GitLab one is tagged `ollama`.
+
 ## Checking what an edit means
 
 `edit_file` used to check one thing: that `old_string` appeared exactly once.
