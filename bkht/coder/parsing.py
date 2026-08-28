@@ -159,6 +159,55 @@ def parse_tool_calls(text: str) -> list[ToolCall]:
     return calls
 
 
+#: A code fence, as the model writes one around a tool call it is about to
+#: make. Three backticks or more, optionally with a language after them.
+FENCE = "```"
+
+
+def _fence_lines(text: str) -> list[tuple[int, int]]:
+    """Every fence line in ``text``, as ``(start, end)`` character offsets."""
+    found = []
+    start = 0
+    for line in text.splitlines(keepends=True):
+        if line.strip().startswith(FENCE):
+            found.append((start, start + len(line)))
+        start += len(line)
+    return found
+
+
+def open_fence(text: str) -> int | None:
+    """Where an unclosed code fence begins, if one does.
+
+    Streaming has to hold a fence back until its contents are known: the
+    opening line arrives whole, several chunks before whatever it contains, so
+    by the time a tool call inside it has been recognised and removed the fence
+    is already on the screen and cannot be taken off it.
+    """
+    fences = _fence_lines(text)
+    return None if len(fences) % 2 == 0 else fences[-1][0]
+
+
+def drop_empty_fences(text: str) -> str:
+    """``text`` with fences that now contain nothing at all removed.
+
+    The model wraps its tool call in ```json ... ```. Removing the call leaves
+    the fence standing around nothing, which renders as an empty block -- the
+    blank gap that used to sit above every tool call in a transcript.
+    """
+    fences = _fence_lines(text)
+    if len(fences) < 2:
+        return text
+    out = []
+    cut = 0
+    for opener, closer in zip(fences[::2], fences[1::2]):
+        if text[opener[1] : closer[0]].strip():
+            continue
+        out.append(text[cut : opener[0]])
+        cut = closer[1]
+    out.append(text[cut:])
+    return "".join(out)
+
+
 def strip_json(text: str) -> str:
     """``text`` with every extracted JSON value removed.
 
@@ -184,4 +233,4 @@ def strip_json(text: str) -> str:
         out.append(text[i])
         i += 1
 
-    return "".join(out).strip()
+    return drop_empty_fences("".join(out)).strip()

@@ -5,7 +5,9 @@ import json
 import pytest
 
 from bkht.coder.parsing import (
+    drop_empty_fences,
     extract_json_objects,
+    open_fence,
     parse_tool_calls,
     strip_json,
 )
@@ -117,3 +119,33 @@ def test_strip_json_leaves_prose():
 
 def test_strip_json_keeps_unparseable_braces():
     assert strip_json("use {placeholder} here") == "use {placeholder} here"
+
+
+# --- fences left empty by a removed call --------------------------------------
+
+
+def test_a_fence_around_a_tool_call_goes_with_the_call():
+    # The model writes ```json around the call. Removing the call used to leave
+    # the fence standing around nothing, which is the blank block that sat above
+    # every tool call in a transcript.
+    text = 'Here is the call:\n\n```json\n{"name": "bash", "arguments": {}}\n```\n'
+    assert strip_json(text) == "Here is the call:"
+
+
+def test_a_fence_with_something_in_it_is_kept():
+    text = "Look:\n\n```py\nx = 1\n```"
+    assert strip_json(text) == text
+
+
+def test_an_unclosed_fence_is_left_alone():
+    text = "```py\nx = 1"
+    assert strip_json(text) == text
+
+
+def test_open_fence_finds_one_still_waiting_for_its_contents():
+    assert open_fence("a\n```json\n") == 2
+    assert open_fence("a\n```json\nx\n```\n") is None
+
+
+def test_drop_empty_fences_leaves_a_lone_fence_alone():
+    assert drop_empty_fences("```json\n") == "```json\n"
