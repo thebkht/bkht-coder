@@ -228,6 +228,39 @@ def test_only_the_same_model_is_offered_as_an_alternative(monkeypatch):
     assert [tag for tag, _ in offered] == ["qwen2.5-coder:7b"]
 
 
+# --- where the weights actually are ---------------------------------------
+
+# Recorded from `/api/ps` with the 14b loaded at 16384 on a 16 GB machine: the
+# 91% GPU row the README measured, in the server's own words.
+SPILLING = [{"name": "qwen2.5-coder:14b", "size": 12486495434, "size_vram": 11421058333}]
+RESIDENT = [{"name": "qwen2.5-coder:7b", "size": 5628107561, "size_vram": 5628107561}]
+
+
+def test_a_fully_resident_model_passes():
+    check = doctor.check_placement("qwen2.5-coder:7b", RESIDENT)
+    assert check.status == OK and "100% on GPU" in check.detail
+
+
+def test_a_model_spilling_to_the_cpu_warns_with_the_share():
+    check = doctor.check_placement("qwen2.5-coder:14b", SPILLING)
+    assert check.status == WARN
+    assert "91% on GPU" in check.detail and "1.0 GB" in check.detail
+    assert "--num-ctx" in check.fix
+
+
+def test_a_model_that_is_not_loaded_is_not_a_problem_and_is_not_loaded():
+    # A health check that pulled nine gigabytes into memory as a side effect is
+    # a health check nobody runs.
+    check = doctor.check_placement("qwen2.5-coder:14b", RESIDENT)
+    assert check.status == OK and "not loaded" in check.detail
+
+
+def test_a_server_that_cannot_say_is_not_a_problem_either():
+    assert doctor.check_placement("qwen2.5-coder:14b", None).status == OK
+    assert doctor.check_placement("x", [{"name": "x"}]).status == OK
+    assert doctor.check_placement("x", [{"name": "x", "size": 0}]).status == OK
+
+
 # --- which copy, and where it was pointed ---------------------------------
 
 

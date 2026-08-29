@@ -191,6 +191,17 @@ def _show(host: str, model: str) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _ps(host: str) -> list[dict] | None:
+    """What is loaded right now, and how much of it is on the GPU."""
+    try:
+        response = httpx.get(f"{host.rstrip('/')}/api/ps", timeout=PROBE_TIMEOUT)
+        response.raise_for_status()
+        models = response.json().get("models", [])
+    except (httpx.HTTPError, ValueError):
+        return None
+    return [entry for entry in models if isinstance(entry, dict)]
+
+
 def check_server(host: str, tags: list[str] | None, problem: str) -> Check:
     if tags is None:
         return Check(
@@ -460,6 +471,58 @@ def check_context(
     )
 
 
+def check_placement(model: str, loaded: list[dict] | None) -> Check:
+    """Where the weights actually are -- the one number here that is measured.
+
+    Every other memory line in this report is arithmetic on a model's size, and
+    arithmetic is what got the 8 GB card wrong for so long. This one is the
+    server's own answer, and it is the answer that decides whether a turn takes
+    a second or a minute: whatever did not fit on the GPU is walked through on
+    the CPU once per token.
+
+    Nothing here loads a model. A health check that pulled nine gigabytes into
+    memory as a side effect would be a check nobody runs.
+    """
+    if loaded is None:
+        return Check("placement", OK, "could not ask the server what is loaded")
+
+    entry = next(
+        (
+            item
+            for item in loaded
+            if model in (str(item.get("name", "")), str(item.get("model", "")))
+        ),
+        None,
+    )
+    if entry is None:
+        return Check(
+            "placement", OK,
+            f"{model} is not loaded; run a turn and re-run doctor to see the split",
+        )
+
+    try:
+        total = float(entry["size"])
+        resident = float(entry.get("size_vram", 0))
+    except (KeyError, TypeError, ValueError):
+        return Check("placement", OK, "the server did not say how it placed the model")
+    if total <= 0:
+        return Check("placement", OK, "the server reported a model of no size")
+
+    share = resident / total
+    if share >= 0.99:
+        return Check(
+            "placement", OK, f"100% on GPU ({total / 1024**3:.1f} GB resident)"
+        )
+    return Check(
+        "placement", WARN,
+        f"{share * 100:.0f}% on GPU -- {(total - resident) / 1024**3:.1f} GB of "
+        f"{total / 1024**3:.1f} GB is on the CPU",
+        "Every token walks the part that is not resident, which is the whole "
+        "difference between a turn that takes a second and one that takes a "
+        "minute. Lower `--num-ctx`, or run a smaller model.",
+    )
+
+
 def check_shell() -> Check:
     shell = resolve_shell()
     if shell is None:
@@ -538,11 +601,11 @@ def check_workspace(root: Path) -> Check:
 def _model_checks(provider: str, model: str, host: str, num_ctx: int) -> list[Check]:
     """The checks that only make sense for the backend actually in use.
 
-    Three of them are about a local server: whether it is up, whether the weights
-    are pulled, and whether this machine has the memory for the window. None of
-    that describes a model reached through somebody else's command line, and a
-    report that fails on a server the user is not using is a report that teaches
-    them to ignore it.
+    Four of them are about a local server: whether it is up, whether the weights
+    are pulled, whether this machine has the memory for the window, and where
+    the server actually put the model. None of that describes a model reached
+    through somebody else's command line, and a report that fails on a server
+    the user is not using is a report that teaches them to ignore it.
     """
     if provider != DEFAULT_PROVIDER:
         return [check_backend(provider, model)]
@@ -551,17 +614,21 @@ def _model_checks(provider: str, model: str, host: str, num_ctx: int) -> list[Ch
     names = _names(entries)
     weights = per_1k = None
     alternatives: list[tuple[str, float]] = []
+    loaded: list[dict] | None = None
     if entries is not None:
         # Only worth asking once the server has answered at all; offline, every
         # one of these would be the same connection error three more times.
         weights = weights_gb(model, entries)
         per_1k = kv_gb(_show(host, model), 1024)
         alternatives = _alternatives(host, model, entries, num_ctx)
+        loaded = _ps(host)
 
     return [
         check_server(host, names, problem),
         check_model(model, names),
+        # The estimate first, the measurement directly under it.
         check_context(num_ctx, memory_budget(), weights, per_1k, alternatives),
+        check_placement(model, loaded),
     ]
 
 
