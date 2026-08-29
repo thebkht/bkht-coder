@@ -60,6 +60,20 @@ holds state this one has never seen, so there is nothing honest to resume.
   enough at the default `num_ctx` of 16384, though turns are slower there;
   on 8 GB use `qwen2.5-coder:7b`.
 
+On a discrete GPU the number that binds is the card, not the machine. What has
+to stay resident is the weights plus the KV cache, and at `num_ctx` 16384 that
+is 8.4 + 3.0 GB for the 14b and 4.4 + 0.9 GB for the 7b — so **an 8 GB card
+runs the 7b at the full window and cannot hold the 14b at any window**. There
+is no trick that avoids this: decoding reads every weight once per token, so
+whatever does not fit is not streamed in the background, it is walked over the
+bus while you wait. `coder doctor` reads the card's memory, asks the server what
+your model actually costs, and then reports the split Ollama chose:
+
+```
+  ok    num_ctx       16384 tokens, about 5 GB of 8 GB of VRAM
+  ok    placement     100% on GPU (5.3 GB resident)
+```
+
 ## Install
 
 ```sh
