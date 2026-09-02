@@ -14,6 +14,7 @@ from . import banner, cancel, clipboard, config, lineedit, markdown, narrate, te
 from .agent import Agent
 from .approval import ask_tty
 from . import doctor
+from . import update
 from .doctor import running_from, version
 from .context import file_tree
 from .instructions import load_instructions, render, summarize as summarize_instructions
@@ -298,6 +299,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_common_arguments(checker)
     doctor.add_arguments(checker)
+
+    updater = subparsers.add_parser(
+        "update", help="Install the newest release, or check whether there is one.",
+        page=usage.UPDATE_HELP,
+    )
+    updater.add_argument("--check", action="store_true", help="Report what is available; install nothing.")
 
     settings = subparsers.add_parser(
         "config", help="Show or change the settings that survive a restart.",
@@ -630,7 +637,7 @@ def home_relative(path) -> str:
         return text
 
 
-def greeting(agent, permissions, workspace, stream=None, loaded=None) -> str:
+def greeting(agent, permissions, workspace, stream=None, loaded=None, notice="") -> str:
     """What the session opens with: the mark, and four facts beside it.
 
     The banner is chrome, and chrome that reaches a pipe is noise -- worse,
@@ -643,7 +650,9 @@ def greeting(agent, permissions, workspace, stream=None, loaded=None) -> str:
     second, wider layout was a second thing to keep true of the first.
     """
     stream = sys.stdout if stream is None else stream
-    plain = f"{header(agent, permissions, workspace)}\n{HINT}"
+    plain = "\n".join(filter(None, (
+        header(agent, permissions, workspace), notice, HINT,
+    )))
     if not terminal.interactive(stream):
         return plain
     if terminal.width() < banner.MIN_WIDTH or not banner.drawable(stream):
@@ -658,6 +667,9 @@ def greeting(agent, permissions, workspace, stream=None, loaded=None) -> str:
         paint(home_relative(workspace.root), DIM, stream),
         paint(f"{mode} · {context}", DIM, stream),
         *(paint(line, DIM, stream) for line in (loaded.lines() if loaded else [])),
+        # Last, and dim like the rest: a release is worth mentioning once, not
+        # worth being the brightest thing in the box.
+        *([paint(notice, DIM, stream)] if notice else []),
     ])
 
 
@@ -748,7 +760,7 @@ def announce_image(provider, path: str, stream=None) -> None:
 
 
 def interactive(agent, snapshots, permissions, workspace, listener,
-                use_instructions=True, jobs=None, loaded=None) -> int:
+                use_instructions=True, jobs=None, loaded=None, notice="") -> int:
     """The REPL. Ctrl-C abandons the current line; Ctrl-D leaves."""
     repl = Repl(
         agent, snapshots, permissions, workspace,
@@ -774,7 +786,7 @@ def interactive(agent, snapshots, permissions, workspace, listener,
 
     # Printed as it comes back: the greeting dims and bolds its own parts now,
     # and a paint() around the whole of it would flatten both.
-    print(greeting(agent, permissions, workspace, loaded=loaded))
+    print(greeting(agent, permissions, workspace, loaded=loaded, notice=notice))
 
     while True:
         try:
@@ -887,6 +899,9 @@ def main(argv: list[str] | None = None) -> int:
                 args.target, as_json=args.json,
             )
 
+    if argv[:1] == ["update"]:
+        return update.run(build_parser().parse_args(argv))
+
     if argv[:1] == ["doctor"]:
         args = configured(build_parser().parse_args(argv))
         return doctor.report(
@@ -898,6 +913,11 @@ def main(argv: list[str] | None = None) -> int:
     args = build_agent_parser().parse_args(argv)
     listener = TerminalListener(verbose=args.verbose)
     agent, snapshots, permissions, workspace, jobs, announced = make_agent(args, listener)
+    # Started here rather than in `make_agent`, which the tests call: nothing
+    # should spawn a thread that talks to the network just by building an
+    # agent. The notice it fills is for the next session, not this one.
+    settings = config.load(Path(args.cwd).expanduser().resolve())
+    update.start(settings)
 
     try:
         if args.prompt:
@@ -909,6 +929,7 @@ def main(argv: list[str] | None = None) -> int:
         return interactive(
             agent, snapshots, permissions, workspace, listener,
             use_instructions=not args.no_instructions, jobs=jobs, loaded=announced,
+            notice=update.notice(settings),
         )
     finally:
         # The user started nothing here and can see nothing here: a server left

@@ -437,3 +437,49 @@ def test_a_backend_that_does_not_exist_fails_rather_than_raising(tmp_path):
     check = doctor.check_backend("gemini", "whatever")
     assert check.status == doctor.FAIL
     assert "ollama" in check.detail
+
+
+def test_the_update_check_reports_a_newer_release(monkeypatch, tmp_path):
+    from bkht.coder import update
+
+    monkeypatch.setattr(update, "editable", lambda: None)
+    monkeypatch.setattr(update, "refresh", lambda: None)
+    monkeypatch.setattr(update, "cached", lambda: "0.9.0")
+    monkeypatch.setattr(update, "available", lambda: "0.9.0")
+
+    check = doctor.check_update(tmp_path)
+    assert check.status == WARN and "0.9.0" in check.detail
+    assert "coder update" in check.fix
+
+
+def test_the_update_check_is_quiet_when_current(monkeypatch, tmp_path):
+    from bkht.coder import update
+
+    monkeypatch.setattr(update, "editable", lambda: None)
+    monkeypatch.setattr(update, "refresh", lambda: None)
+    monkeypatch.setattr(update, "cached", lambda: "0.9.0")
+    monkeypatch.setattr(update, "available", lambda: None)
+
+    assert doctor.check_update(tmp_path).status == OK
+
+
+def test_the_update_check_never_fails_a_report(monkeypatch, tmp_path):
+    # Being a release behind does not stop a turn from running, and this report
+    # is read to find out why one will not.
+    from bkht.coder import update
+
+    monkeypatch.setattr(update, "editable", lambda: None)
+    monkeypatch.setattr(update, "refresh", lambda: None)
+    monkeypatch.setattr(update, "cached", lambda: None)
+
+    assert doctor.check_update(tmp_path).status == WARN
+
+
+def test_the_update_check_sends_a_checkout_to_git_pull(monkeypatch, tmp_path):
+    from bkht.coder import update
+
+    monkeypatch.setattr(update, "editable", lambda: tmp_path)
+    monkeypatch.setattr(update, "refresh", lambda: pytest.fail("asked anyway"))
+
+    check = doctor.check_update(tmp_path)
+    assert check.status == OK and "git pull" in check.detail

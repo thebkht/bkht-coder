@@ -50,7 +50,7 @@ INTERVAL = 24 * 60 * 60
 TIMEOUT = 3.0
 
 #: A release, and the dev versions leading to it: 1.2, v1.2.3, 1.2.3.dev4+gabc.
-_VERSION = re.compile(r"^v?(\d+(?:\.\d+)*)(.*)$")
+_VERSION = re.compile(r"^[vV]?(\d+(?:\.\d+)*)(.*)$")
 
 
 def parse(text: str) -> tuple | None:

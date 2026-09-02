@@ -67,6 +67,7 @@ Commands:
   session resume [last|id]       Continue a saved session
 
   config [get|set|unset]         Show or change settings that survive a restart
+  update [--check]               Install the newest release, if there is one
 
   review [range]                 Review changes, a branch, or a commit range
   doctor                         Check that this install can run a turn
@@ -138,6 +139,7 @@ Settings:
   max_iterations          Cap on loop iterations per task
   instructions            Read AGENTS.md and CLAUDE.md
   skills                  Load skills, and offer the skill tool
+  update_check            Ask once a day whether a newer release exists
 
 Flags:
   --workspace             Write .bkht-coder/config.json, not the personal file
@@ -266,6 +268,38 @@ Examples:
 
   coder review --base main --ci
       Annotate the diff on the pull request, and fail on a finding
+"""
+
+UPDATE_HELP = """\
+coder update
+Install the newest release, or check whether there is one.
+
+Releases are git tags. An update is a re-install of a named tag with
+`uv tool install --force`, which is exactly what the installer runs -- so it
+leaves you where a fresh install would, and nothing else on the machine moves.
+
+A session also checks on its own, at most once a day, and says so in one line
+of the greeting. That check asks the GitHub releases API for a version number
+and sends nothing: no code, no prompts, no telemetry. It is skipped entirely
+off a terminal and for a source checkout, and `update_check false` turns it
+off for good.
+
+Usage:
+  coder update [--check]
+
+Flags:
+  --check                 Report what is available; install nothing
+  -h, --help              Display this help and exit
+
+Examples:
+  coder update
+      Install the newest release, if you are behind one
+
+  coder update --check
+      Say whether there is one, and stop there
+
+  coder config set update_check false
+      Never check for a release again
 """
 
 DOCTOR_HELP = f"""\

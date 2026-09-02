@@ -165,6 +165,34 @@ def check_version(root: Path, origin: Path | None = None) -> Check:
     return Check("version", OK, label)
 
 
+def check_update(root: Path | None = None) -> Check:
+    """Whether a newer release exists.
+
+    This one asks live rather than reading the cache the greeting reads. The
+    background check is a courtesy and is allowed to be a day stale; `doctor`
+    was typed, and a report that answered "up to date" from yesterday's cache
+    would be the kind of stale reassurance this command exists to avoid.
+
+    Never FAIL. Being a release behind does not stop a turn from running, and
+    this report is read to find out why one will not.
+    """
+    from . import update
+
+    if (checkout := update.editable()) is not None:
+        return Check("update", OK, f"running from a checkout at {checkout} -- `git pull` to update")
+
+    update.refresh()
+    latest = update.cached()
+    if latest is None:
+        return Check("update", WARN, "could not reach the releases API to check")
+    if (newer := update.available()) is None:
+        return Check("update", OK, f"v{latest} is the newest release")
+    return Check(
+        "update", WARN, f"v{newer} is available",
+        "Run `coder update` to install it.",
+    )
+
+
 def _tags(host: str) -> tuple[list[dict] | None, str]:
     """Every model the server knows about, or why we could not ask.
 
@@ -683,6 +711,7 @@ def run_checks(
     """
     return [
         check_version(root),
+        check_update(root),
         check_workspace(root),
         *_model_checks(provider, model, host, num_ctx),
         check_shell(),

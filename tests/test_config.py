@@ -523,3 +523,15 @@ def test_config_set_takes_the_flag_before_the_key(home, project, capsys):
     )
     assert (status, err) == (0, "")
     assert json.loads((project / config.WORKSPACE_NAME).read_text()) == {"num_ctx": 8192}
+
+
+def test_the_update_check_is_on_by_default_and_can_be_turned_off(tmp_path, monkeypatch):
+    # The one setting that governs a request leaving the machine, so both
+    # directions are asserted rather than assumed from the field list.
+    monkeypatch.setattr(config, "GLOBAL_PATH", tmp_path / "config.json")
+    assert config.load(tmp_path).update_check is True
+
+    config.set_value("update_check", "false", root=tmp_path)
+    settings = config.load(tmp_path)
+    assert settings.update_check is False
+    assert settings.source("update_check") == config.GLOBAL

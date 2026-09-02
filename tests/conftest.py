@@ -82,3 +82,19 @@ def isolated_state(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "GLOBAL_PATH", tmp_path / "config.json")
     monkeypatch.setattr(skills, "GLOBAL_ROOT", tmp_path / "global-skills")
     monkeypatch.setattr(commands, "GLOBAL_ROOT", tmp_path / "global-commands")
+
+
+@pytest.fixture(autouse=True)
+def no_update_check(monkeypatch, tmp_path):
+    """Keep the release check off the network and out of the real cache.
+
+    The check is deliberately easy to reach -- `doctor` runs it, and so does
+    starting a session -- so without this a test that never mentions updates
+    would still make a request to GitHub, and write its answer to the
+    developer's own ~/.bkht-coder. Tests about the check patch over this with
+    what they want the request to have returned.
+    """
+    from bkht.coder import update
+
+    monkeypatch.setattr(update, "CACHE", tmp_path / "update.json")
+    monkeypatch.setattr(update, "refresh", lambda: None)
