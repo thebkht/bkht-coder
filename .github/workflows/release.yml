@@ -28,8 +28,13 @@ jobs:
 
       # A tag cut from a branch that never merged would publish code no one
       # reviewed, under a version number that outlives the mistake.
+      # Fetched by name rather than trusted to be there: checking out a tag
+      # does not necessarily leave a remote-tracking ref for the branch, and a
+      # guard that errors because the ref is missing would read exactly like a
+      # tag cut from the wrong place.
       - name: The tag is on main
         run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
           if ! git merge-base --is-ancestor "${GITHUB_REF_NAME}" origin/main; then
             echo "::error::${GITHUB_REF_NAME} is not reachable from main" >&2
             exit 1
