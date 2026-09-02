@@ -664,6 +664,32 @@ def notice_line(notice: str) -> str:
     return notice.split(" · ")[0] if notice else ""
 
 
+def pinned_block(permissions, line, stream=None):
+    """The prompt block, as rows the spinner can keep on screen through a turn.
+
+    The same five rows the editor draws, with the input empty: the line that
+    was typed has already scrolled into the transcript above, and what stays is
+    the frame it was typed into. Before this, submitting a line took the whole
+    block off the screen and a turn ran against a bare spinner -- the session
+    lost its shape at exactly the moment there was most to say about it.
+
+    Empty rather than echoing the question: this is not an editor and nothing
+    typed into it would be read, so a box with words in it would be a promise
+    the turn cannot keep.
+
+    Painted and fitted here, because :class:`~bkht.coder.status.Status` stacks
+    rows and counts them and must not have to know what is in one.
+    """
+
+    def rows() -> list[str]:
+        stream_ = sys.stdout if stream is None else stream
+        rule = paint(banner.rule(terminal.width()), DIM, stream_)
+        footer = lineedit.footer_rows(permissions.mode, **line.fields())
+        return [rule, paint(PROMPT.rstrip(), ACCENT + BOLD, stream_), rule, *footer.split("\n")]
+
+    return rows
+
+
 HINT = "/help for commands, /exit to leave."
 
 #: The prompt itself. A single mark, so the input starts as near the left edge
@@ -832,6 +858,10 @@ def interactive(agent, snapshots, permissions, workspace, listener,
     listener.watch = watch
     if getattr(listener, "status", None) is not None:
         listener.status.cancellable = watch.enabled
+        # The block the spinner keeps on screen for the length of a turn. Only
+        # here: a one-shot run prints an answer and leaves, and a prompt frame
+        # around nothing is chrome for a session that is not going to happen.
+        listener.status.block = pinned_block(permissions, line)
 
     # Printed as it comes back: the greeting dims and bolds its own parts now,
     # and a paint() around the whole of it would flatten both.

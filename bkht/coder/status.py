@@ -15,7 +15,16 @@ import contextlib
 import threading
 import time
 
-from .terminal import CLEAR_LINE, DIM, HIDE_CURSOR, RESET, SHOW_CURSOR, width
+from .terminal import (
+    CLEAR_LINE,
+    CURSOR_UP,
+    DIM,
+    ERASE_BELOW,
+    HIDE_CURSOR,
+    RESET,
+    SHOW_CURSOR,
+    width,
+)
 
 FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 INTERVAL = 0.1
@@ -26,7 +35,7 @@ class Status:
 
     def __init__(self, writer=None, clock=time.monotonic, enabled: bool = True,
                  interval: float = INTERVAL, colour: bool = True,
-                 cancellable: bool = False) -> None:
+                 cancellable: bool = False, block=None) -> None:
         self.writer = writer
         self.clock = clock
         self.enabled = enabled
@@ -35,12 +44,20 @@ class Status:
         #: Whether Esc will stop this turn -- said on the line, because a key
         #: nobody is told about is a key nobody presses.
         self.cancellable = cancellable
+        #: Rows pinned under the spinner for as long as it draws: the prompt
+        #: block, so the session keeps its shape while a turn runs instead of
+        #: emptying out to one line and filling back in afterwards.
+        #:
+        #: A callable, and asked on every frame, because what it says -- the
+        #: mode, the window, the token count -- is what the turn is changing.
+        #: Rows come painted and pre-fitted; this only stacks them.
+        self.block = block
 
         self.label = "working"
         self.tokens = 0
         self._started: float | None = None
         self._step = 0
-        self._drawn = False
+        self._drawn = 0  # how many rows the last paint left on screen
         self._suspended = False
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -146,17 +163,35 @@ class Status:
                 self._step += 1
             self._stop.wait(self.interval)
 
+    def rows(self) -> list[str]:
+        """Every row this owns: the spinner, and whatever is pinned below it.
+
+        Below rather than above, so the turn's output scrolls up out of a block
+        that stays where it is -- and so the last thing on screen is the prompt,
+        which is where the eye goes back to when the turn ends.
+        """
+        text = self.frame()
+        spinner = f"{DIM}{text}{RESET}" if self.colour else text
+        return [spinner, *(self.block() if self.block is not None else [])]
+
     def _draw(self) -> None:
         if self._suspended:
             return
-        text = self.frame()
-        self._write(f"{CLEAR_LINE}{DIM}{text}{RESET}" if self.colour else f"{CLEAR_LINE}{text}")
-        self._drawn = True
+        rows = self.rows()
+        self._write("\n".join(f"{CLEAR_LINE}{row}" for row in rows))
+        self._drawn = len(rows)
 
     def _erase(self) -> None:
-        if self._drawn:
-            self._write(CLEAR_LINE)
-            self._drawn = False
+        """Take back every row the last paint left, ending where it started.
+
+        Walked up one row at a time rather than jumped: the cursor has to end
+        on the first of them, because that is the line the next writer -- prose,
+        a tool line, an approval -- carries on from.
+        """
+        if not self._drawn:
+            return
+        self._write(CURSOR_UP * (self._drawn - 1) + ERASE_BELOW)
+        self._drawn = 0
 
     def _write(self, text: str) -> None:
         if not self.enabled or self.writer is None:

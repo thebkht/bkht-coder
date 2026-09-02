@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import re
 
+from bkht.coder import cli
 from bkht.coder.agent import Agent
 from bkht.coder.cli import TerminalListener, report, run_turn, summarize
 from bkht.coder.parsing import ToolCall
@@ -19,10 +20,17 @@ def listener(**kwargs) -> tuple[TerminalListener, io.StringIO]:
     return TerminalListener(stream=stream, **kwargs), stream
 
 
+#: Everything the status line uses to take a row back: a line clear before each
+#: row it paints, and a walk up to the top of the block followed by an erase to
+#: the bottom of the screen. Both are boundaries between what was drawn and
+#: what came next.
+ERASED = re.compile(r"(?:\x1b\[A)*\r\x1b\[(?:2K|J)")
+
+
 def visible_text(stream) -> str:
     """What survives on screen: spinner frames are erased, prose is not."""
     out = []
-    for chunk in stream.getvalue().split("\r\x1b[2K"):
+    for chunk in ERASED.split(stream.getvalue()):
         if not chunk.startswith("\x1b[2m"):  # a dim spinner frame
             out.append(re.sub(r"\x1b\[[0-9?]*[a-zA-Z]", "", chunk))
     return "".join(out).strip()
@@ -268,3 +276,43 @@ def test_a_failed_call_says_why_and_not_what_it_returned():
     written = stream.getvalue()
     assert "! no such file" in written
     assert "line" not in written
+
+
+# --- the block pinned under a running turn ----------------------------------
+
+
+class _Permissions:
+    mode = "ask"
+
+
+class _Line:
+    """A StatusLine with nothing to look up."""
+
+    def fields(self):
+        return {
+            "name": "bkht-coder", "branch": "main", "ratio": 0.24,
+            "model": "qwen2.5-coder:7b", "spent": 3100, "note": "", "width": 100,
+        }
+
+
+def test_the_pinned_block_is_the_prompt_frame_with_nothing_in_it():
+    rows = cli.pinned_block(_Permissions(), _Line(), stream=io.StringIO())()
+    assert len(rows) == 5
+    rule, prompt, rule_again, status, mode = rows
+    assert set(rule.strip()) == {"─"} and rule == rule_again
+    # Empty: this is not an editor, and a box with words in it would promise a
+    # turn could read what was typed into it.
+    assert prompt.strip() == "›"
+    assert "bkht-coder" in status and "(main)" in status and "24% used" in status
+    assert mode == "▸▸ ask mode on (shift+tab to cycle)"
+
+
+def test_the_pinned_block_says_what_the_turn_is_changing():
+    # Asked again on every frame rather than built once, so the meter and the
+    # token count move while the turn runs.
+    line = _Line()
+    block = cli.pinned_block(_Permissions(), line, stream=io.StringIO())
+    before = block()[3]
+    line.fields = lambda: {**_Line().fields(), "ratio": 0.91, "spent": 12000}
+    assert block()[3] != before
+    assert "91% used" in block()[3]

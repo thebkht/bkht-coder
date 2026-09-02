@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 
 from bkht.coder.status import FRAMES, Status
-from bkht.coder.terminal import CLEAR_LINE
+from bkht.coder.terminal import CURSOR_UP, ERASE_BELOW
 
 
 class Clock:
@@ -65,7 +65,10 @@ def test_pause_clears_the_line_before_yielding():
     writer.truncate()
 
     with status.pause():
-        assert writer.getvalue() == CLEAR_LINE, "the line must be gone before the caller prints"
+        # Erased to the bottom of the screen rather than line by line: the
+        # spinner may be pinning a block of rows under itself, and one code
+        # takes back all of them however they wrapped.
+        assert writer.getvalue() == ERASE_BELOW, "the line must be gone before the caller prints"
     status.stop()
 
 
@@ -75,7 +78,7 @@ def test_stop_erases_the_line_and_is_safe_twice():
     status._draw()
     status.stop()
     status.stop()
-    assert writer.getvalue().endswith(CLEAR_LINE + "\033[?25h")
+    assert writer.getvalue().endswith(ERASE_BELOW + "\033[?25h")
 
 
 def test_the_line_is_truncated_to_the_terminal_width(monkeypatch):
@@ -103,3 +106,43 @@ def test_the_line_offers_esc_when_the_turn_can_be_cancelled():
 def test_the_line_stays_quiet_about_esc_when_it_would_not_work():
     line = Status(writer=None, enabled=False)
     assert "esc" not in line.frame()
+
+
+# --- the pinned block -----------------------------------------------------
+
+
+def test_the_spinner_pins_the_rows_it_is_given_under_itself():
+    line = Status(writer=io.StringIO(), clock=iter([0, 0, 0]).__next__, colour=False)
+    line.block = lambda: ["one", "two"]
+    rows = line.rows()
+    # Under, not over: the turn's output scrolls up out of a block that stays,
+    # and the prompt is the last thing on screen when the turn ends.
+    assert rows[0].endswith("working…")
+    assert rows[1:] == ["one", "two"]
+
+
+def test_a_pinned_block_is_taken_back_whole():
+    writer = io.StringIO()
+    line = Status(writer=writer, clock=iter([0, 0, 0, 0]).__next__, colour=False, interval=0)
+    line.block = lambda: ["one", "two", "three"]
+    line._draw()
+    writer.truncate(0), writer.seek(0)
+    line._erase()
+    # Three rows below the spinner means the cursor walks up three to reach the
+    # row the next writer carries on from.
+    assert writer.getvalue() == CURSOR_UP * 3 + ERASE_BELOW
+
+
+def test_a_block_that_changes_is_redrawn_as_it_is():
+    # The rows say what the turn is changing -- the token count, the meter --
+    # so they are asked for again on every frame rather than kept.
+    counter = iter(["first", "second"])
+    line = Status(writer=io.StringIO(), clock=lambda: 0, colour=False)
+    line.block = lambda: [next(counter)]
+    assert line.rows()[1] == "first"
+    assert line.rows()[1] == "second"
+
+
+def test_no_block_is_the_line_on_its_own():
+    line = Status(writer=io.StringIO(), clock=lambda: 0, colour=False)
+    assert len(line.rows()) == 1
