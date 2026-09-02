@@ -457,7 +457,10 @@ class Editor:
         footer = self.footer()
         rows = [rule, *(prefix + line for prefix, line in zip(prefixes, lines)), rule]
         if footer:
-            rows.append(footer)
+            # Split rather than appended whole: the footer is one string so that
+            # the callable stays one shape, but every row below has to be a row
+            # here or the redraw walks back up the wrong number of them.
+            rows.extend(footer.split("\n"))
         return rows
 
     def _wrapped(self, prompt: str, width: int) -> list[int]:
@@ -580,3 +583,109 @@ def footer(mode: str, cycles: bool = True, stream=None) -> str:
     if cycles:
         text += " (shift+tab to cycle)"
     return f"{terminal.paint('▸▸', colour, stream)} {terminal.paint(text, colour, stream)}"
+
+
+#: How wide the context meter is drawn. Twelve cells is a percentage point
+#: about every eight, which is as much as a bar read at a glance is worth.
+METER = 12
+
+#: The share of the window above which the meter changes colour. The same
+#: number `context.COMPACT_AT` compacts at, so the row goes warm exactly when
+#: the next turn is the one that will summarise -- and not a moment before,
+#: which would be a warning about nothing.
+WARM_AT = 0.75
+
+
+def tokens(count: int) -> str:
+    """``840`` or ``12.4k``, whichever is shorter to read.
+
+    Thousands rather than exact counts past a thousand: nobody acts on the last
+    three digits of a context window, and a field that changes width every turn
+    makes the row jitter under the cursor.
+    """
+    if count < 1000:
+        return str(count)
+    if count < 1_000_000:
+        return f"{count / 1000:.1f}k".replace(".0k", "k")
+    return f"{count / 1_000_000:.1f}M".replace(".0M", "M")
+
+
+def status(
+    name: str = "",
+    *,
+    branch: str = "",
+    ratio: float = 0.0,
+    model: str = "",
+    spent: int = 0,
+    note: str = "",
+    width: int = 80,
+    stream=None,
+) -> str:
+    """The row above the mode line: where you are, and what the turn has cost.
+
+    Every field is passed in rather than looked up. The row is rebuilt on each
+    redraw -- which is each keystroke -- so anything it did for itself, a
+    subprocess or a walk of the history, it would do a hundred times a line.
+
+    Fields are dropped from the right as the terminal narrows, in the order
+    below, because an eighty-column window cannot hold all of them and a row
+    that wrapped would break the caret arithmetic in :meth:`Editor._wrapped`.
+    What survives to the last is the directory and the branch: they say which
+    checkout is about to be edited, which is the one thing here that can make a
+    keystroke a mistake.
+    """
+    if not name:
+        return ""
+    left: list[tuple[str, str]] = [(name, terminal.BOLD)]
+    if branch:
+        left.append((f"({branch})", terminal.ACCENT))
+    if model:
+        left.append((f"[{model}]", DIM))
+    if ratio or spent:
+        meter = terminal.bar(ratio, METER, stream)
+        colour = terminal.ORANGE if ratio >= WARM_AT else DIM
+        left.append((f"ctx {meter} {round(ratio * 100)}% used", colour))
+    if spent:
+        left.append((f"{tokens(spent)} tokens", DIM))
+
+    # Measured plain and painted afterwards: `terminal.fit` hands coloured text
+    # back whole rather than cutting an escape in half, so a row assembled in
+    # colour could not be trimmed at all.
+    #
+    # Dropped from the end, one at a time, because the alternative -- fitting
+    # the finished row -- cuts a field mid-word and leaves "ctx ███░░ 4" on
+    # screen, which reads as a number rather than as something missing.
+    def plain(parts: list[tuple[str, str]]) -> str:
+        return "  ".join(text for text, _ in parts)
+
+    reserved = terminal.visible(note) + 1 if note else 0
+    while len(plain(left)) + reserved > width - 1:
+        if len(left) > 1:
+            left.pop()
+        elif note:
+            # The note goes last but one: it is an aside, and a terminal too
+            # narrow for both should spend its columns on where you are.
+            note, reserved = "", 0
+        else:
+            # Nothing left to drop. The name alone is wider than the terminal,
+            # so it is cut -- the only case in this row where a field is.
+            left = [(terminal.fit(plain(left), width - 1), left[0][1])]
+            break
+
+    row = "  ".join(terminal.paint(text, colour, stream) for text, colour in left)
+    if not note:
+        return f" {row}"
+    pad = max(1, width - 1 - len(plain(left)) - terminal.visible(note))
+    return f" {row}{' ' * pad}{terminal.paint(note, DIM, stream)}"
+
+
+def footer_rows(mode: str, cycles: bool = True, stream=None, **fields) -> str:
+    """The whole block under the input: the status row, then the mode row.
+
+    One string with a newline in it rather than a list, so that the callable
+    :class:`Editor` already takes needs no new shape -- and so that a caller
+    with nothing to say about the workspace can keep returning one row.
+    """
+    rows = [row] if (row := status(stream=stream, **fields)).strip() else []
+    rows.append(footer(mode, cycles, stream))
+    return "\n".join(rows)

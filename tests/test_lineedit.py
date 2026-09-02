@@ -389,3 +389,86 @@ def test_ctrl_v_does_nothing_when_there_is_no_clipboard_to_ask():
     ed = editor()
     type(ed, "hello\x16")
     assert ed.buffer == "hello"
+
+
+# --- the status row -------------------------------------------------------
+
+
+def test_the_status_row_says_where_you_are_and_what_the_turn_has_cost():
+    row = lineedit.status(
+        "bkht-coder", branch="main", ratio=0.07, model="qwen2.5-coder:14b",
+        spent=12400, width=120,
+    )
+    assert "bkht-coder" in row
+    assert "(main)" in row
+    assert "[qwen2.5-coder:14b]" in row
+    assert "7% used" in row
+    assert "12.4k tokens" in row
+
+
+def test_a_checkout_with_no_branch_grows_no_empty_parentheses():
+    row = lineedit.status("bkht-coder", branch="", ratio=0.1, width=120)
+    assert "()" not in row
+
+
+def test_the_status_row_is_nothing_without_a_workspace_to_name():
+    assert lineedit.status("") == ""
+
+
+def test_the_status_row_drops_fields_rather_than_wrapping():
+    wide = lineedit.status(
+        "bkht-coder", branch="main", ratio=0.5, model="qwen2.5-coder:14b",
+        spent=8000, width=120,
+    )
+    narrow = lineedit.status(
+        "bkht-coder", branch="main", ratio=0.5, model="qwen2.5-coder:14b",
+        spent=8000, width=30,
+    )
+    assert len(wide) > len(narrow)
+    # Whatever else goes, the row still says which checkout is about to be
+    # edited -- the one field here that can make a keystroke a mistake.
+    assert "bkht-coder" in narrow and "(main)" in narrow
+
+
+def test_no_row_is_ever_wider_than_the_terminal():
+    # A row that wrapped would put the caret arithmetic out by a line and smear
+    # the block on every keystroke.
+    for width in range(10, 100, 7):
+        row = lineedit.status(
+            "workspace", branch="feature/long-branch-name", ratio=0.9,
+            model="qwen2.5-coder:14b", spent=120_000, note="update available",
+            width=width,
+        )
+        assert terminal.visible(row) <= width, width
+
+
+def test_the_note_is_pushed_to_the_right_edge():
+    row = lineedit.status("here", branch="main", note="v0.3.0", width=60)
+    assert row.rstrip().endswith("v0.3.0")
+    assert terminal.visible(row) <= 60
+
+
+def test_the_meter_warms_when_compaction_is_close():
+    tty = FakeTTY()
+    calm = lineedit.status("here", ratio=0.10, width=100, stream=tty)
+    warm = lineedit.status("here", ratio=0.95, width=100, stream=tty)
+    assert terminal.ORANGE not in calm
+    assert terminal.ORANGE in warm
+
+
+def test_token_counts_are_rounded_to_something_worth_reading():
+    assert lineedit.tokens(840) == "840"
+    assert lineedit.tokens(12_400) == "12.4k"
+    assert lineedit.tokens(9000) == "9k"
+    assert lineedit.tokens(2_500_000) == "2.5M"
+
+
+def test_the_footer_is_two_rows_when_there_is_a_workspace_to_name():
+    rows = lineedit.footer_rows("plan", name="bkht-coder", branch="main", width=100)
+    top, bottom = rows.split("\n")
+    assert "bkht-coder" in top
+    assert bottom == "▸▸ plan mode on (shift+tab to cycle)"
+
+
+def test_the_footer_is_the_mode_alone_when_there_is_not():
+    assert lineedit.footer_rows("ask") == lineedit.footer("ask")
