@@ -11,19 +11,27 @@ Esc raises ``KeyboardInterrupt`` in the thread doing the work. That lands in the
 handler Ctrl-C has always landed in, which is the point: one way to abandon a
 turn, two keys that reach it.
 
-Two things this cannot do. Esc arrives as the first byte of every arrow key, so
+One thing this cannot do. Esc arrives as the first byte of every arrow key, so
 a bare Esc is only known to be bare once nothing follows it -- there is a short
 wait built in, and it is why an arrow key pressed mid-turn is swallowed rather
-than acted on. And the interrupt is raised, not delivered: the work thread
-takes it at its next bytecode boundary, so a turn blocked in a socket read
-stops when the next token arrives rather than instantly.
+than acted on.
+
+The interrupt is raised, not delivered: the main thread takes it at its next
+bytecode boundary. Blocked in a socket read it is running no bytecode at all,
+and that used to mean Esc did nothing for the whole of the wait before the
+first token -- which on a local 14b is half a minute, and is exactly the part
+of a turn worth stopping. :func:`interruptible` is why it now lands: the read
+happens on a worker, and the main thread waits in short hops it can be
+interrupted between.
 """
 
 from __future__ import annotations
 
 import contextlib
+import queue
 import threading
 import _thread
+from collections.abc import Iterable, Iterator
 
 ESC = "\x1b"
 
@@ -35,6 +43,72 @@ SEQUENCE_WAIT = 0.05
 #: How long the reader blocks before looking at its own flags again. It bounds
 #: how long `pause` waits to take the terminal back, so it is small.
 POLL = 0.05
+
+#: What :func:`interruptible` puts on the queue to say the source is finished.
+_DONE = object()
+
+
+def interruptible(source: Iterable, poll: float = POLL) -> Iterator:
+    """Yield ``source`` here, while something else does the waiting.
+
+    ``interrupt_main`` sets a flag the main thread reads between bytecodes. A
+    thread blocked in a socket read is between nothing, so an Esc pressed
+    while the model thinks was remembered and then delivered whenever the first
+    token happened to arrive -- which is to say, not when it was pressed.
+
+    So the source is drained on a worker and handed over a queue, and the wait
+    here is a series of short gets rather than one long read. Each get is
+    bytecode, so the interrupt lands within ``poll`` of the key.
+
+    The queue is unbounded on purpose. A bounded one would park the worker in
+    ``put`` when this generator is abandoned mid-turn -- which is the ordinary
+    end of a cancelled turn -- and a parked worker never reaches the ``finally``
+    that closes the response. What accumulates instead is one reply's worth of
+    chunks, which the window already bounds.
+
+    An exception raised inside ``source`` is re-raised here, on the thread that
+    asked for it, so callers see the failures they have always seen.
+    """
+    chunks: queue.Queue = queue.Queue()
+    failure: list[BaseException] = []
+    abandoned = threading.Event()
+
+    def drain() -> None:
+        try:
+            for item in source:
+                chunks.put(item)
+                if abandoned.is_set():
+                    break
+        except BaseException as exc:  # re-raised below, on the caller's thread
+            failure.append(exc)
+        finally:
+            # Closing the source is what releases the response behind it; the
+            # generator's own `finally` does the work.
+            close = getattr(source, "close", None)
+            if close is not None:
+                with contextlib.suppress(Exception):
+                    close()
+            chunks.put(_DONE)
+
+    worker = threading.Thread(target=drain, daemon=True)
+    worker.start()
+    try:
+        while True:
+            try:
+                item = chunks.get(timeout=poll)
+            except queue.Empty:
+                continue
+            if item is _DONE:
+                break
+            yield item
+    finally:
+        # Reached by an Esc, a Ctrl-C, or a caller that stopped early. The
+        # worker is told so it can stop at its next chunk rather than reading
+        # a reply nobody is listening to.
+        abandoned.set()
+
+    if failure:
+        raise failure[0]
 
 
 def available(stdin=None, stdout=None) -> bool:

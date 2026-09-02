@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Protocol
 
 from . import prompts
+from .cancel import interruptible
 from .context import compact, elide_tool_results, should_compact
 from .language import detect as detect_language
 from .parsing import ToolCall
@@ -336,13 +337,17 @@ class Agent:
         """
         self._compact_if_needed()
 
-        def stream():
-            for chunk in self.provider.chat(self.session.payload()):
+        # The read is pumped through a worker so that Esc lands during the
+        # wait before the first token, which on a local model is most of a
+        # turn. Rendering stays on this thread: the listener draws, and two
+        # threads drawing is a different bug.
+        def rendered():
+            for chunk in interruptible(self.provider.chat(self.session.payload())):
                 if chunk.content:
                     self.listener.on_token(chunk.content)
                 yield chunk
 
-        return collect(stream())
+        return collect(rendered())
 
     def _compact_if_needed(self) -> None:
         """Free context when the window is close to full.

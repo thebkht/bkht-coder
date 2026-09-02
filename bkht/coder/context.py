@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .cancel import interruptible
 from .provider import ProviderError, collect
 
 COMPACT_AT = 0.75
@@ -152,12 +153,17 @@ def compact(session, provider, keep_recent: int = KEEP_RECENT) -> str | None:
     older, recent = session.messages[:-keep_recent], session.messages[-keep_recent:]
 
     try:
+        # Pumped like the turn's own read is: summarizing is a full model call
+        # with nothing on screen, and an Esc pressed during it has to land
+        # there too rather than wait for the summary to come back.
         reply = collect(
-            provider.chat(
-                [
-                    {"role": "system", "content": SUMMARY_INSTRUCTION},
-                    {"role": "user", "content": transcript(older)},
-                ]
+            interruptible(
+                provider.chat(
+                    [
+                        {"role": "system", "content": SUMMARY_INSTRUCTION},
+                        {"role": "user", "content": transcript(older)},
+                    ]
+                )
             )
         )
     except ProviderError:

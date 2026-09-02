@@ -128,3 +128,77 @@ def test_pause_on_an_unstarted_watch_is_a_no_op():
     made = cancel.Watch(enabled=False)
     with made.pause():
         pass
+
+
+# --- interruptible --------------------------------------------------------
+
+
+def test_interruptible_yields_what_the_source_yields():
+    assert list(cancel.interruptible(iter([1, 2, 3]))) == [1, 2, 3]
+
+
+def test_an_error_in_the_source_is_raised_on_the_asking_thread():
+    def angry():
+        yield 1
+        raise ValueError("no")
+
+    got = []
+    with pytest.raises(ValueError):
+        for item in cancel.interruptible(angry()):
+            got.append(item)
+    assert got == [1]
+
+
+def test_a_blocked_source_does_not_block_the_caller():
+    # The bug this exists for: a turn waiting on a socket for a 14b's first
+    # token ran no bytecode, so the Esc that had already been pressed was not
+    # delivered until the model spoke. The caller has to keep reaching a
+    # bytecode boundary while the read blocks.
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow():
+        started.set()
+        release.wait(5)
+        yield "late"
+
+    stream = cancel.interruptible(slow(), poll=0.01)
+    hops = []
+
+    def count():
+        # Stands in for the interpreter noticing an interrupt: it can only run
+        # between the caller's own bytecodes.
+        started.wait(2)
+        for _ in range(3):
+            hops.append(time.monotonic())
+            time.sleep(0.02)
+        release.set()
+
+    watcher = threading.Thread(target=count)
+    watcher.start()
+    assert list(stream) == ["late"]
+    watcher.join(2)
+    assert len(hops) == 3
+
+
+def test_abandoning_the_stream_stops_the_worker_reading():
+    # A cancelled turn leaves the generator unfinished. The worker must not go
+    # on draining a reply nobody is listening to.
+    read = []
+
+    def endless():
+        # Paced, so the worker is still reading when the caller lets go --
+        # a source that ran to the end first would prove nothing.
+        for number in range(1000):
+            read.append(number)
+            yield number
+            time.sleep(0.01)
+
+    stream = cancel.interruptible(endless(), poll=0.01)
+    assert next(stream) == 0
+    stream.close()
+    time.sleep(0.1)
+    settled = len(read)
+    time.sleep(0.1)
+    assert len(read) == settled, "the worker went on reading after being let go"
+    assert settled < 1000
