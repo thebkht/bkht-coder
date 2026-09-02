@@ -122,6 +122,54 @@ def fit(text: str, limit: int) -> str:
     return text[: limit - 1].rstrip() + "…" if limit > 1 else "…"
 
 
+#: What a full and an empty cell of a meter are drawn with. Half-blocks rather
+#: than a bracketed run of hashes: the meter sits inside a line of prose and has
+#: to read as a bar at a glance without a border to say where it starts.
+#:
+#: The pair after them is what a console that cannot encode blocks gets. A
+#: Windows terminal left on cp1252 raises on the first one rather than drawing
+#: it badly, and the prompt is not the place to discover that.
+FULL, EMPTY = "\u2588", "\u2591"
+ASCII_FULL, ASCII_EMPTY = "#", "-"
+
+
+def encodable(text: str, stream=None) -> bool:
+    """True when ``stream`` can actually carry ``text``.
+
+    Asked of anything drawn outside Latin-1, because the failure is not a
+    fallback glyph -- it is a ``UnicodeEncodeError`` out of the write itself, or
+    mojibake where a meter should be.
+    """
+    stream = sys.stdout if stream is None else stream
+    encoding = getattr(stream, "encoding", None)
+    if not encoding:
+        return False
+    try:
+        text.encode(encoding)
+    except (LookupError, UnicodeEncodeError):
+        return False
+    return True
+
+
+def bar(ratio: float, cells: int = 12, stream=None) -> str:
+    """A meter ``cells`` wide, ``ratio`` of it filled.
+
+    Uncoloured, because who colours it is the caller: what a full bar *means*
+    differs by what is being measured, and this only knows how many cells it is.
+
+    A ratio above one fills the bar rather than overflowing it, and one just
+    above zero still lights a cell -- a meter that reads empty while something
+    is being consumed is worse than one that rounds up.
+    """
+    cells = max(0, cells)
+    ratio = min(1.0, max(0.0, ratio))
+    filled = round(ratio * cells)
+    if ratio > 0 and filled == 0:
+        filled = 1
+    full, empty = (FULL, EMPTY) if encodable(FULL + EMPTY, stream) else (ASCII_FULL, ASCII_EMPTY)
+    return full * filled + empty * (cells - filled)
+
+
 def width(default: int = 80) -> int:
     """Terminal columns, for truncating anything drawn on a single line."""
     try:
