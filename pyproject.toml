@@ -41,9 +41,10 @@ build-backend = "hatchling.build"
 # for, so a checkout can never claim to be a release it is not.
 [tool.hatch.version]
 source = "vcs"
-# A tarball or a clone without tags has nothing to describe. Degrading to 0.0.0
-# is better than failing the build: the update check reads 0.0.0 as "cannot
-# tell" and stays quiet, rather than pestering about a version that is not real.
+# A tarball or a clone without tags has nothing to describe. Degrading is
+# better than failing the build, and 0.0.0 is the honest floor: it sorts below
+# every real release, so such a build is told to update -- which is the right
+# advice for a copy that cannot say what it is.
 fallback-version = "0.0.0"
 
 [tool.hatch.build.hooks.vcs]
