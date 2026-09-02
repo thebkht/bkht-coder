@@ -104,8 +104,16 @@ class Budget:
 def version() -> str:
     """The installed version, or nothing.
 
-    A checkout run straight from source has no distribution metadata, and a
-    greeting is not worth failing to start over.
+    Two sources, because there are two ways to be running. An installed
+    distribution carries the version in its metadata, which is the authority:
+    it is what the wheel on PATH was built as, whatever the checkout beside it
+    now says. A checkout run straight from source has no such metadata, and
+    falls back to the file hatch-vcs writes at build time -- which describes an
+    untagged commit as a dev version of the release it leads to, so a working
+    copy never reports itself as a release.
+
+    Neither is worth failing to start over: with both absent this returns
+    nothing, and every caller already prints a shorter line for that.
     """
     try:
         from importlib.metadata import PackageNotFoundError, version as installed
@@ -114,7 +122,12 @@ def version() -> str:
     try:
         return installed("bkht-coder")
     except PackageNotFoundError:
+        pass
+    try:
+        from ._version import __version__
+    except ImportError:
         return ""
+    return str(__version__)
 
 
 def running_from() -> Path:

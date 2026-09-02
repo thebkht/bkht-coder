@@ -1,6 +1,6 @@
 [project]
 name = "bkht-coder"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A coding agent that runs entirely on a local Ollama -- nothing leaves the machine"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -33,8 +33,21 @@ coder = "bkht.coder.cli:main"
 dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+# The git tag is the only place a version number is written. A build from an
+# untagged commit describes itself as a dev version of the release it is heading
+# for, so a checkout can never claim to be a release it is not.
+[tool.hatch.version]
+source = "vcs"
+# A tarball or a clone without tags has nothing to describe. Degrading to 0.0.0
+# is better than failing the build: the update check reads 0.0.0 as "cannot
+# tell" and stays quiet, rather than pestering about a version that is not real.
+fallback-version = "0.0.0"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "bkht/coder/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["bkht"]

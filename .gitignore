@@ -6,6 +6,9 @@ dist/
 build/
 *.egg-info/
 
+# Written at build time by hatch-vcs from the git tag.
+bkht/coder/_version.py
+
 .ruff_cache/
 .coverage
 htmlcov/
