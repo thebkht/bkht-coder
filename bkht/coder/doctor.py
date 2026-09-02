@@ -104,8 +104,16 @@ class Budget:
 def version() -> str:
     """The installed version, or nothing.
 
-    A checkout run straight from source has no distribution metadata, and a
-    greeting is not worth failing to start over.
+    Two sources, because there are two ways to be running. An installed
+    distribution carries the version in its metadata, which is the authority:
+    it is what the wheel on PATH was built as, whatever the checkout beside it
+    now says. A checkout run straight from source has no such metadata, and
+    falls back to the file hatch-vcs writes at build time -- which describes an
+    untagged commit as a dev version of the release it leads to, so a working
+    copy never reports itself as a release.
+
+    Neither is worth failing to start over: with both absent this returns
+    nothing, and every caller already prints a shorter line for that.
     """
     try:
         from importlib.metadata import PackageNotFoundError, version as installed
@@ -114,7 +122,12 @@ def version() -> str:
     try:
         return installed("bkht-coder")
     except PackageNotFoundError:
+        pass
+    try:
+        from ._version import __version__
+    except ImportError:
         return ""
+    return str(__version__)
 
 
 def running_from() -> Path:
@@ -150,6 +163,34 @@ def check_version(root: Path, origin: Path | None = None) -> Check:
             "or prefix commands with `uv run`.",
         )
     return Check("version", OK, label)
+
+
+def check_update(root: Path | None = None) -> Check:
+    """Whether a newer release exists.
+
+    This one asks live rather than reading the cache the greeting reads. The
+    background check is a courtesy and is allowed to be a day stale; `doctor`
+    was typed, and a report that answered "up to date" from yesterday's cache
+    would be the kind of stale reassurance this command exists to avoid.
+
+    Never FAIL. Being a release behind does not stop a turn from running, and
+    this report is read to find out why one will not.
+    """
+    from . import update
+
+    if (checkout := update.editable()) is not None:
+        return Check("update", OK, f"running from a checkout at {checkout} -- `git pull` to update")
+
+    update.refresh()
+    latest = update.cached()
+    if latest is None:
+        return Check("update", WARN, "could not reach the releases API to check")
+    if (newer := update.available()) is None:
+        return Check("update", OK, f"v{latest} is the newest release")
+    return Check(
+        "update", WARN, f"v{newer} is available",
+        "Run `coder update` to install it.",
+    )
 
 
 def _tags(host: str) -> tuple[list[dict] | None, str]:
@@ -670,6 +711,7 @@ def run_checks(
     """
     return [
         check_version(root),
+        check_update(root),
         check_workspace(root),
         *_model_checks(provider, model, host, num_ctx),
         check_shell(),

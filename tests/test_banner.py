@@ -217,3 +217,31 @@ def test_a_pipe_gets_the_prompt_and_no_cursor_games(monkeypatch):
 
     assert cli.read_line(Reader(), "> ", stream) == "hi"
     assert stream.getvalue() == ""
+
+
+def test_an_available_release_is_the_last_line_of_the_greeting(monkeypatch):
+    rows = drawn(monkeypatch, notice="v0.3.0 available · coder update").splitlines()
+    assert rows[-1].endswith("v0.3.0 available · coder update")
+
+
+def test_a_pipe_gets_the_release_line_as_plain_text():
+    # Off a terminal the greeting is two lines and always has been; a notice
+    # goes between them rather than turning it into a box.
+    agent, permissions, workspace = session()
+    greeting = cli.greeting(
+        agent, permissions, workspace, io.StringIO(),
+        notice="v0.3.0 available · coder update",
+    )
+    lines = greeting.splitlines()
+    assert lines[1] == "v0.3.0 available · coder update"
+    assert lines[-1] == "/help for commands, /exit to leave."
+
+
+def test_no_release_leaves_the_greeting_exactly_as_it_was(monkeypatch):
+    # The empty string has to add nothing at all -- not a blank row in the box,
+    # and not a blank line in the piped form.
+    assert drawn(monkeypatch, notice="") == drawn(monkeypatch)
+
+    agent, permissions, workspace = session()
+    plain = cli.greeting(agent, permissions, workspace, io.StringIO())
+    assert cli.greeting(agent, permissions, workspace, io.StringIO(), notice="") == plain

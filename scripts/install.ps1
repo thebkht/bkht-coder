@@ -201,10 +201,33 @@ if ($skipModel) {
 
 # -------------------------------------------------------------------- coder
 
-$target = $RepoUrl
-if ($env:BKHT_CODER_REF) { $target = "$RepoUrl@$($env:BKHT_CODER_REF)" }
+# The newest release tag, or nothing when there are none. Sorting is git's own
+# version sort, so v0.10.0 comes above v0.9.0 rather than below it.
+function Get-LatestTag {
+    $url = $RepoUrl -replace '^git\+', ''
+    $line = (git ls-remote --tags --refs --sort=-v:refname $url 'v*' 2>$null |
+             Select-Object -First 1)
+    if (-not $line) { return $null }
+    return ($line -split '\s+')[1] -replace '^refs/tags/', ''
+}
 
-Write-Step "installing coder ($target)"
+# What gets installed, most specific first: an explicit ref, else the newest
+# release, else the default branch -- which is what this did before any tag
+# existed, and is still the honest answer on a repository with none.
+if ($env:BKHT_CODER_REF) {
+    $target = "$RepoUrl@$($env:BKHT_CODER_REF)"
+    Write-Step "installing coder from $($env:BKHT_CODER_REF) (BKHT_CODER_REF)"
+} else {
+    $tag = Get-LatestTag
+    if ($tag) {
+        $target = "$RepoUrl@$tag"
+        Write-Step "installing coder $tag"
+    } else {
+        $target = $RepoUrl
+        Write-Warn 'no release tags found - installing from the default branch'
+    }
+}
+
 uv tool install --force $target
 if ($LASTEXITCODE -ne 0) { Write-Fail "uv tool install failed for $target" }
 Write-Pass 'coder installed'

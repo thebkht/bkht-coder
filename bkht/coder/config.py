@@ -90,6 +90,9 @@ FIELDS: tuple[Field, ...] = (
     Field("max_iterations", "int", MAX_ITERATIONS, "Cap on loop iterations per task."),
     Field("instructions", "bool", True, "Read AGENTS.md and CLAUDE.md.", live=False),
     Field("skills", "bool", True, "Load skills, and offer the skill tool.", live=False),
+    # The one setting that governs a request leaving this machine. Not live:
+    # the check is started once, before the first turn.
+    Field("update_check", "bool", True, "Check for a new release once a day.", live=False),
 )
 
 BY_NAME = {f.name: f for f in FIELDS}

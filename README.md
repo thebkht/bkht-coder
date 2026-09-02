@@ -113,8 +113,44 @@ Read it first if you'd rather not pipe a script into a shell — it is
 | ----------------------- | ------------------------------------------------------- |
 | `MODEL`                 | Model tag to pull, overriding the RAM-based choice      |
 | `BKHT_CODER_NO_MODEL=1` | Skip the model pull; `ollama pull` it yourself later    |
-| `BKHT_CODER_REF`        | Install a branch or tag instead of the default          |
+| `BKHT_CODER_REF`        | Install a branch or tag instead of the newest release   |
 | `BKHT_CODER_YES=1`      | Don't ask; required when there is no terminal to ask on |
+
+## Updating
+
+The installer takes the newest release tag, and so does the updater:
+
+```sh
+coder update            # install the newest release
+coder update --check    # say whether there is one, and stop there
+```
+
+A session also checks on its own, at most once a day, and mentions it in one
+line of the greeting:
+
+```
+v0.3.0 available · coder update
+```
+
+**That check is the only request coder makes that does not go to your own
+Ollama.** It asks the GitHub releases API for a version number. It sends
+nothing — no code, no prompts, no paths, no telemetry — and it runs in the
+background off a cached answer, so it never delays a turn or fails one. The
+line above the prompt is the whole of what it does with the answer; nothing is
+ever installed without you typing `coder update`.
+
+It is skipped entirely when the output is not a terminal, and when coder is
+running from a source checkout. To switch it off for good:
+
+```sh
+coder config set update_check false
+```
+
+`coder doctor` reports the same thing, asked live rather than from the cache.
+
+Releases are git tags — there is no package index in the middle, and an update
+is a re-install of a named tag with the same `uv tool install` the installer
+runs. [`CHANGELOG.md`](CHANGELOG.md) says what changed in each one.
 
 ## Install manually — Linux / macOS
 
@@ -239,14 +275,17 @@ in the repo to override them for one project. A flag on the command line beats
 both, so a written-down default never gets in the way of a one-off run.
 
 The keys are `provider`, `model`, `host`, `num_ctx`, `temperature`, `mode`,
-`scout`, `max_iterations`, `instructions` and `skills` — each one an existing
-flag, so nothing becomes configurable that was not already. A bad file is not
+`scout`, `max_iterations`, `instructions`, `skills` and `update_check` — each of
+the first ten an existing flag, so nothing becomes configurable that was not
+already; `update_check` is the [release check](#updating), and the one setting
+that governs a request leaving this machine. A bad file is not
 fatal: the settings fall back to their defaults and the reason is printed once.
 
 The same thing works mid-session: `/config` lists, `/config set <key> <value>`
 writes and applies the change to the running agent where it can, and says so
 plainly when it cannot — `provider`, `instructions` and `skills` wait for the
-next session. Add `--workspace` to either to write the repo's file instead.
+next session — as does `update_check`. Add `--workspace` to either to write the
+repo's file instead.
 
 ## Borrowing a bigger model
 

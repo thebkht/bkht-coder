@@ -238,10 +238,28 @@ fi
 
 # -------------------------------------------------------------------- coder
 
-TARGET="$REPO_URL"
-if [ -n "${BKHT_CODER_REF:-}" ]; then TARGET="$REPO_URL@$BKHT_CODER_REF"; fi
+# The newest release tag, or nothing when there are none. Sorting is git's own
+# version sort, so v0.10.0 comes above v0.9.0 rather than below it.
+latest_tag() {
+  git ls-remote --tags --refs --sort=-v:refname \
+    "${REPO_URL#git+}" 'v*' 2>/dev/null \
+  | awk 'NR == 1 { sub(/^refs\/tags\//, "", $2); print $2 }'
+}
 
-step "installing coder ($TARGET)"
+# What gets installed, most specific first: an explicit ref, else the newest
+# release, else the default branch -- which is what this did before any tag
+# existed, and is still the honest answer on a repository with none.
+if [ -n "${BKHT_CODER_REF:-}" ]; then
+  TARGET="$REPO_URL@$BKHT_CODER_REF"
+  step "installing coder from $BKHT_CODER_REF (BKHT_CODER_REF)"
+elif TAG="$(latest_tag)" && [ -n "$TAG" ]; then
+  TARGET="$REPO_URL@$TAG"
+  step "installing coder $TAG"
+else
+  TARGET="$REPO_URL"
+  warn "no release tags found — installing from the default branch"
+fi
+
 uv tool install --force "$TARGET" || fail "uv tool install failed for $TARGET"
 pass "coder installed"
 

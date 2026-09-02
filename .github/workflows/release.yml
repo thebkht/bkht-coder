@@ -1,0 +1,61 @@
+name: Release
+
+# A tag is the release. Pushing vX.Y.Z is the whole ceremony: this checks that
+# the tag describes something real, runs the same CI everything else runs, and
+# then publishes the notes that were already written down.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  guard:
+    name: check the tag
+    runs-on: ubuntu-latest
+    steps:
+      # Full history, and the branches: neither the changelog check nor the
+      # reachability one can be answered from a shallow clone of one tag.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # A tag nobody wrote a line for is a release nobody can read. This is the
+      # same script a human runs before tagging, so CI cannot disagree with it.
+      - name: The changelog describes this version
+        run: scripts/changelog.sh "${GITHUB_REF_NAME}"
+
+      # A tag cut from a branch that never merged would publish code no one
+      # reviewed, under a version number that outlives the mistake.
+      - name: The tag is on main
+        run: |
+          if ! git merge-base --is-ancestor "${GITHUB_REF_NAME}" origin/main; then
+            echo "::error::${GITHUB_REF_NAME} is not reachable from main" >&2
+            exit 1
+          fi
+
+  ci:
+    name: ci
+    needs: guard
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: publish
+    needs: [guard, ci]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The release notes are the changelog section, not a generated list of
+      # commits: what changed for a user is a thing somebody decided to say.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          scripts/changelog.sh "${GITHUB_REF_NAME}" > notes.md
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file notes.md

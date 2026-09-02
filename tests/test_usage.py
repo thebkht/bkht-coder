@@ -7,7 +7,7 @@ import pytest
 from bkht.coder import cli, usage
 
 PAGES = [usage.HELP, usage.SESSIONS_HELP, usage.SESSION_HELP, usage.REVIEW_HELP,
-         usage.DOCTOR_HELP, usage.CONFIG_HELP]
+         usage.DOCTOR_HELP, usage.CONFIG_HELP, usage.UPDATE_HELP]
 
 
 @pytest.mark.parametrize("page", PAGES)
@@ -26,7 +26,7 @@ def test_no_page_wraps_an_eighty_column_terminal(page):
 
 
 def test_the_top_level_page_names_every_command():
-    for command in ("sessions", "session", "config", "review", "doctor", "help"):
+    for command in ("sessions", "session", "config", "review", "doctor", "update", "help"):
         assert command in usage.HELP
     assert usage.HELP.startswith(usage.title())
     assert usage.TAGLINE in usage.HELP
@@ -42,6 +42,7 @@ def test_each_subcommand_page_is_the_one_its_parser_serves():
         "sessions": usage.SESSIONS_HELP,
         "session": usage.SESSION_HELP,
         "config": usage.CONFIG_HELP,
+        "update": usage.UPDATE_HELP,
     }
     subparsers = next(
         action for action in parser._actions if hasattr(action, "choices") and action.choices
