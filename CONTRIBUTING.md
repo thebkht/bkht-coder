@@ -60,6 +60,30 @@ uv run ruff check .
 There is deliberately no autoformatter. Please don't reformat code you aren't
 otherwise changing; it buries the actual diff and rewrites `git blame`.
 
+## Cutting a release
+
+The git tag is the version. Nothing in the tree carries a version number —
+`hatch-vcs` derives one from the tag, so an untagged commit builds as a dev
+version of the release it is heading for and there is nothing to bump by hand.
+
+Add the section, tag it, push the tag:
+
+```sh
+# 1. Move the Unreleased entries under a new heading, dated.
+$EDITOR CHANGELOG.md
+./scripts/changelog.sh v0.2.0        # what the release notes will say
+
+git commit -am "Release 0.2.0"
+git tag -a v0.2.0 -m "v0.2.0"
+git push origin main v0.2.0
+```
+
+CI does the rest: it refuses a tag the changelog does not describe or that is
+not reachable from `main`, runs the ordinary test matrix, and publishes a
+GitHub Release whose body is the section you wrote. That release is what
+`coder update` and the install scripts resolve to, so a tag is live for users
+the moment the workflow finishes.
+
 ## Commits
 
 Write the subject line as what the change does for a reader of the code, not

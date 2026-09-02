@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # So a release can require exactly this, rather than a second copy of it that
+  # drifts. "Green" has one definition, and it is below.
+  workflow_call:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
