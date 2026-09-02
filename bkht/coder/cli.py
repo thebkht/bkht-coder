@@ -10,12 +10,12 @@ from functools import partial
 from pathlib import Path
 from typing import NamedTuple
 
-from . import banner, cancel, clipboard, config, lineedit, markdown, narrate, terminal, update
+from . import banner, cancel, clipboard, config, git, lineedit, markdown, narrate, terminal, update
 from .agent import Agent
 from .approval import ask_tty
 from . import doctor
 from .doctor import running_from, version
-from .context import file_tree
+from .context import file_tree, usage_ratio
 from .instructions import load_instructions, render, summarize as summarize_instructions
 from .parsing import ToolCall
 from .permissions import ASK, AUTO, PLAN, Permissions, cycle as next_mode
@@ -620,6 +620,50 @@ def header(agent, permissions, workspace) -> str:
     return f"coder · {facts(agent, permissions)} · {workspace.root}"
 
 
+class StatusLine:
+    """The fields of the row under the prompt, gathered on demand.
+
+    A class rather than a lambda because one of the fields costs a subprocess.
+    The row is rebuilt on every keystroke, and asking git which branch this is a
+    hundred times a line would make typing wait on a fork -- so the branch is
+    read once and again whenever a line is submitted, which is the only moment
+    in a session where it plausibly changed.
+    """
+
+    def __init__(self, agent, workspace, note: str = "") -> None:
+        self.agent = agent
+        self.workspace = workspace
+        self.note = note
+        self.branch = git.branch(workspace.root)
+
+    def refresh(self) -> None:
+        self.branch = git.branch(self.workspace.root)
+
+    def fields(self) -> dict:
+        session = self.agent.session
+        num_ctx = getattr(self.agent.provider, "num_ctx", DEFAULT_NUM_CTX)
+        return {
+            "name": self.workspace.root.name or str(self.workspace.root),
+            "branch": self.branch,
+            "ratio": usage_ratio(session, num_ctx),
+            "model": self.agent.provider.model,
+            "spent": session.prompt_tokens + session.completion_tokens,
+            "note": self.note,
+            "width": terminal.width(),
+        }
+
+
+def notice_line(notice: str) -> str:
+    """An update notice, cut down for the right edge of the status row.
+
+    The greeting has room for `v0.3.0 available · coder update`; a row that
+    also has to hold a path, a branch and a meter has room for the half that
+    is news. What to type about it is a `coder update` away, and in the
+    greeting directly above.
+    """
+    return notice.split(" · ")[0] if notice else ""
+
+
 HINT = "/help for commands, /exit to leave."
 
 #: The prompt itself. A single mark, so the input starts as near the left edge
@@ -657,14 +701,18 @@ def greeting(agent, permissions, workspace, stream=None, loaded=None, notice="")
     if terminal.width() < banner.MIN_WIDTH or not banner.drawable(stream):
         return paint(plain, DIM, stream)
 
-    _, mode, context = parts(agent, permissions)
+    # The mode and the context count used to sit here too. They are the two
+    # facts on screen that change while the session runs, and a greeting is
+    # scrollback -- it said `ask` for the rest of the session no matter how
+    # many times Shift+Tab was pressed. Both are now on the row under the
+    # prompt, which is redrawn on the keypress that changes them.
+    #
     # Only the name is coloured. What a greeting is for is being read once and
     # then ignored, and a column of accents is a column that keeps asking.
     return banner.render([
         paint(" ".join(filter(None, ("bkht.coder", version()))), ACCENT, stream),
         paint(agent.provider.model, DIM, stream),
         paint(home_relative(workspace.root), DIM, stream),
-        paint(f"{mode} · {context}", DIM, stream),
         *(paint(line, DIM, stream) for line in (loaded.lines() if loaded else [])),
         # Last, and dim like the rest: a release is worth mentioning once, not
         # worth being the brightest thing in the box.
@@ -766,11 +814,13 @@ def interactive(agent, snapshots, permissions, workspace, listener,
         use_instructions=use_instructions, jobs=jobs,
     )
     # The footer is a callable, not a string: the mode it names is the thing
-    # Shift+Tab changes, and the editor redraws it on the same keypress.
+    # Shift+Tab changes, and the editor redraws it on the same keypress -- and
+    # the row above it counts tokens that change with every turn.
+    line = StatusLine(agent, workspace, note=notice_line(notice))
     reader = Reader(
         repl,
         enabled=terminal.interactive(),
-        footer=lambda: lineedit.footer(permissions.mode),
+        footer=lambda: lineedit.footer_rows(permissions.mode, **line.fields()),
         cycle=lambda: setattr(permissions, "mode", next_mode(permissions.mode)),
         attach=attach_image,
         on_image=lambda path: announce_image(agent.provider, path),
@@ -793,9 +843,17 @@ def interactive(agent, snapshots, permissions, workspace, listener,
             # would be the same line drawn twice.
             if rule := (divider() if not reader.cycles else ""):
                 print(rule)
+                # Where there is no editor -- Windows, a pipe, an IDE console
+                # -- the same two rows are printed above the input instead of
+                # under it. Above is the only side readline leaves free, and
+                # the rows are worth more out of place than absent.
+                if rows := lineedit.footer_rows(
+                    permissions.mode, cycles=False, **line.fields()
+                ):
+                    print(rows)
             elif reader.cycles:
                 print()
-            line = read_line(reader, PROMPT)
+            text = read_line(reader, PROMPT)
         except EOFError:
             print()
             return 0
@@ -803,7 +861,10 @@ def interactive(agent, snapshots, permissions, workspace, listener,
             print()
             continue
 
-        command = repl.dispatch(line)
+        # The branch can have changed while the last turn ran -- a checkout in
+        # another window, or one this session made itself.
+        line.refresh()
+        command = repl.dispatch(text)
         if command.quit:
             return 0
         if command.handled:

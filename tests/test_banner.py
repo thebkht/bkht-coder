@@ -95,7 +95,17 @@ def test_the_greeting_is_the_mark_with_the_facts_beside_it(monkeypatch):
     assert "bkht.coder" in rows[0]
     assert "qwen2.5-coder:14b" in rows[1]
     assert "/tmp/project" in rows[2]
-    assert "ask · 1,234/8,192 ctx" in rows[3]
+
+
+def test_the_greeting_says_nothing_that_goes_stale_while_the_session_runs(monkeypatch):
+    # The mode and the context count used to be a fourth row here. A greeting
+    # is scrollback: it went on saying "ask" however many times Shift+Tab was
+    # pressed, and "0 ctx" however many turns had been taken. Both live on the
+    # row under the prompt now, which is redrawn on the keypress that changes
+    # them.
+    greeting = drawn(monkeypatch)
+    assert "ask" not in greeting
+    assert "ctx" not in greeting
 
 
 def test_one_shape_at_every_width_worth_drawing_at(monkeypatch):
