@@ -10,11 +10,10 @@ from functools import partial
 from pathlib import Path
 from typing import NamedTuple
 
-from . import banner, cancel, clipboard, config, lineedit, markdown, narrate, terminal
+from . import banner, cancel, clipboard, config, lineedit, markdown, narrate, terminal, update
 from .agent import Agent
 from .approval import ask_tty
 from . import doctor
-from . import update
 from .doctor import running_from, version
 from .context import file_tree
 from .instructions import load_instructions, render, summarize as summarize_instructions
