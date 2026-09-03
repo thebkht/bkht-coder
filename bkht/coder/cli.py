@@ -242,6 +242,12 @@ class TerminalListener:
             # parsing them.
             if said := narrate.outcome(call, result.content):
                 self._say(paint(f"  {said}", DIM, self.stream))
+            # The plan is the one result shown in full. It is four short lines,
+            # it is the agent's own account of what it is doing, and a count
+            # would hide the very thing worth watching: whether the list the
+            # model is ticking down is still the list it wrote.
+            for row in narrate.checklist(result.content) if call.name == "plan" else []:
+                self._say(paint(f"  {row}", DIM, self.stream))
         self.status.note("thinking")
 
     def on_retry(self, reason: str) -> None:
@@ -290,6 +296,8 @@ def add_agent_arguments(parser) -> None:
     parser.add_argument("--plan", action="store_true", default=None, help="Read-only: refuse every change to the workspace.")
     parser.add_argument("--verbose", action="store_true", help="Stream raw model output and tool results.")
     parser.add_argument("--no-scout", action="store_true", default=None, help="Do not search the workspace before each task.")
+    parser.add_argument("--no-planning", action="store_true", default=None, help="Omit the plan tool.")
+    parser.add_argument("--no-delegation", action="store_true", default=None, help="Omit the task tool, which runs a sub-agent.")
     parser.add_argument("--max-iterations", type=int, default=None, help="Cap on loop iterations per task.")
     add_common_arguments(parser)
 
@@ -484,12 +492,51 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
         Discovery() if getattr(args, "no_skills", False) else discover_skills(root)
     )
 
+    provider = build_provider(
+        getattr(args, "provider", DEFAULT_PROVIDER),
+        model=args.model, host=args.host, num_ctx=args.num_ctx,
+        temperature=args.temperature,
+    )
+    # Tool output is capped as a share of the window, so the window has to be
+    # known before any tool runs.
+    set_output_budget(provider.num_ctx)
+
+    # The session is built before the registry now, because the `plan` tool
+    # writes onto it. Its system prompt cannot be: that names the tool set, so
+    # it is assigned below once the registry knows what is in it. Rebuilt
+    # rather than reloaded, so a resumed session picks up the current tools
+    # instead of whatever it was told last time -- and a resumed session brings
+    # its plan back with it, which is the point of persisting one.
+    session = None
+    target = getattr(args, "resume", None)
+    if target:
+        previous = saved.resolve(root, target)
+        if previous is None:
+            # Named ids and `last` fail differently: one is a directory with no
+            # history yet, the other is a typo, and starting fresh is only the
+            # obvious thing to do about the first.
+            print(paint(f"{saved.missing(root, target)} Starting a new one.", YELLOW, sys.stderr), file=sys.stderr)
+        else:
+            session = Session.load(previous)
+            print(paint(f"Resumed {previous.name} ({len(session.messages)} messages).", DIM))
+
+    if session is None:
+        session = Session(cwd=str(root), model=args.model)
+        session.start_file()
+
     # In plan mode the mutating tools are left out of the registry entirely
     # rather than denied at call time, so the model is never tempted by a tool
     # it cannot use -- one fewer way for a small model to waste a turn.
     registry, workspace = build_registry(
         root, read_only=(mode == PLAN), snapshots=snapshots, skills=found_skills,
         jobs=jobs,
+        session=None if getattr(args, "no_planning", False) else session,
+        # The sub-agent shares this session's provider and skills, and reports
+        # its tool calls through this session's listener -- a delegated task is
+        # the one stretch of a turn the user cannot otherwise see.
+        delegate=None if getattr(args, "no_delegation", False) else {
+            "provider": provider, "skills": found_skills, "listener": listener,
+        },
     )
     # The prompt pauses the status line for the whole exchange: without it the
     # spinner repaints over the diff being approved. It pauses the Esc watch
@@ -509,14 +556,6 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
     # the user would be surprised by a prompt they thought they had answered.
     if permissions.rules is not None and permissions.rules.error:
         print(paint(permissions.rules.error, YELLOW, sys.stderr), file=sys.stderr)
-    provider = build_provider(
-        getattr(args, "provider", DEFAULT_PROVIDER),
-        model=args.model, host=args.host, num_ctx=args.num_ctx,
-        temperature=args.temperature,
-    )
-    # Tool output is capped as a share of the window, so the window has to be
-    # known before any tool runs.
-    set_output_budget(provider.num_ctx)
 
     # Announced rather than applied silently: instructions shape every answer
     # the model gives, and a rule the user has forgotten writing is worse than
@@ -533,32 +572,13 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
         summarize_instructions(loaded) if loaded else "",
         summarize_skills(found_skills) if found_skills.skills or found_skills.problems else "",
     )
-    system = system_prompt(
+    session.system = system_prompt(
         registry,
         str(workspace.root),
         file_tree(workspace.root),
         render(loaded),
         render_skills(found_skills),
     )
-
-    # The system prompt is rebuilt rather than reloaded, so a resumed session
-    # picks up the current tool set instead of whatever it was told last time.
-    session = None
-    target = getattr(args, "resume", None)
-    if target:
-        previous = saved.resolve(workspace.root, target)
-        if previous is None:
-            # Named ids and `last` fail differently: one is a directory with no
-            # history yet, the other is a typo, and starting fresh is only the
-            # obvious thing to do about the first.
-            print(paint(f"{saved.missing(workspace.root, target)} Starting a new one.", YELLOW, sys.stderr), file=sys.stderr)
-        else:
-            session = Session.load(previous, system=system)
-            print(paint(f"Resumed {previous.name} ({len(session.messages)} messages).", DIM))
-
-    if session is None:
-        session = Session(system=system, cwd=str(workspace.root), model=args.model)
-        session.start_file()
 
     agent = Agent(
         provider=provider,

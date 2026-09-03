@@ -78,6 +78,8 @@ Flags:
   --plan                  Read-only: refuse every change to the workspace
   --verbose               Stream raw model output and tool results
   --no-scout              Do not search the workspace before each task
+  --no-planning           Omit the plan tool
+  --no-delegation         Omit the task tool, which runs a sub-agent
   --max-iterations <n>    Cap on loop iterations per task
 {COMMON}
   -h, --help              Display this help and exit
@@ -139,6 +141,8 @@ Settings:
   max_iterations          Cap on loop iterations per task
   instructions            Read AGENTS.md and CLAUDE.md
   skills                  Load skills, and offer the skill tool
+  planning                Offer the plan tool
+  delegation              Offer the task tool, which runs a sub-agent
   update_check            Ask once a day whether a newer release exists
 
 Flags:

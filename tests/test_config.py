@@ -241,7 +241,7 @@ def namespace(**overrides):
     values = dict(
         provider=None, model=None, host=None, num_ctx=None, temperature=None,
         max_iterations=None, no_scout=None, no_instructions=None, no_skills=None,
-        auto=None, plan=None,
+        no_planning=None, no_delegation=None, auto=None, plan=None,
     )
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -535,3 +535,34 @@ def test_the_update_check_is_on_by_default_and_can_be_turned_off(tmp_path, monke
     settings = config.load(tmp_path)
     assert settings.update_check is False
     assert settings.source("update_check") == config.GLOBAL
+
+
+# --- the two tool switches --------------------------------------------------
+
+
+def test_planning_and_delegation_are_on_unless_turned_off(home, project):
+    args = namespace()
+    config.load(project).apply(args)
+    assert args.no_planning is False
+    assert args.no_delegation is False
+
+
+def test_turning_them_off_in_a_file_sets_the_negative_switches(home, project):
+    # Two tools, one line each. The registry's standing argument -- every extra
+    # tool costs selection accuracy on a small model -- is why they can go.
+    write(home, planning=False, delegation=False)
+    args = namespace()
+    config.load(project).apply(args)
+    assert args.no_planning is True
+    assert args.no_delegation is True
+
+
+def test_the_setting_named_planning_does_not_touch_the_plan_mode_switch(home, project):
+    # `--plan` is the permission mode and `planning` is the tool. They were one
+    # word apart, and a config key called `plan` would have silently rewritten
+    # the mode flag.
+    write(home, planning=False, mode="auto")
+    args = namespace()
+    config.load(project).apply(args)
+    assert args.no_planning is True
+    assert (args.auto, args.plan) == (True, False)

@@ -90,6 +90,11 @@ FIELDS: tuple[Field, ...] = (
     Field("max_iterations", "int", MAX_ITERATIONS, "Cap on loop iterations per task."),
     Field("instructions", "bool", True, "Read AGENTS.md and CLAUDE.md.", live=False),
     Field("skills", "bool", True, "Load skills, and offer the skill tool.", live=False),
+    # Two tools, two switches. The registry's standing argument -- every extra
+    # tool costs selection accuracy on a small model -- applies to these as
+    # much as to anything else, so both are turned off from one line.
+    Field("planning", "bool", True, "Offer the plan tool.", live=False),
+    Field("delegation", "bool", True, "Offer the task tool, which runs a sub-agent.", live=False),
     # The one setting that governs a request leaving this machine. Not live:
     # the check is started once, before the first turn.
     Field("update_check", "bool", True, "Check for a new release once a day.", live=False),
@@ -265,6 +270,7 @@ class Settings:
         # means "whatever was configured". So they are filled from the inverse.
         for name, dest in (
             ("scout", "no_scout"), ("instructions", "no_instructions"), ("skills", "no_skills"),
+            ("planning", "no_planning"), ("delegation", "no_delegation"),
         ):
             if getattr(args, dest, "missing") is None:
                 setattr(args, dest, not self.values[name])

@@ -5,6 +5,8 @@ from __future__ import annotations
 import io
 import re
 
+import pytest
+
 from bkht.coder import cli
 from bkht.coder.agent import Agent
 from bkht.coder.cli import TerminalListener, report, run_turn, summarize
@@ -347,3 +349,66 @@ def test_prose_landing_on_the_edge_is_wrapped_rather_than_left_pending(monkeypat
         listen._emit("next")
         assert listen._at == 4
     assert "0123456789\n" in stream.getvalue()
+
+
+# --- the plan and task tools reach the loop ---------------------------------
+
+
+@pytest.fixture
+def wired(project, tmp_path, monkeypatch):
+    """`make_agent` with its state directory and config pointed somewhere safe."""
+    from bkht.coder import config as config_module
+    from bkht.coder import session as session_module
+
+    monkeypatch.setattr(session_module, "SESSION_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(config_module, "GLOBAL_PATH", tmp_path / "config.json")
+
+    def build(*flags):
+        from bkht.coder.cli import build_agent_parser, make_agent
+
+        args = build_agent_parser().parse_args(["--cwd", str(project), *flags])
+        return make_agent(args)[0]
+
+    return build
+
+
+def test_a_session_is_offered_both_new_tools(wired):
+    agent = wired()
+    assert "plan" in agent.registry.names()
+    assert "task" in agent.registry.names()
+
+
+def test_the_plan_tool_writes_onto_this_sessions_plan(wired):
+    # The wiring that matters: the tool has to hold the same Session the loop
+    # sends, or the plan is written somewhere the model never reads it back.
+    agent = wired()
+    agent.registry.get("plan").run(steps=["one", "two"])
+    assert agent.session.plan.render() == "1. [ ] one\n2. [ ] two"
+    assert "1. [ ] one" in agent.session.payload()[-1]["content"]
+
+
+def test_the_system_prompt_names_them(wired):
+    # It is assigned after the registry is built, which is why the session is
+    # now constructed first; a prompt missing the tools it was given is a turn
+    # spent discovering they exist.
+    agent = wired()
+    assert "## plan" in agent.session.system
+    assert "## task" in agent.session.system
+
+
+def test_each_switch_removes_only_its_own_tool(wired):
+    planless = wired("--no-planning")
+    assert "plan" not in planless.registry.names()
+    assert "task" in planless.registry.names()
+
+    alone = wired("--no-delegation")
+    assert "plan" in alone.registry.names()
+    assert "task" not in alone.registry.names()
+
+
+def test_plan_mode_keeps_the_plan_tool(wired):
+    # Producing a plan is the whole of what plan mode is for, so the read-only
+    # registry is exactly where the tool has to survive.
+    agent = wired("--plan")
+    assert "plan" in agent.registry.names()
+    assert "write_file" not in agent.registry.names()
