@@ -9,6 +9,28 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ## [Unreleased]
 
+### Added
+
+- A row under the prompt naming the directory, the branch, how full the context
+  window is, the model and what the session has spent. It is redrawn on every
+  keystroke, and the meter turns orange at the point compaction becomes the
+  next thing to happen. A narrow terminal drops fields from the right rather
+  than wrapping.
+- The prompt block stays on screen while a turn runs, pinned under the spinner,
+  instead of the session emptying out to one line until the answer arrives.
+- A release waiting to be installed is shown on its own row above the frame.
+
+### Changed
+
+- Esc stops a turn during the wait before the first token, which on a local
+  model is most of a turn. The read now happens on a worker thread, so the
+  interrupt lands when the key is pressed rather than whenever the model next
+  speaks.
+- The greeting no longer names the permission mode or the context count. Both
+  changed while the session ran and the greeting could not be redrawn, so it
+  went on reporting the mode the session started in; they are on the row under
+  the prompt now.
+
 ## [0.2.0] - 2026-09-02
 
 ### Added

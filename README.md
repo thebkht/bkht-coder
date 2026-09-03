@@ -24,9 +24,12 @@ on its own leaves.
 On a terminal the session streams: prose appears as the model writes it, a
 status line shows elapsed time and tokens while it is quiet, and each tool call
 is announced in words above the call itself, with a count of what came back
-under it. Approvals take a single key — `y`, `n`, `a` to remember this call,
-or `d` to see the whole diff rather than the first forty lines. **Esc stops a
-running turn**, and so does Ctrl-C. Redirect the output and all of that goes
+under it. The prompt block stays on screen for the length of a turn, so where
+you are and how full the window is are readable while the model works rather
+than only between turns. Approvals take a single key — `y`, `n`, `a` to
+remember this call, or `d` to see the whole diff rather than the first forty
+lines. **Esc stops a running turn** — including during the long wait before
+the first token — and so does Ctrl-C. Redirect the output and all of that goes
 away: piped runs print the same plain transcript they always did.
 
 The prompt takes more than one line. Paste a forty-line block and it arrives as
@@ -467,6 +470,51 @@ A skill missing its `name` or `description` is skipped and said so on startup.
 Silently ignoring it would look identical to a skill the model simply chose not
 to use, and the user would have no way to tell the two apart. `/skills` lists
 what loaded, where each came from, and what was refused.
+
+## The row under the prompt
+
+```
+                                          v0.3.0 available · coder update
+────────────────────────────────────────────────────────────────────────
+› add a --verbose flag
+────────────────────────────────────────────────────────────────────────
+ bkht-coder  (main)  ctx ██░░░░░░░░░░ 18% used  [qwen2.5-coder:7b]  5.2k tokens
+▸▸ auto mode on (shift+tab to cycle)
+```
+
+Five things, and each is there because it changes what the next keystroke
+means. The **directory** and the **branch** say which checkout is about to be
+edited. The **meter** says how much of the window is left, and turns orange at
+the point where the next turn is the one that will summarize — the thing that
+used to happen without warning and take the model's record of what it had read
+with it. The **model** and the **tokens** say what is answering and what the
+session has spent.
+
+They used to be in the greeting, which is scrollback: it went on saying `ask`
+however many times Shift+Tab had been pressed, and `0 ctx` however many turns
+had been taken. A fact that changes belongs where it can be redrawn, so the
+greeting now says only what stays true.
+
+A narrow terminal drops fields from the right rather than wrapping, because a
+row that wrapped would put the caret arithmetic out by a line and smear the
+block on every keystroke. What survives longest is the directory, the branch
+and the meter.
+
+A release waiting to be installed gets a row of its own, above the frame and
+against the right edge — it is news about the next version of the program
+rather than about the line being typed, and `update_check false` turns it off.
+
+**The block stays while a turn runs.** Submitting used to take it off the
+screen, so a turn ran against a bare spinner: the session lost its shape at
+exactly the moment there was most to say about it. Now the spinner keeps the
+frame pinned under itself and the answer scrolls above it. The input in it is
+empty, and stays empty — this is a picture of the prompt, not an editor, and a
+box with words in it would promise a turn could read what was typed into it.
+
+Where there is no line editor — Windows, a pipe, an IDE console — the same two
+footer rows are printed above the input instead of under it. Above is the only
+side `readline` leaves free, and the rows are worth more out of place than
+absent.
 
 ## Searching before it answers
 
