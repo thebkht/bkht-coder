@@ -1,5 +1,6 @@
 """Static checks on a file the model is about to write."""
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -140,3 +141,111 @@ def test_check_warns_when_the_file_parses(pkg):
 
 def test_a_file_that_is_not_python_is_not_checked(pkg):
     assert verify.check("def go(:", pkg / "notes.md", pkg, "notes.md") == (None, [])
+
+
+# --- running the project's own test command ---------------------------------
+
+
+class Ran:
+    """Stands in for ``subprocess.run``, recording what it was asked to do."""
+
+    def __init__(self, code=0, stdout="", stderr="", raises=None) -> None:
+        self.code, self.stdout, self.stderr, self.raises = code, stdout, stderr, raises
+        self.calls: list[tuple] = []
+
+    def __call__(self, argv, **kwargs):
+        self.calls.append((argv, kwargs))
+        if self.raises is not None:
+            raise self.raises
+        return subprocess.CompletedProcess(argv, self.code, self.stdout, self.stderr)
+
+
+def test_a_passing_suite_says_so(tmp_path):
+    report = verify.suite("pytest -q", tmp_path, runner=Ran(0, "3 passed"))
+    assert report.ok
+    assert report.status == verify.PASSED
+    assert report.summary() == "pytest -q passed"
+
+
+def test_a_failing_suite_carries_the_output_and_the_code(tmp_path):
+    # The output is the whole point: a failure the model cannot read is a
+    # failure it can only guess at.
+    ran = Ran(1, "1 failed, 2 passed", "E   assert 3 == 4")
+    report = verify.suite("pytest -q", tmp_path, runner=ran)
+    assert not report.ok
+    assert report.code == 1
+    assert "1 failed" in report.output
+    assert "assert 3 == 4" in report.output
+    assert report.summary() == "pytest -q failed (exit 1)"
+
+
+def test_stdout_comes_before_stderr(tmp_path):
+    # A failing suite prints its summary to stdout and its tracebacks to
+    # stderr, and the summary is the half worth reading first.
+    ran = Ran(1, "SUMMARY", "TRACEBACK")
+    report = verify.suite("x", tmp_path, runner=ran)
+    assert report.output.index("SUMMARY") < report.output.index("TRACEBACK")
+
+
+def test_a_suite_that_never_returns_is_a_timeout_not_a_failure(tmp_path):
+    # Distinct from a failure on purpose: nothing about a timeout tells the
+    # model what to change, so the loop must not hand it back as if it did.
+    ran = Ran(raises=subprocess.TimeoutExpired("pytest", 120))
+    report = verify.suite("pytest", tmp_path, runner=ran)
+    assert report.status == verify.TIMED_OUT
+    assert not report.ok
+    assert "timed out" in report.summary()
+
+
+def test_a_command_that_cannot_start_is_broken_not_failed(tmp_path):
+    ran = Ran(raises=OSError("no such file"))
+    report = verify.suite("nope", tmp_path, runner=ran)
+    assert report.status == verify.BROKEN
+    assert "no such file" in report.output
+
+
+def test_the_command_runs_in_the_workspace_root(tmp_path):
+    ran = Ran(0)
+    verify.suite("pytest -q", tmp_path, runner=ran)
+    argv, kwargs = ran.calls[0]
+    assert kwargs["cwd"] == str(tmp_path)
+    assert argv[-1] == "pytest -q"
+    # Bounded, always. Esc cannot reach a blocked waitpid, so the timeout is
+    # the only thing that ends a suite that hangs.
+    assert kwargs["timeout"] == verify.TIMEOUT
+
+
+@pytest.mark.parametrize(
+    "marker, expected",
+    [
+        ("pytest.ini", "pytest -q"),
+        ("Cargo.toml", "cargo test"),
+        ("go.mod", "go test ./..."),
+        ("package.json", "npm test"),
+    ],
+)
+def test_a_marker_file_suggests_the_command_its_project_uses(tmp_path, marker, expected):
+    (tmp_path / marker).write_text("")
+    assert verify.detect(tmp_path) == expected
+
+
+def test_a_tests_directory_alone_suggests_nothing(tmp_path):
+    # It says a project has tests, not what runs them, and a wrong suggestion
+    # is worse than none -- the user is being asked to trust this enough to
+    # write it into their config.
+    (tmp_path / "tests").mkdir()
+    assert verify.detect(tmp_path) == ""
+
+    (tmp_path / "pyproject.toml").write_text("")
+    assert verify.detect(tmp_path) == "pytest -q"
+
+
+def test_a_rust_project_that_also_has_tests_is_still_a_rust_project(tmp_path):
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "pyproject.toml").write_text("")
+    (tmp_path / "Cargo.toml").write_text("")
+    assert verify.detect(tmp_path) == "cargo test"
+
+
+def test_an_empty_directory_suggests_nothing(tmp_path):
+    assert verify.detect(tmp_path) == ""

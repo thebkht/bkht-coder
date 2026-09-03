@@ -296,6 +296,42 @@ def no_call_and_no_answer(tool_names: list[str]) -> str:
     )
 
 
+def suite_failed(command: str, output: str) -> str:
+    """Handed back when the project's own tests fail after a turn's edits.
+
+    Phrased as a result, not an accusation. The turn had already decided it was
+    finished, so the useful thing to say is what the command reported and that
+    the work is not done -- a message that argues about whose fault it is
+    spends tokens the correction needs.
+    """
+    return (
+        f"You have finished editing, so `{command}` was run to check the work. "
+        "It failed:\n\n"
+        f"{output}\n\n"
+        "Read the failure and fix what caused it. If the failure is not about "
+        "your change -- it was already failing, or it is about something you "
+        "did not touch -- say so in your answer and stop; do not try to fix "
+        "the whole suite."
+    )
+
+
+def suite_still_failing(command: str, output: str) -> str:
+    """Handed back on the last run, when a fix did not take.
+
+    The difference from the message above is what it asks for. Another attempt
+    has already been spent, so this asks for an account rather than a fix: a
+    turn that ends saying which test fails and why is more use than one that
+    ends having tried a third time and run out of iterations mid-edit.
+    """
+    return (
+        f"`{command}` still fails after your fix:\n\n"
+        f"{output}\n\n"
+        "Stop editing and answer now. Say what you changed, what is still "
+        "failing, and what you think is wrong. A clear account of an unfinished "
+        "fix is worth more than another attempt at it."
+    )
+
+
 def tool_schema_hint(tool) -> str:
     """A single tool's schema, for when the model needs the exact shape."""
     return json.dumps(tool.parameters, indent=2)
