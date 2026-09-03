@@ -4,10 +4,21 @@ Sessions are append-only JSONL under ``~/.bkht-coder/sessions/``: one header
 record naming the working directory and model, then one record per message.
 Append-only means a crashed or killed session is still resumable up to its last
 complete message, which matters when a turn can take minutes.
+
+Three of the record types are written for a reader that is not the resume path.
+A transcript is only a training example if the *input* half survives too, and
+the input half is the system prompt: the tool protocol lives in it, and it is
+assembled per session from the registry, the tree, the project instructions and
+the skills. So ``prompt`` records what the model was actually told, ``outcome``
+records how each turn ended, and the header names the backend that answered.
+None of the three is replayed on resume -- a resumed session is rebuilt against
+the tools it has *now*, which is the whole reason the old prompt has to be
+written down rather than recomputed later.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -21,6 +32,31 @@ from .plan import Plan
 
 STATE_DIR = Path("~/.bkht-coder").expanduser()
 SESSION_DIR = STATE_DIR / "sessions"
+
+
+def _version() -> str:
+    """Which coder wrote this file.
+
+    Imported inside the call because ``doctor`` reaches for distribution
+    metadata, and opening a session file is not worth paying that at import
+    time. A build that cannot say what it is records nothing rather than a
+    guess.
+    """
+    try:
+        from .doctor import version
+
+        return version()
+    except Exception:
+        return ""
+
+
+def prompt_hash(system: str) -> str:
+    """A short, stable name for one system prompt.
+
+    Twelve hex characters, which is plenty to tell two prompts apart in a
+    listing and short enough to read. Nothing security-sensitive rides on it.
+    """
+    return hashlib.sha256(system.encode("utf-8")).hexdigest()[:12]
 
 
 def new_session_id() -> str:
@@ -39,6 +75,13 @@ class Session:
     id: str = field(default_factory=new_session_id)
     cwd: str = ""
     model: str = ""
+    #: The backend that answered. Recorded because a trajectory's worth as
+    #: training data depends entirely on what produced it: a frontier model
+    #: through `claude-code` is a teacher, and the local 14b is a student.
+    provider: str = ""
+    #: The tool names offered this session, which depend on the mode and on the
+    #: skills/planning/delegation switches -- and, for the shell, on the OS.
+    tools: list[str] = field(default_factory=list)
     path: Path | None = None
     # The language the user is writing in, carried between turns because a
     # follow-up is often too short to identify on its own. Derived state, not
@@ -49,6 +92,10 @@ class Session:
     # dropping message history, and this is the one thing a turn cannot afford
     # to lose to them. Persisted, so a resumed session resumes the plan too.
     plan: Plan = field(default_factory=Plan)
+    #: What the file said about itself, for a reader that wants the session as
+    #: it was rather than as it would be rebuilt. Empty for a live session --
+    #: nothing has been read back -- and never consulted by the resume path.
+    recorded: dict = field(default_factory=dict)
 
     # --- history ------------------------------------------------------------
 
@@ -99,6 +146,57 @@ class Session:
 
     def _persist_plan(self) -> None:
         self._persist({"type": "plan", "steps": self.plan.as_record()})
+
+    def record_prompt(self, system: str, tools: list[str] | None = None) -> None:
+        """Adopt a system prompt, and write down what it was.
+
+        Called instead of assigning ``system`` directly, because the assignment
+        is the moment the information exists: the prompt names the tool set, so
+        it cannot be built until the registry is, which is after the file was
+        opened. Written as its own record rather than into the header for the
+        same reason -- and a resumed session appends a second one, so a file
+        that spans two tool sets says so in order instead of claiming the newer
+        one applied from the start.
+
+        The hash is there so a reader can group trajectories by the prompt that
+        produced them without comparing four kilobytes of text per session.
+        """
+        self.system = system
+        self.tools = list(tools or [])
+        self._persist(
+            {
+                "type": "prompt",
+                "system": system,
+                "hash": prompt_hash(system),
+                "tools": self.tools,
+                "provider": self.provider,
+                "model": self.model,
+            }
+        )
+
+    def record_outcome(self, outcome) -> None:
+        """Write down how a turn ended.
+
+        A transcript says what was said; this says whether it went anywhere. The
+        difference matters to anything selecting trajectories to learn from: a
+        turn that hit the iteration cap and a turn that answered look identical
+        in the message list, and only one of them is worth imitating.
+
+        Duck-typed rather than importing ``agent.Outcome``, which would make the
+        session depend on the loop that drives it.
+        """
+        self._persist(
+            {
+                "type": "outcome",
+                "stopped": getattr(outcome, "stopped", ""),
+                "iterations": getattr(outcome, "iterations", 0),
+                "tool_calls": getattr(outcome, "tool_calls", 0),
+                "errors": list(getattr(outcome, "errors", []) or []),
+                "seconds": round(float(getattr(outcome, "seconds", 0.0)), 3),
+                "sent": getattr(outcome, "sent", 0),
+                "received": getattr(outcome, "received", 0),
+            }
+        )
 
     def add_user(self, content: str, images: list[str] | None = None) -> None:
         """Record what the user said, and any images they pasted with it.
@@ -155,9 +253,16 @@ class Session:
                 "id": self.id,
                 "cwd": self.cwd,
                 "model": self.model,
+                "provider": self.provider,
+                "version": _version(),
                 "created": time.time(),
             }
         )
+        # A prompt already assigned before the file existed is written down
+        # too, so the ordering rule -- every message follows the prompt in
+        # force for it -- holds for a session whose file opened late.
+        if self.system:
+            self.record_prompt(self.system, self.tools)
         for message in self.messages:
             self._persist({"type": "message", **message})
         # A plan made before the file existed would otherwise be the one piece
@@ -199,6 +304,14 @@ class Session:
                 session.id = record.get("id", session.id)
                 session.cwd = record.get("cwd", "")
                 session.model = record.get("model", "")
+                session.provider = record.get("provider", "")
+                session.recorded.update(record)
+            elif kind in ("prompt", "outcome"):
+                # Kept beside the session rather than in it. The prompt read
+                # here described the tools of the run that wrote it, and this
+                # run is about to be given its own -- so replaying it would
+                # hand the model a protocol for tools it no longer has.
+                session.recorded.setdefault(kind, []).append(record)
             elif kind == "clear":
                 session.messages = []
                 session.plan = Plan()

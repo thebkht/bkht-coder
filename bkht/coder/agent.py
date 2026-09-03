@@ -138,12 +138,9 @@ class Agent:
         self.session.add_user(user_message, images=images)
         self._note_language(user_message)
         self._scout(user_message)
-        outcome = self.resume()
-        # Restamped over what resume() measured: scouting greps the workspace
-        # before the first round trip, and a turn's duration that leaves that
-        # out is not the duration the user waited.
-        outcome.seconds = max(0.0, self.clock() - started)
-        return outcome
+        # `_loop` directly rather than through `resume`, so the turn is recorded
+        # once, with the duration that includes the scouting above.
+        return self._finish(self._loop(), started)
 
     def _note_language(self, user_message: str) -> None:
         """Update the language the session is being conducted in.
@@ -188,8 +185,18 @@ class Agent:
     def resume(self) -> Outcome:
         """Continue from the current history without adding a user message."""
         started = self.clock()
-        outcome = self._loop()
+        return self._finish(self._loop(), started)
+
+    def _finish(self, outcome: Outcome, started: float) -> Outcome:
+        """Stamp a turn's duration and write down how it ended.
+
+        The transcript already says what was said. This is the part that says
+        whether it worked -- which is what anything choosing trajectories to
+        learn from needs, and what the message list alone cannot tell it: a turn
+        that answered and a turn that hit the iteration cap look the same there.
+        """
         outcome.seconds = max(0.0, self.clock() - started)
+        self.session.record_outcome(outcome)
         return outcome
 
     def _loop(self) -> Outcome:

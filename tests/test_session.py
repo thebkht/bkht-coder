@@ -14,14 +14,22 @@ def store(tmp_path):
     return directory
 
 
+def records_in(session):
+    return [json.loads(line) for line in session.path.read_text().splitlines()]
+
+
 def test_messages_are_appended_as_they_happen(store):
     session = Session(system="sys", cwd="/work", model="m")
     session.start_file(store)
     session.add_user("hello")
 
-    records = [json.loads(line) for line in session.path.read_text().splitlines()]
+    records = records_in(session)
     assert records[0]["type"] == "session" and records[0]["cwd"] == "/work"
-    assert records[1] == {"type": "message", "role": "user", "content": "hello"}
+    # The prompt comes between the header and the first message, and that order
+    # is the point: every message in the file was answered under the prompt
+    # above it, so a reader replaying the session never has to guess which.
+    assert records[1]["type"] == "prompt" and records[1]["system"] == "sys"
+    assert records[2] == {"type": "message", "role": "user", "content": "hello"}
 
 
 def test_round_trip_preserves_the_conversation(store):
@@ -37,13 +45,70 @@ def test_round_trip_preserves_the_conversation(store):
     assert loaded.cwd == "/work" and loaded.model == "m"
 
 
-def test_system_prompt_is_not_persisted(store):
-    # It is rebuilt on resume, so a session picks up the current tool set.
+def test_the_system_prompt_is_recorded_but_never_replayed(store):
+    # Written down, because it is the input half of every exchange in the file
+    # and cannot be reconstructed later -- it names the tool set of the run that
+    # produced it. Not replayed, because this run has its own.
     session = Session(system="old prompt", cwd="/work")
     session.start_file(store)
     session.add_user("hi")
-    assert "old prompt" not in session.path.read_text()
-    assert Session.load(session.path, system="new prompt").system == "new prompt"
+
+    loaded = Session.load(session.path, system="new prompt")
+    assert loaded.system == "new prompt"
+    assert [r["system"] for r in loaded.recorded["prompt"]] == ["old prompt"]
+
+
+def test_a_resumed_session_records_the_prompt_it_was_given(store):
+    # Two tool sets, one file. Appending rather than replacing is what lets a
+    # reader pair each message with the prompt that was in force for it.
+    session = Session(system="first", cwd="/work")
+    session.start_file(store)
+    session.add_user("one")
+
+    resumed = Session.load(session.path)
+    resumed.record_prompt("second", ["read_file"])
+    resumed.add_user("two")
+
+    kinds = [r.get("type") for r in records_in(resumed)]
+    assert kinds == ["session", "prompt", "message", "prompt", "message"]
+    assert [r["system"] for r in Session.load(session.path).recorded["prompt"]] == [
+        "first", "second",
+    ]
+
+
+def test_an_outcome_says_how_the_turn_ended(store):
+    class Turn:
+        stopped, iterations, tool_calls = "iteration-cap", 25, 12
+        errors, seconds, sent, received = ["gave up"], 91.5, 9000, 400
+
+    session = Session(cwd="/work")
+    session.start_file(store)
+    session.record_outcome(Turn())
+
+    written = records_in(session)[-1]
+    assert written["type"] == "outcome" and written["stopped"] == "iteration-cap"
+    assert written["iterations"] == 25 and written["errors"] == ["gave up"]
+
+
+def test_the_header_names_the_backend_that_answered(store):
+    session = Session(cwd="/work", model="m", provider="local")
+    session.start_file(store)
+    assert Session.load(session.path).provider == "local"
+
+
+def test_a_session_written_before_any_of_this_still_loads(store):
+    # The fields are all optional on read, because 500 files on this machine
+    # were written without them.
+    path = store / "old.jsonl"
+    path.write_text(
+        json.dumps({"type": "session", "id": "old", "cwd": "/work", "model": "m"})
+        + "\n"
+        + json.dumps({"type": "message", "role": "user", "content": "hi"})
+        + "\n"
+    )
+    loaded = Session.load(path)
+    assert loaded.provider == "" and loaded.recorded.get("prompt") is None
+    assert [m["content"] for m in loaded.messages] == ["hi"]
 
 
 def test_a_partial_final_line_is_skipped_not_fatal(store):

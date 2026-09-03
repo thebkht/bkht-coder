@@ -518,10 +518,14 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
             print(paint(f"{saved.missing(root, target)} Starting a new one.", YELLOW, sys.stderr), file=sys.stderr)
         else:
             session = Session.load(previous)
+            session.provider = getattr(args, "provider", DEFAULT_PROVIDER)
             print(paint(f"Resumed {previous.name} ({len(session.messages)} messages).", DIM))
 
     if session is None:
-        session = Session(cwd=str(root), model=args.model)
+        session = Session(
+            cwd=str(root), model=args.model,
+            provider=getattr(args, "provider", DEFAULT_PROVIDER),
+        )
         session.start_file()
 
     # In plan mode the mutating tools are left out of the registry entirely
@@ -572,12 +576,20 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
         summarize_instructions(loaded) if loaded else "",
         summarize_skills(found_skills) if found_skills.skills or found_skills.problems else "",
     )
-    session.system = system_prompt(
-        registry,
-        str(workspace.root),
-        file_tree(workspace.root),
-        render(loaded),
-        render_skills(found_skills),
+    # Recorded rather than assigned. The prompt is the input half of every
+    # exchange in this file, and it is built here, from this registry -- so a
+    # reader coming back to the transcript later has no way to reconstruct it.
+    # A resumed session appends its own, which is correct: the tools may have
+    # moved since the messages above it were written.
+    session.record_prompt(
+        system_prompt(
+            registry,
+            str(workspace.root),
+            file_tree(workspace.root),
+            render(loaded),
+            render_skills(found_skills),
+        ),
+        registry.names(),
     )
 
     agent = Agent(

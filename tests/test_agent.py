@@ -318,7 +318,7 @@ def test_a_turn_reports_how_long_it_took(loop):
     # The first reading and the last are what the duration is made of; the ones
     # between belong to the loop's own bookkeeping and it may take more of them
     # than it does today, so the clock keeps answering rather than running out.
-    ticks = itertools.chain([10.0, 12.5, 13.0], itertools.repeat(14.0))
+    ticks = itertools.chain([10.0, 12.5], itertools.repeat(14.0))
     agent, _ = loop(["Done."], clock=lambda: next(ticks))
     assert agent.run("go").seconds == pytest.approx(4.0)
 
