@@ -21,11 +21,22 @@ from pathlib import Path
 import httpx
 
 from .instructions import load_instructions
-from .provider import DEFAULT_HOST, DEFAULT_MODEL, DEFAULT_NUM_CTX
+from .provider import DEFAULTS, DEFAULT_NUM_CTX
 from .provider import DEFAULT_PROVIDER, ProviderError, build
 from .session import STATE_DIR
 from .skills import discover as discover_skills
 from .tools.shell import resolve_shell
+
+#: The two backends that are an HTTP server this machine can be asked about,
+#: named because the checks differ between them and neither is "the default".
+LOCAL = "local"
+OLLAMA = "ollama"
+
+#: What a report describes when the caller named nothing. Read from the default
+#: backend's own entry rather than from any one server's constants, so that a
+#: bare `run_checks()` cannot check the default provider against Ollama's port.
+DEFAULT_MODEL = DEFAULTS[DEFAULT_PROVIDER]["model"]
+DEFAULT_HOST = DEFAULTS[DEFAULT_PROVIDER]["host"]
 
 PROBE_TIMEOUT = 5.0
 
@@ -642,17 +653,91 @@ def check_workspace(root: Path) -> Check:
 def _model_checks(provider: str, model: str, host: str, num_ctx: int) -> list[Check]:
     """The checks that only make sense for the backend actually in use.
 
-    Four of them are about a local server: whether it is up, whether the weights
-    are pulled, whether this machine has the memory for the window, and where
-    the server actually put the model. None of that describes a model reached
-    through somebody else's command line, and a report that fails on a server
-    the user is not using is a report that teaches them to ignore it.
-    """
-    if provider != DEFAULT_PROVIDER:
-        return [check_backend(provider, model)]
+    Three shapes, named rather than inferred. This used to ask whether the
+    backend was the *default* one, which read correctly only for as long as the
+    default happened to be Ollama: the moment it moved, Ollama would have been
+    checked for a command on PATH and the new default asked for `/api/tags`.
+    What a check applies to is a property of the backend, not of which one
+    happens to be first.
 
+    A report that fails on a server the user is not running is a report that
+    teaches them to ignore it, which is the whole reason this branches at all.
+    """
+    if provider == OLLAMA:
+        return _ollama_checks(model, host, num_ctx)
+    if provider == LOCAL:
+        return _server_checks(model, host, num_ctx)
+    return [check_backend(provider, model)]
+
+
+def _server_checks(model: str, host: str, num_ctx: int) -> list[Check]:
+    """An OpenAI-compatible server: is it up, is it serving this, does it fit.
+
+    Three where Ollama gets four, and the missing one is placement. There is no
+    `/api/ps` here -- the OpenAI API has no notion of where a model is resident
+    -- so the one measured number in the Ollama report is simply not available,
+    and inventing it from arithmetic is what this file spent a release learning
+    not to do.
+    """
+    from .openai import OpenAIProvider
+
+    served = OpenAIProvider(model=model, host=host).models()
+    return [
+        check_endpoint(host, served),
+        check_served(model, served),
+        # No weights and no metadata to ask for them with, so this falls back to
+        # the fitted constants. It is an estimate either way; here it is one
+        # with less to go on, which the window line says by naming no model.
+        check_context(num_ctx, memory_budget()),
+    ]
+
+
+def check_endpoint(host: str, served: list[str] | None) -> Check:
+    if served is None:
+        return Check(
+            "server", FAIL,
+            f"{host} did not answer",
+            "Start one -- `mlx_lm.server --model <path> --host 0.0.0.0 --port 8080` "
+            f"-- then check `curl {host}/v1/models`.",
+        )
+    return Check("server", OK, f"{host} answered with {len(served)} model(s)")
+
+
+def check_served(model: str, served: list[str] | None) -> Check:
+    """Whether the server is serving what this session is about to ask for.
+
+    A warning rather than a failure when the name does not match. A server
+    started with a single model routinely reports it under a path, a hash, or
+    whatever it was given on the command line, and answers to any name it is
+    asked for -- so a mismatch here is usually cosmetic, and refusing to start
+    over it would be wrong far more often than right.
+    """
+    if served is None:
+        return Check(
+            "model", FAIL,
+            "could not ask: the server is not answering",
+            "Fix the check above first; this one cannot be answered until it passes.",
+        )
+    if model in served:
+        return Check("model", OK, f"{model} is being served")
+    if not served:
+        return Check(
+            "model", WARN,
+            f"the server lists no models, and this session asks for {model}",
+            "Most single-model servers answer anyway. If the turn fails, start "
+            "the server with the model you mean.",
+        )
+    return Check(
+        "model", WARN,
+        f"{model} is not listed; the server offers {', '.join(served[:3])}",
+        f"A single-model server answers to any name. Otherwise use "
+        f"`--model {served[0]}`.",
+    )
+
+
+def _ollama_checks(model: str, host: str, num_ctx: int) -> list[Check]:
+    """Ollama: up, pulled, fits, and where the weights actually landed."""
     entries, problem = _tags(host)
-    names = _names(entries)
     weights = per_1k = None
     alternatives: list[tuple[str, float]] = []
     loaded: list[dict] | None = None
@@ -664,6 +749,7 @@ def _model_checks(provider: str, model: str, host: str, num_ctx: int) -> list[Ch
         alternatives = _alternatives(host, model, entries, num_ctx)
         loaded = _ps(host)
 
+    names = _names(entries)
     return [
         check_server(host, names, problem),
         check_model(model, names),

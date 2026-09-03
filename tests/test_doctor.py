@@ -334,7 +334,12 @@ def test_a_broken_skill_is_surfaced_here_too(project):
 
 @pytest.fixture
 def offline(monkeypatch):
-    """A machine with no Ollama on it."""
+    """A machine with no model server on it.
+
+    `doctor.httpx` is the httpx module itself, so patching an attribute on it
+    reaches every backend that reaches for it -- which is what makes this
+    hermetic on a machine that happens to have something on port 8080.
+    """
 
     def refuse(*args, **kwargs):
         raise httpx.ConnectError("connection refused")
@@ -366,8 +371,36 @@ def test_json_output_is_parseable_and_carries_the_fix(project, offline):
     report(project, as_json=True, out=lines.append)
 
     checks = json.loads(lines[0])
-    server = next(check for check in checks if check["name"] == "ollama")
-    assert server["status"] == FAIL and "ollama serve" in server["fix"]
+    server = next(check for check in checks if check["name"] == "server")
+    assert server["status"] == FAIL and "mlx_lm.server" in server["fix"]
+
+
+def test_each_backend_is_checked_as_itself_not_as_the_default(project, offline):
+    # This branch used to ask whether the backend *was* the default, which read
+    # correctly only while the default happened to be Ollama. The moment it
+    # moved, Ollama would have been checked for a command on PATH.
+    def names(provider):
+        return [c.name for c in doctor.run_checks(project, provider=provider)]
+
+    assert "ollama" in names("ollama") and "placement" in names("ollama")
+    assert "server" in names("local") and "placement" not in names("local")
+    assert "backend" in names("codex")
+
+
+def test_an_unlisted_model_is_a_warning_because_one_model_servers_answer_anyway():
+    # A server started with a single model reports it under whatever name it was
+    # given, and answers to any name asked for. Refusing to start over that
+    # would be wrong far more often than right.
+    check = doctor.check_served("coder", ["/models/qwen-fused"])
+    assert check.status == WARN and "--model /models/qwen-fused" in check.fix
+
+
+def test_a_served_model_that_matches_is_fine():
+    assert doctor.check_served("coder", ["coder"]).status == OK
+
+
+def test_a_silent_server_cannot_answer_the_model_question():
+    assert doctor.check_served("coder", None).status == FAIL
 
 
 def test_every_failure_carries_a_fix(project, offline):

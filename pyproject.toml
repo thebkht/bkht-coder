@@ -1,13 +1,13 @@
 [project]
 name = "bkht-coder"
 dynamic = ["version"]
-description = "A coding agent that runs entirely on a local Ollama -- nothing leaves the machine"
+description = "A coding agent that runs on a model server you control -- nothing leaves the machine"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Bakhtiyor Ganijon" }]
-keywords = ["coding-agent", "ollama", "llm", "cli", "local-first"]
+keywords = ["coding-agent", "ollama", "mlx", "llm", "cli", "local-first"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",

@@ -272,7 +272,7 @@ def add_common_arguments(parser) -> None:
         help="Model backend to run the turn through.",
     )
     parser.add_argument("--model", default=None, help="Model to use.")
-    parser.add_argument("--host", default=None, help="Ollama server URL.")
+    parser.add_argument("--host", default=None, help="Model server URL.")
     parser.add_argument("--num-ctx", type=int, default=None, help="Context window to request.")
     parser.add_argument(
         "--temperature", type=float, default=None,
@@ -315,7 +315,7 @@ def version_line() -> str:
 def build_parser() -> argparse.ArgumentParser:
     parser = usage.Parser(
         prog="coder",
-        description="A coding agent running against a local Ollama server.",
+        description="A coding agent running against a model server you control.",
         page=usage.HELP,
     )
     parser.add_argument("-v", "--version", action="version", version=version_line())
@@ -408,7 +408,7 @@ def build_agent_parser() -> argparse.ArgumentParser:
     """
     parser = usage.Parser(
         prog="coder",
-        description="A coding agent running against a local Ollama server.",
+        description="A coding agent running against a model server you control.",
         page=usage.HELP,
     )
     parser.add_argument("-v", "--version", action="version", version=version_line())

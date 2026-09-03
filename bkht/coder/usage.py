@@ -33,12 +33,11 @@ def title() -> str:
 #: Each of them overrides the matching key in the config files; `coder config`
 #: shows what those are set to and where each value came from.
 COMMON = """\
-  --provider <name>       Backend: ollama, claude-code, codex
+  --provider <name>       Backend: local, ollama, claude-code, codex
   --model <name>          Model to use
-  --host <url>            Ollama server URL (ollama only)
+  --host <url>            Model server URL (local and ollama)
   --num-ctx <n>           Context window to request
   --temperature <n>       Sampling temperature; low keeps tool calls valid
-                          (ollama only)
   --cwd <path>            Workspace root; defaults to the current directory
   --auto                  Allow every tool call without prompting
   --no-instructions       Ignore AGENTS.md and CLAUDE.md
@@ -113,12 +112,18 @@ for the run you are in, and a workspace can pin what a project needs.
 
 `provider` names the model backend:
 
-  ollama        a local server -- the default, and the only one that keeps
-                the work on this machine
+  local         any OpenAI-compatible server -- mlx_lm.server, llama-server,
+                vLLM, or Ollama's own /v1. The default.
+  ollama        Ollama's native API, for a stock model it has already pulled
   claude-code   the `claude` command, using the login it already has
   codex         the `codex` command, using the login it already has
 
-The other two are borrowed transports: their own file tools are switched off,
+The first two both keep the work on hardware you own. `local` is the default
+because it is the one that can serve a model you trained yourself -- and
+because `host` may name another machine on your network, so the box with the
+memory can do the thinking while you drive from a laptop.
+
+The last two are borrowed transports: their own file tools are switched off,
 and every change still goes through coder's permission gate. Switching provider
 brings that backend's own model and window with it unless you have pinned your
 own.
@@ -131,11 +136,11 @@ Usage:
   coder config path
 
 Settings:
-  provider                Model backend: ollama, claude-code, codex
+  provider                Model backend: local, ollama, claude-code, codex
   model                   Model to run
-  host                    Server URL (ollama only)
+  host                    Model server URL (local and ollama)
   num_ctx                 Context window to plan for
-  temperature             Sampling temperature (ollama only)
+  temperature             Sampling temperature
   mode                    Permission mode: ask, auto, plan
   scout                   Search the workspace before each task
   max_iterations          Cap on loop iterations per task
