@@ -25,6 +25,7 @@ from .provider import BACKENDS, DEFAULT_NUM_CTX, DEFAULT_PROVIDER
 from .provider import build as build_provider
 from .repl import Repl
 from .review import cli as review_cli
+from .training import cli as training_cli
 from .session import Session, Snapshots
 from . import sessions as saved
 from .skills import Discovery, discover as discover_skills, render as render_skills
@@ -351,6 +352,12 @@ def build_parser() -> argparse.ArgumentParser:
         page=usage.SESSIONS_HELP,
     )
     saved_cli_arguments(lister)
+
+    dataset = subparsers.add_parser(
+        "dataset", help="Build the training corpus from transcripts on this machine.",
+        page=usage.DATASET_HELP,
+    )
+    training_cli.add_arguments(dataset)
 
     opener = subparsers.add_parser(
         "session", help="Show or resume one saved session.",
@@ -975,7 +982,11 @@ def resume_argv(rest: list[str]) -> list[str]:
     return ["--resume", rest[0] if named else saved.LAST, *rest[1 if named else 0:]]
 
 
-def config_argv(argv: list[str]) -> list[str]:
+#: The `dataset` flags that take a separate value, for the same reordering.
+DATASET_VALUED_FLAGS = {"--source", "--out", "--max-tokens", "--num-ctx", "--cwd", "--file"}
+
+
+def config_argv(argv: list[str], valued: set[str] = None) -> list[str]:
     """A subcommand line with its positionals moved ahead of its flags.
 
     argparse before CPython 3.12.7 cannot fill an optional positional that
@@ -998,7 +1009,7 @@ def config_argv(argv: list[str]) -> list[str]:
             # The only `config` flag that takes a separate value. Written as a
             # set so a second one cannot be added to the parser and forgotten
             # here without the name being obvious.
-            if token in CONFIG_VALUED_FLAGS and index + 1 < len(argv):
+            if token in (valued or CONFIG_VALUED_FLAGS) and index + 1 < len(argv):
                 index += 1
                 flags.append(argv[index])
         else:
@@ -1044,6 +1055,14 @@ def main(argv: list[str] | None = None) -> int:
                 Path(args.cwd).expanduser().resolve(),
                 args.target, as_json=args.json,
             )
+
+    if argv[:1] == ["dataset"]:
+        # Same positionals-before-flags reordering `config` needs, and for the
+        # same reason: `dataset show --out x 3` is the shape argparse cannot
+        # fill on every interpreter this package supports.
+        return training_cli.run(
+            build_parser().parse_args(config_argv(argv, DATASET_VALUED_FLAGS))
+        )
 
     if argv[:1] == ["update"]:
         return update.run(build_parser().parse_args(argv))

@@ -70,6 +70,7 @@ Commands:
 
   review [range]                 Review changes, a branch, or a commit range
   doctor                         Check that this install can run a turn
+  dataset [build|stats|show]     Build a training corpus from transcripts
   help                           Show this help
 
 Flags:
@@ -277,6 +278,54 @@ Examples:
 
   coder review --base main --ci
       Annotate the diff on the pull request, and fail on a finding
+"""
+
+DATASET_HELP = """\
+coder dataset
+Build the training corpus from the transcripts already on this machine.
+
+A coding agent produces exactly what a coding agent has to be trained on: a
+task, the calls made to work it out, what each returned, and an answer. This
+collects those from coder's own sessions and from Claude Code's and Codex's,
+translates every call into coder's protocol, and writes the chat JSONL that
+`mlx_lm.lora` reads.
+
+Translation is not cosmetic. A model trained on `Read(file_path=...)` learns to
+emit a call coder has no tool for; the same call mapped to `read_file(path=...)`
+teaches the one that exists. Arguments coder's tools do not accept are dropped,
+because an unknown argument is a hard error at runtime, not a warning. Calls
+with no coder equivalent end the trajectory there rather than leaving a hole in
+the middle of it.
+
+Two things are done to match what the model will actually see at serve time:
+tool results are cut to coder's own output budget, and an example too long for
+the training window has its older results elided exactly as a long session's
+are. Both keep the training bytes and the served bytes the same shape.
+
+`build` writes the files, `stats` says what is in them, and `show` prints one
+example as the model reads it. Run `show` at least once: a histogram cannot
+tell you a conversation is incoherent, and reading one takes a minute.
+
+Usage:
+  coder dataset build [flags]
+  coder dataset stats [--out DIR] [--json]
+  coder dataset show <n> [--out DIR]
+
+Flags:
+  --source <list>         Comma-separated: coder, claude, codex, chat
+  --file <path>           A chat JSONL to include. Repeatable
+  --out <dir>             Where to write. Defaults to training/data
+  --max-tokens <n>        Longest example to keep. Defaults to 4096
+  --num-ctx <n>           Window to size tool results for
+  --cwd <path>            Workspace the system prompt is built against
+  --json                  Machine-readable output
+  -h, --help              Display this help and exit
+
+Examples:
+  coder dataset build
+  coder dataset build --source claude,codex --max-tokens 8192
+  coder dataset stats
+  coder dataset show 0
 """
 
 UPDATE_HELP = """\
