@@ -6,6 +6,7 @@ import json
 import pytest
 
 from bkht.coder import config
+from bkht.coder.cli import build_agent_parser
 from bkht.coder.config import ConfigError, Settings
 
 
@@ -566,3 +567,73 @@ def test_the_setting_named_planning_does_not_touch_the_plan_mode_switch(home, pr
     config.load(project).apply(args)
     assert args.no_planning is True
     assert (args.auto, args.plan) == (True, False)
+
+
+# --- falling back to a backend that is actually serving ------------------------
+
+
+def served(monkeypatch, *reachable):
+    """Pretend exactly these backends have something answering.
+
+    The real ``settle`` is put back -- conftest stubs it out for every other
+    test -- and only the probe underneath it is faked, so what is exercised
+    here is the actual decision rather than a restatement of it.
+    """
+    from bkht.coder import provider
+
+    monkeypatch.setattr(config, "settle", provider.settle)
+    monkeypatch.setattr(provider, "reachable", lambda name, host: name in reachable)
+
+
+def test_an_unserved_default_falls_back_to_one_that_is_running(home, project, monkeypatch):
+    # A machine that has only ever run Ollama should not have its first session
+    # fail against a server it was never told to start.
+    served(monkeypatch, "ollama")
+    args = build_agent_parser().parse_args(["--cwd", str(project)])
+    settings = config.load(project)
+    settings.apply(args)
+
+    assert args.provider == "ollama"
+    assert args.model == "qwen2.5-coder:14b" and "11434" in args.host
+    assert "running on ollama" in settings.notice
+
+
+def test_a_default_that_is_serving_is_left_alone(home, project, monkeypatch):
+    served(monkeypatch, "local", "ollama")
+    args = build_agent_parser().parse_args(["--cwd", str(project)])
+    settings = config.load(project)
+    settings.apply(args)
+
+    assert args.provider == "local" and settings.notice == ""
+
+
+def test_a_backend_named_on_the_command_line_never_falls_back(home, project, monkeypatch):
+    # Quietly answering with a different model than the one somebody typed is
+    # the worse failure. `--provider local` against a dead server is an error.
+    served(monkeypatch, "ollama")
+    args = build_agent_parser().parse_args(["--provider", "local", "--cwd", str(project)])
+    settings = config.load(project)
+    settings.apply(args)
+
+    assert args.provider == "local" and settings.notice == ""
+
+
+def test_a_backend_written_in_a_config_file_never_falls_back(home, project, monkeypatch):
+    served(monkeypatch, "ollama")
+    write(home, provider="local")
+    args = build_agent_parser().parse_args(["--cwd", str(project)])
+    settings = config.load(project)
+    settings.apply(args)
+
+    assert args.provider == "local" and settings.notice == ""
+
+
+def test_with_nothing_serving_the_session_stays_on_what_was_configured(home, project, monkeypatch):
+    # Staying put keeps the error about the thing that was actually configured,
+    # and `coder doctor` explains it.
+    served(monkeypatch)
+    args = build_agent_parser().parse_args(["--cwd", str(project)])
+    settings = config.load(project)
+    settings.apply(args)
+
+    assert args.provider == "local" and settings.notice == ""

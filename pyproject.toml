@@ -61,8 +61,15 @@ packages = ["bkht"]
 testpaths = ["tests"]
 pythonpath = ["tests"]
 markers = [
-    "live: requires a reachable Ollama server",
+    "live: requires a reachable model server, and is deselected by default",
 ]
+# The live tests drive a real model, and they are not slightly slower -- a bare
+# `pytest` that collects them takes 46 minutes against 9 seconds without them,
+# and 45 of those minutes are five tests. A suite nobody can afford to run
+# before a commit is a suite that stops being run, so the default is the fast
+# arm and the slow one is asked for: `pytest -m live`. Nothing is skipped
+# silently -- pytest reports the deselected count on every run.
+addopts = ["-m", "not live"]
 
 [tool.ruff]
 target-version = "py312"

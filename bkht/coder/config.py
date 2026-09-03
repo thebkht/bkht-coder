@@ -36,6 +36,7 @@ from pathlib import Path
 
 from .agent import MAX_ITERATIONS
 from .permissions import ASK, AUTO, MODES, PLAN
+from .provider import settle
 from .provider import (
     BACKENDS,
     DEFAULTS,
@@ -225,6 +226,11 @@ class Settings:
     sources: dict = field(default_factory=dict)
     #: What could not be read, ready to print. Empty when everything loaded.
     error: str = ""
+    #: A sentence about a decision this resolution made on the user's behalf --
+    #: today, only falling back from an unserved default. Separate from
+    #: ``error`` because nothing went wrong: the session is starting, and this
+    #: says on what.
+    notice: str = ""
 
     def __getattr__(self, name: str):
         # Only reached for attributes the dataclass does not define, so the
@@ -259,9 +265,19 @@ class Settings:
         # `--provider` is resolved first, and it moves the three settings whose
         # meaning depends on it. Otherwise `--provider claude-code` would run
         # Claude Code against the model tag the config file picked for Ollama.
-        if getattr(args, "provider", "missing") is None:
+        typed = getattr(args, "provider", "missing")
+        if typed is None:
             args.provider = self.values["provider"]
         chosen = getattr(args, "provider", self.values["provider"])
+
+        # Nobody named this backend -- not on the command line, not in either
+        # config file. That is the one case where finding nothing at the other
+        # end is worth answering rather than failing on: a machine that has only
+        # ever run Ollama should not have its first session fail against a
+        # server it was never told to start.
+        if typed is None and self.source("provider") == DEFAULT:
+            chosen, self.notice = settle(chosen, self.values["host"])
+            args.provider = chosen
         follows = {
             key: value
             for key, value in DEFAULTS.get(chosen, {}).items()

@@ -404,6 +404,54 @@ DEFAULTS = {
 }
 
 
+#: Where a backend's fallback goes when nothing is serving it. Only the
+#: built-in default has one: a backend the user asked for by name must fail
+#: loudly, because silently running a different model than the one somebody
+#: typed is worse than not running.
+FALLBACK = {"local": "ollama"}
+
+
+def reachable(name: str, host: str) -> bool:
+    """Whether ``name`` has something answering at ``host`` right now.
+
+    Cheap and forgiving. It runs before every default session, so it is one
+    request with a short timeout, and anything that goes wrong is False --
+    which sends the caller to the fallback, and the fallback is the safe answer
+    to every one of those cases.
+    """
+    try:
+        return build(name, host=host).available()
+    except (ProviderError, TypeError, ValueError):
+        return False
+
+
+def settle(name: str, host: str) -> tuple[str, str]:
+    """The backend to actually run, and a sentence when it is not ``name``.
+
+    The default is `local`, which is right for a machine serving a model it
+    trained and wrong for one that has only ever run Ollama -- and a first
+    session that fails to connect teaches nothing except that this does not
+    work. So when nothing answers on the default endpoint and Ollama does, the
+    session runs on Ollama and says so.
+
+    Only reached for a backend nobody named. `--provider local` against a dead
+    server is an error, and it stays one: quietly answering with a different
+    model than the one somebody asked for is the worse failure.
+    """
+    alternative = FALLBACK.get(name)
+    if alternative is None or reachable(name, host):
+        return name, ""
+    if not reachable(alternative, DEFAULTS[alternative]["host"]):
+        # Neither is up. Staying on the default keeps the error about the thing
+        # that was actually configured, and `coder doctor` explains it.
+        return name, ""
+    return alternative, (
+        f"Nothing is serving on {host}, so this session is running on "
+        f"{alternative}. Start a server there, or pin one with "
+        f"`coder config set provider {alternative}`."
+    )
+
+
 def build(name: str = DEFAULT_PROVIDER, **options) -> Provider:
     """The provider called ``name``, constructed with ``options``."""
     loader = BACKENDS.get(name)

@@ -455,6 +455,12 @@ def configured(args):
     if settings.error:
         print(paint(settings.error, YELLOW, sys.stderr), file=sys.stderr)
     settings.apply(args)
+    # Said out loud, always. Resolution may have moved the session onto a
+    # different backend than the default names, and a session running a model
+    # the user did not pick is exactly the case where the next surprise has no
+    # explanation attached to it.
+    if settings.notice:
+        print(paint(settings.notice, YELLOW, sys.stderr), file=sys.stderr)
     return args
 
 

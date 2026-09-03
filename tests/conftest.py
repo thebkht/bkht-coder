@@ -21,6 +21,23 @@ def default_output_budget():
     set_output_budget(0)
 
 
+@pytest.fixture(autouse=True)
+def no_backend_probe(monkeypatch):
+    """Answer the default-backend probe without asking the network.
+
+    Resolving a provider nobody named asks whether anything is serving on the
+    default endpoint. That is right for a session and wrong for a suite: the
+    answer would depend on what happens to be running on the machine, so the
+    same test would pass on a laptop with Ollama up and fail on CI.
+
+    Stubbed to "the configured backend, no notice", which is the shape every
+    test but the fallback's own expects. Those override it.
+    """
+    monkeypatch.setattr(
+        "bkht.coder.config.settle", lambda name, host: (name, "")
+    )
+
+
 @pytest.fixture
 def workspace(tmp_path: Path) -> Workspace:
     """An empty workspace rooted at a temp directory."""
