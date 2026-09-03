@@ -9,6 +9,22 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ## [Unreleased]
 
+### Added
+
+- `scripts/benchmark.py` -- what a turn costs, per task: seconds, iterations,
+  tool calls and how it stopped, with `--out` to save a run and `--compare` to
+  put two of them side by side. All of it was already recorded; `Outcome`
+  carries every field and every turn writes one to the session file, and
+  nothing read them back. Until something did, a change to what the model is
+  sent could only be argued about.
+
+  The backend is whatever a session would use unless one is named, so it
+  measures what the user runs, fallback included. The tasks are read-only,
+  which is the one place this differs from `training/generate.py`: a task that
+  edits the tree leaves a different repository behind than it found, so the
+  second run of a comparison is not measuring the same work as the first, and
+  the change under test gets credit or blame that belongs to the edit.
+
 ### Changed
 
 - `grep` handed a glob where a path goes now says which argument the pattern
