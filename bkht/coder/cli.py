@@ -283,6 +283,10 @@ def add_common_arguments(parser) -> None:
     parser.add_argument("--auto", action="store_true", default=None, help="Allow every tool call without prompting.")
     parser.add_argument("--no-instructions", action="store_true", default=None, help="Ignore AGENTS.md and CLAUDE.md.")
     parser.add_argument("--no-skills", action="store_true", default=None, help="Ignore skills, and omit the skill tool.")
+    # Common rather than agent-only so `doctor` is handed the configured value
+    # and can report what would run -- the check exists to be read before a
+    # turn, not only during one.
+    parser.add_argument("--verify-command", default=None, metavar="CMD", help="Test command to run after a turn's edits.")
 
 
 def add_agent_arguments(parser) -> None:
@@ -299,6 +303,7 @@ def add_agent_arguments(parser) -> None:
     parser.add_argument("--no-scout", action="store_true", default=None, help="Do not search the workspace before each task.")
     parser.add_argument("--no-planning", action="store_true", default=None, help="Omit the plan tool.")
     parser.add_argument("--no-delegation", action="store_true", default=None, help="Omit the task tool, which runs a sub-agent.")
+    parser.add_argument("--no-verify", action="store_true", default=None, help="Do not run verify_command after a turn.")
     parser.add_argument("--max-iterations", type=int, default=None, help="Cap on loop iterations per task.")
     add_common_arguments(parser)
 
@@ -613,6 +618,14 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
         permissions=permissions,
         max_iterations=args.max_iterations,
         scout_root=None if getattr(args, "no_scout", False) else workspace.root,
+        # Two switches over one behaviour, and both have to be off for nothing
+        # to run: --no-verify keeps a configured command written down while
+        # turning it off for this session.
+        verify_command=(
+            "" if getattr(args, "no_verify", False)
+            else getattr(args, "verify_command", "") or ""
+        ),
+        verify_root=workspace.root,
     )
     return agent, snapshots, permissions, workspace, jobs, announced
 
@@ -1078,7 +1091,9 @@ def main(argv: list[str] | None = None) -> int:
         return doctor.report(
             Path(args.cwd).expanduser().resolve(),
             model=args.model, host=args.host, num_ctx=args.num_ctx,
-            provider=args.provider, as_json=args.json,
+            provider=args.provider,
+            verify_command=getattr(args, "verify_command", "") or "",
+            as_json=args.json,
         )
 
     args = build_agent_parser().parse_args(argv)

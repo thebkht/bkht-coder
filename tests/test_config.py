@@ -242,7 +242,8 @@ def namespace(**overrides):
     values = dict(
         provider=None, model=None, host=None, num_ctx=None, temperature=None,
         max_iterations=None, no_scout=None, no_instructions=None, no_skills=None,
-        no_planning=None, no_delegation=None, auto=None, plan=None,
+        no_planning=None, no_delegation=None, no_verify=None, verify_command=None,
+        auto=None, plan=None,
     )
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -637,3 +638,43 @@ def test_with_nothing_serving_the_session_stays_on_what_was_configured(home, pro
     settings.apply(args)
 
     assert args.provider == "local" and settings.notice == ""
+
+
+# --- the verify command -----------------------------------------------------
+
+
+def test_nothing_runs_after_an_edit_until_a_command_is_written_down(home, project):
+    # The empty default is the safety. Everything about running a command here
+    # rests on it being one the user chose.
+    args = namespace()
+    config.load(project).apply(args)
+    assert args.verify_command == ""
+    assert args.no_verify is False
+
+
+def test_a_configured_command_reaches_the_flag(home, project):
+    write(home, verify_command="pytest -q")
+    args = namespace()
+    config.load(project).apply(args)
+    assert args.verify_command == "pytest -q"
+
+
+def test_verify_command_is_the_one_text_setting_that_may_be_empty(home, project):
+    # Every other one refuses: an empty model or host is a session that cannot
+    # start. Empty is exactly how this one says "run nothing", and a setting
+    # whose off position cannot be typed can only be turned off by unsetting it.
+    assert config.parse("verify_command", "") == ""
+    with pytest.raises(ConfigError):
+        config.parse("model", "")
+    with pytest.raises(ConfigError):
+        config.parse("host", "  ")
+
+
+def test_turning_verify_off_leaves_the_command_written_down(home, project):
+    # Two switches over one behaviour: --no-verify is for this session, and it
+    # must not cost the user the command they configured.
+    write(home, verify_command="pytest -q", verify=False)
+    args = namespace()
+    config.load(project).apply(args)
+    assert args.no_verify is True
+    assert args.verify_command == "pytest -q"

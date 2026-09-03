@@ -516,3 +516,38 @@ def test_the_update_check_sends_a_checkout_to_git_pull(monkeypatch, tmp_path):
 
     check = doctor.check_update(tmp_path)
     assert check.status == OK and "git pull" in check.detail
+
+
+# --- the verify check -------------------------------------------------------
+
+
+def test_a_configured_command_is_reported(tmp_path):
+    check = doctor.check_verify(tmp_path, "pytest -q")
+    assert check.status == doctor.OK
+    assert "pytest -q" in check.detail
+    assert not check.fix
+
+
+def test_an_unset_command_suggests_one_and_says_how_to_set_it(tmp_path):
+    # The suggestion is why this check exists. Without somewhere that says out
+    # loud what this project looks like, the feature is one nobody finds.
+    (tmp_path / "pyproject.toml").write_text("")
+    (tmp_path / "tests").mkdir()
+    check = doctor.check_verify(tmp_path)
+
+    assert check.status == doctor.OK
+    assert "not set" in check.detail
+    assert "coder config set verify_command" in check.fix
+    assert "pytest -q" in check.fix
+
+
+def test_a_project_with_no_signal_is_not_offered_a_guess(tmp_path):
+    check = doctor.check_verify(tmp_path)
+    assert check.status == doctor.OK
+    assert not check.fix
+
+
+def test_an_unset_command_never_fails_the_report(tmp_path):
+    # Not configuring it is a choice, not a broken install, and `doctor`'s exit
+    # status is what CI reads.
+    assert not doctor.check_verify(tmp_path).failed

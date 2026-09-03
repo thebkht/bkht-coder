@@ -84,6 +84,13 @@ class Field:
     #: Whether a running session can adopt a new value. The ones that cannot are
     #: baked into the provider or the system prompt before the first turn.
     live: bool = True
+    #: Whether empty is a value this setting can hold. For nearly every text
+    #: setting it is not -- an empty model or host is a session that cannot
+    #: start, and refusing it puts the error on the keystroke. `verify_command`
+    #: is the exception, because empty is precisely how it says "run nothing",
+    #: and a setting whose off position cannot be typed can only be turned off
+    #: with `config unset`.
+    blank: bool = False
 
 
 FIELDS: tuple[Field, ...] = (
@@ -102,6 +109,11 @@ FIELDS: tuple[Field, ...] = (
     # much as to anything else, so both are turned off from one line.
     Field("planning", "bool", True, "Offer the plan tool.", live=False),
     Field("delegation", "bool", True, "Offer the task tool, which runs a sub-agent.", live=False),
+    # Empty by default, and that is the safety: nothing is ever run until the
+    # user writes down what to run. `doctor` suggests a command; it never
+    # becomes this value on its own.
+    Field("verify_command", "str", "", "Test command to run after a turn's edits.", blank=True),
+    Field("verify", "bool", True, "Run verify_command after a turn that changed files."),
     # The one setting that governs a request leaving this machine. Not live:
     # the check is started once, before the first turn.
     Field("update_check", "bool", True, "Check for a new release once a day.", live=False),
@@ -145,7 +157,7 @@ def _coerce(spec: Field, raw: object) -> object:
     if not isinstance(raw, str):
         raise ConfigError(f"{spec.name} must be text; got {raw!r}.")
     text = raw.strip()
-    if not text:
+    if not text and not spec.blank:
         raise ConfigError(f"{spec.name} cannot be empty.")
     return text
 
@@ -284,7 +296,8 @@ class Settings:
             if self.source(key) == DEFAULT
         }
 
-        for name in ("model", "host", "num_ctx", "temperature", "max_iterations"):
+        for name in ("model", "host", "num_ctx", "temperature", "max_iterations",
+                     "verify_command"):
             if getattr(args, name, "missing") is None:
                 setattr(args, name, follows.get(name, self.values[name]))
 
@@ -293,6 +306,7 @@ class Settings:
         for name, dest in (
             ("scout", "no_scout"), ("instructions", "no_instructions"), ("skills", "no_skills"),
             ("planning", "no_planning"), ("delegation", "no_delegation"),
+            ("verify", "no_verify"),
         ):
             if getattr(args, dest, "missing") is None:
                 setattr(args, dest, not self.values[name])

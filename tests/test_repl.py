@@ -493,3 +493,16 @@ def test_context_says_nothing_about_a_plan_that_does_not_exist(repl):
     r, lines = repl
     r.dispatch("/context")
     assert "plan  " not in "\n".join(lines)
+
+
+def test_context_says_what_runs_after_an_edit(repl):
+    r, lines = repl
+    r.agent.verify_command = "pytest -q"
+    r.dispatch("/context")
+    assert "verify     pytest -q" in "\n".join(lines)
+
+
+def test_context_says_off_when_no_command_is_configured(repl):
+    r, lines = repl
+    r.dispatch("/context")
+    assert "verify     off" in "\n".join(lines)

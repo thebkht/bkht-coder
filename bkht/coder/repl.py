@@ -249,6 +249,8 @@ class Repl:
         self.out(f"  session    {session.path or 'not saved'}")
         self.out(f"  undo depth {len(self.snapshots)}")
         self.out(f"  scout      {'on' if self.agent.scout_root else 'off'}")
+        command = getattr(self.agent, "verify_command", "")
+        self.out(f"  verify     {command or 'off'}")
         # The plan is not in the message count above -- it rides alongside the
         # history rather than in it -- so /context would otherwise be the one
         # place that claims to say what is being sent and does not.

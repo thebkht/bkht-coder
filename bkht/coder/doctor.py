@@ -26,6 +26,7 @@ from .provider import DEFAULT_PROVIDER, ProviderError, build
 from .session import STATE_DIR
 from .skills import discover as discover_skills
 from .tools.shell import resolve_shell
+from . import verify
 
 #: The two backends that are an HTTP server this machine can be asked about,
 #: named because the checks differ between them and neither is "the default".
@@ -632,6 +633,28 @@ def check_skills(root: Path) -> Check:
     return Check("skills", OK, ", ".join(skill.name for skill in found.skills))
 
 
+def check_verify(root: Path, command: str = "") -> Check:
+    """What runs after a turn's edits, or what could.
+
+    The suggestion is the whole reason this check exists. `verify_command` is
+    empty by default and nothing infers its way into it, so without somewhere
+    that says out loud "this project looks like `pytest -q`, here is how to
+    turn it on", the feature is one nobody discovers.
+    """
+    command = command.strip()
+    if command:
+        return Check("verify", OK, f"`{command}` after a turn that edits files")
+
+    suggestion = verify.detect(root)
+    if not suggestion:
+        return Check("verify", OK, "not set; no test command runs after an edit")
+    return Check(
+        "verify", OK, "not set; no test command runs after an edit",
+        f"This project looks like `{suggestion}` -- "
+        f"`coder config set verify_command '{suggestion}'` to check edits with it.",
+    )
+
+
 def check_workspace(root: Path) -> Check:
     """Where the agent has been pointed, when that is somewhere too big.
 
@@ -788,6 +811,7 @@ def run_checks(
     host: str = DEFAULT_HOST,
     num_ctx: int = DEFAULT_NUM_CTX,
     provider: str = DEFAULT_PROVIDER,
+    verify_command: str = "",
 ) -> list[Check]:
     """Every check, in the order a failing install should be read in.
 
@@ -805,6 +829,7 @@ def run_checks(
         check_state_dir(),
         check_instructions(root),
         check_skills(root),
+        check_verify(root, verify_command),
     ]
 
 
@@ -833,11 +858,15 @@ def report(
     host: str = DEFAULT_HOST,
     num_ctx: int = DEFAULT_NUM_CTX,
     provider: str = DEFAULT_PROVIDER,
+    verify_command: str = "",
     as_json: bool = False,
     out=print,
 ) -> int:
     """Run every check and print it. Non-zero exit when one failed, for CI."""
-    checks = run_checks(root, model=model, host=host, num_ctx=num_ctx, provider=provider)
+    checks = run_checks(
+        root, model=model, host=host, num_ctx=num_ctx, provider=provider,
+        verify_command=verify_command,
+    )
     out(json.dumps([c.payload() for c in checks], indent=2) if as_json else render(checks))
     return 1 if any(check.failed for check in checks) else 0
 

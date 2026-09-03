@@ -80,6 +80,8 @@ Flags:
   --no-scout              Do not search the workspace before each task
   --no-planning           Omit the plan tool
   --no-delegation         Omit the task tool, which runs a sub-agent
+  --verify-command <cmd>  Test command to run after a turn's edits
+  --no-verify             Do not run it for this session
   --max-iterations <n>    Cap on loop iterations per task
 {COMMON}
   -h, --help              Display this help and exit
@@ -149,6 +151,8 @@ Settings:
   skills                  Load skills, and offer the skill tool
   planning                Offer the plan tool
   delegation              Offer the task tool, which runs a sub-agent
+  verify_command          Test command run after a turn's edits; off by default
+  verify                  Run verify_command after a turn that changed files
   update_check            Ask once a day whether a newer release exists
 
 Flags:
