@@ -9,6 +9,32 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ## [Unreleased]
 
+### Changed
+
+- A bare `pytest` no longer runs the live tests. The `live` marker already
+  existed and was already applied; what was missing was a default, so the
+  command CONTRIBUTING tells you to run before a commit collected the model-
+  backed suite along with everything else. `pytest -m live` runs them, and
+  pytest reports the deselected count on every run, so nothing is skipped
+  quietly.
+
+### Measured
+
+Three full runs of the old default, on `qwen2.5-coder:14b`: **41, 46 and 49
+minutes**. The same tree with the live tests deselected: **9.1 seconds**, 1372
+passed. Coverage is identical -- 11 tests moved from "run by default" to "run
+on request", and the slowest test remaining in the default arm takes 1.0 s.
+
+Where the 46 minutes went, from `--durations`:
+
+    1118s  test_review_corpus.py::test_recall_on_planted_bugs
+     787s  test_review_corpus.py::test_precision_on_clean_code
+     297s  test_live.py::test_reads_the_file_instead_of_asking_for_it
+     222s  test_live.py::test_fixes_a_real_bug_and_the_fixed_code_runs
+     171s  test_live.py::test_answers_a_question_by_reading_the_code
+
+Five tests, 45 of the 46 minutes.
+
 ## [0.4.0] - 2026-09-03
 
 ### Added
