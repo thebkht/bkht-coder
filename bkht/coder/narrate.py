@@ -55,6 +55,19 @@ def intent(call: ToolCall) -> str:
     if call.name == "bash":
         command = arguments.get("command")
         return f"Running {_short(command)}" if command else "Running a command"
+    if call.name == "plan":
+        # `done` first: a call carrying both is a step finished and the list
+        # revised in one go, and the finished step is the news.
+        done = arguments.get("done")
+        if done is not None:
+            return f"Ticking off step {done}"
+        steps = arguments.get("steps")
+        if isinstance(steps, list) and steps:
+            return f"Writing a plan, {_count(len(steps), 'step')}"
+        return "Planning"
+    if call.name == "task":
+        instruction = arguments.get("instruction")
+        return f"Delegating: {_short(instruction)}" if instruction else "Delegating a task"
 
     # An unknown tool -- a future one, or one a model invented -- still gets a
     # sentence rather than nothing.
@@ -95,6 +108,15 @@ def outcome(call: ToolCall, content: str) -> str:
         return _count(len(lines), "line")
     if call.name == "read_file":
         return _count(len(lines), "line")
+    if call.name == "plan":
+        # The list itself is printed underneath by `checklist`; this is the
+        # one-line version, for the count beside the call.
+        for line in reversed(lines):
+            if line.strip().endswith("done."):
+                return line.strip().rstrip(".")
+        return ""
+    if call.name == "task":
+        return f"{_count(len(lines), 'line')} back"
 
     # Everything else: its own first line if that is the whole of it, and a
     # count when it is not. `edit_file` and `write_file` answer in a sentence;
@@ -103,3 +125,21 @@ def outcome(call: ToolCall, content: str) -> str:
     if len(lines) == 1:
         return first if len(first) <= SUMMARY_LIMIT else _count(len(first), "character")
     return _count(len(lines), "line")
+
+
+def checklist(content: str) -> list[str]:
+    """The plan's own rows, pulled back out of a `plan` result.
+
+    Printed in full rather than counted. A plan is the one tool result worth
+    showing the user verbatim: it is four short lines, it is what the agent
+    believes it is doing, and a session where the model has quietly rewritten
+    it into something else is exactly what a reader needs to be able to see.
+    """
+    rows = []
+    for line in _lines(content):
+        stripped = line.strip()
+        # `1. [x] text` -- matched on the tick rather than the number, so a
+        # step whose own text begins with a digit cannot be mistaken for one.
+        if "[x]" in stripped[:8] or "[ ]" in stripped[:8]:
+            rows.append(stripped)
+    return rows

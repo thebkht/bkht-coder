@@ -83,3 +83,42 @@ def test_a_long_single_line_becomes_a_count():
 
 def test_nothing_at_all_says_so():
     assert narrate.outcome(call("bash"), "") == "nothing"
+
+
+# --- plan and task ----------------------------------------------------------
+
+
+def test_a_plan_call_says_which_way_it_is_going():
+    assert narrate.intent(ToolCall("plan", {"steps": ["a", "b"]})) == "Writing a plan, 2 steps"
+    assert narrate.intent(ToolCall("plan", {"done": 2})) == "Ticking off step 2"
+    # Both at once is a step finished and the list revised in one go, and the
+    # finished step is the news.
+    assert narrate.intent(ToolCall("plan", {"done": 1, "steps": ["a"]})) == "Ticking off step 1"
+    assert narrate.intent(ToolCall("plan", {})) == "Planning"
+
+
+def test_a_task_call_names_what_was_delegated():
+    said = narrate.intent(ToolCall("task", {"instruction": "summarise review/ci.py"}))
+    assert said == "Delegating: summarise review/ci.py"
+    assert narrate.intent(ToolCall("task", {})) == "Delegating a task"
+
+
+def test_a_plan_result_is_summarised_by_its_progress():
+    content = "Plan set, 2 steps. \n1. [x] one\n2. [ ] two\n\n1/2 done."
+    assert narrate.outcome(ToolCall("plan", {}), content) == "1/2 done"
+
+
+def test_the_checklist_is_pulled_back_out_of_a_plan_result():
+    content = "Ticked step 1: one \n1. [x] one\n2. [ ] two\n\n1/2 done."
+    assert narrate.checklist(content) == ["1. [x] one", "2. [ ] two"]
+
+
+def test_prose_that_merely_mentions_a_box_is_not_a_checklist_row():
+    # Matched on the tick near the start of the line, so an answer discussing
+    # `[ ]` in the middle of a sentence does not get printed as a plan.
+    assert narrate.checklist("the syntax is a pair of brackets, [ ], written so") == []
+
+
+def test_a_delegated_answer_is_counted_not_quoted():
+    said = narrate.outcome(ToolCall("task", {}), "one\ntwo\nthree")
+    assert said == "3 lines back"

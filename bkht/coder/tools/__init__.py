@@ -23,7 +23,13 @@ __all__ = [
 
 
 def build_registry(
-    root: Path | str, read_only: bool = False, snapshots=None, skills=None, jobs=None
+    root: Path | str,
+    read_only: bool = False,
+    snapshots=None,
+    skills=None,
+    jobs=None,
+    session=None,
+    delegate=None,
 ) -> tuple[Registry, Workspace]:
     """Build the tool set for a workspace rooted at ``root``.
 
@@ -32,6 +38,13 @@ def build_registry(
     is omitted for the same reason when a workspace has none: no skills, no
     ``skill`` tool, and a tool set byte-for-byte what it was before skills
     existed.
+
+    ``session`` and ``delegate`` follow that same rule, and are why a sub-agent
+    gets neither ``plan`` nor ``task``: the first is offered only to a loop that
+    has a session to write a plan onto, the second only when a provider is
+    handed in to run it with. A nested registry is built with neither, so a
+    delegated task cannot delegate, and cannot rewrite the plan of the turn that
+    delegated to it.
     """
     workspace = Workspace(Path(root))
     registry = Registry()
@@ -60,6 +73,18 @@ def build_registry(
         from .skills import register_skill_tool
 
         register_skill_tool(registry, skills)
+
+    # Registered before the mutating tools, so it is offered in plan mode too:
+    # producing a plan is the whole of what plan mode is for.
+    if session is not None:
+        from .plan import register_plan_tool
+
+        register_plan_tool(registry, session)
+
+    if delegate is not None:
+        from .task import register_task_tool
+
+        register_task_tool(registry, root, **delegate)
 
     if not read_only:
         from .fs import register_write_tools
