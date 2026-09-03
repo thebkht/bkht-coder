@@ -25,8 +25,17 @@ from .parsing import ToolCall, parse_tool_calls, strip_json
 
 #: The backend a session runs on unless it is told otherwise. Local, because
 #: that is the promise this project makes; the others are opt-in.
-DEFAULT_PROVIDER = "ollama"
+#:
+#: An OpenAI-compatible server rather than Ollama, because a fine-tune trained
+#: on this machine is served by `mlx_lm.server` and Ollama cannot host it
+#: without being taught about it first. The promise is unchanged: `local`
+#: points at localhost by default, and the weights stay on hardware the user
+#: owns. Ollama remains fully supported -- it stopped being the default, not
+#: the recommendation for anyone running a stock model.
+DEFAULT_PROVIDER = "local"
 
+#: Ollama's own defaults. Named for it specifically, because they are no longer
+#: the defaults of the program -- `DEFAULTS` below decides that per backend.
 DEFAULT_HOST = "http://localhost:11434"
 DEFAULT_MODEL = "qwen2.5-coder:14b"
 # Measured on a 16 GB M-series machine with qwen2.5-coder:14b (Q4, ~9 GB of
@@ -55,6 +64,13 @@ DEFAULT_NUM_CTX = 16384
 # Ollama's own default is 2048, which silently truncates instead of erroring.
 # Anything at or below it is a misconfiguration rather than a small window.
 MIN_USEFUL_NUM_CTX = 4096
+
+#: Where `mlx_lm.server` and llama.cpp's `llama-server` both listen, and the
+#: name a server hosting exactly one model ignores. Declared here rather than
+#: in ``openai`` so that ``DEFAULTS`` can name them without importing the
+#: module -- naming a backend is what loads it, and that is worth keeping.
+OPENAI_HOST = "http://localhost:8080"
+OPENAI_MODEL = "coder"
 
 # Ollama's default is 0.8. That is a reasonable setting for prose and a poor one
 # here: every tool call is a JSON object that has to be exactly right, and the
@@ -324,6 +340,22 @@ class OllamaProvider:
             return False
         return True
 
+    def deterministic(self) -> "OllamaProvider":
+        """A copy of this provider that samples at zero; see :func:`for_review`."""
+        return OllamaProvider(
+            model=self.model,
+            host=self.host,
+            num_ctx=self.num_ctx,
+            temperature=0.0,
+            keep_alive=self.keep_alive,
+        )
+
+
+def _local():
+    from .openai import OpenAIProvider
+
+    return OpenAIProvider
+
 
 def _ollama():
     return OllamaProvider
@@ -346,7 +378,12 @@ def _codex():
 #: The values are loaders rather than classes so that naming a backend is what
 #: imports it. The error for a name that is not here lists what is, rather than
 #: failing at the first turn.
-BACKENDS = {"ollama": _ollama, "claude-code": _claude_code, "codex": _codex}
+BACKENDS = {
+    "local": _local,
+    "ollama": _ollama,
+    "claude-code": _claude_code,
+    "codex": _codex,
+}
 
 #: The defaults that depend on which backend is running.
 #:
@@ -356,6 +393,9 @@ BACKENDS = {"ollama": _ollama, "claude-code": _claude_code, "codex": _codex}
 #: the user has not set themselves, which is what makes switching one command
 #: rather than four. An empty host means "wherever the backend goes by default".
 DEFAULTS = {
+    "local": {
+        "model": OPENAI_MODEL, "host": OPENAI_HOST, "num_ctx": DEFAULT_NUM_CTX,
+    },
     "ollama": {"model": DEFAULT_MODEL, "host": DEFAULT_HOST, "num_ctx": DEFAULT_NUM_CTX},
     "claude-code": {
         "model": DEFAULT_CLAUDE_CODE_MODEL, "host": "", "num_ctx": CLAUDE_CODE_NUM_CTX,
@@ -380,15 +420,12 @@ def for_review(provider: Provider) -> Provider:
     Review is a measurement, not a conversation. At the default temperature the
     same diff yields findings on one run and an empty array on the next, which
     makes recall and precision unusable as a metric -- a prompt change and a
-    dice roll look identical. Anything that is not an OllamaProvider is
-    returned unchanged, so fakes and future backends still work.
+    dice roll look identical.
+
+    Asked of the provider rather than decided here by type. A backend that can
+    turn sampling off says so by offering ``deterministic``; one that cannot --
+    a fake, or a frontier model behind somebody else's command line -- is
+    returned unchanged, which is the only honest thing to do about it.
     """
-    if not isinstance(provider, OllamaProvider):
-        return provider
-    return OllamaProvider(
-        model=provider.model,
-        host=provider.host,
-        num_ctx=provider.num_ctx,
-        temperature=0.0,
-        keep_alive=provider.keep_alive,
-    )
+    pin = getattr(provider, "deterministic", None)
+    return pin() if callable(pin) else provider

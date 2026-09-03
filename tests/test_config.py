@@ -360,7 +360,7 @@ def test_config_list_says_where_each_value_came_from(home, project, capsys):
 
 def test_config_json_is_machine_readable(home, project, capsys):
     _, out, _ = coder(capsys, "config", "--json", "--cwd", str(project))
-    assert json.loads(out)["provider"] == {"value": "ollama", "source": "default"}
+    assert json.loads(out)["provider"] == {"value": "local", "source": "default"}
 
 
 def test_config_unset_falls_back_to_the_layer_below(home, project, capsys):

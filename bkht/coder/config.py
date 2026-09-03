@@ -39,8 +39,6 @@ from .permissions import ASK, AUTO, MODES, PLAN
 from .provider import (
     BACKENDS,
     DEFAULTS,
-    DEFAULT_HOST,
-    DEFAULT_MODEL,
     DEFAULT_NUM_CTX,
     DEFAULT_PROVIDER,
     DEFAULT_TEMPERATURE,
@@ -56,6 +54,14 @@ DEFAULT = "default"
 GLOBAL = "global"
 WORKSPACE = "workspace"
 SCOPES = (GLOBAL, WORKSPACE)
+
+#: What the program defaults to, which is the default *backend's* model and
+#: server rather than any one server's. Read from the same table
+#: ``_follow_provider`` uses, so the declared default and the effective one
+#: cannot drift apart -- before this they could, and `coder config` would show
+#: a model the session was not running.
+DEFAULT_MODEL = DEFAULTS[DEFAULT_PROVIDER]["model"]
+DEFAULT_HOST = DEFAULTS[DEFAULT_PROVIDER]["host"]
 
 #: The highest temperature Ollama accepts as meaningful. Above this the model
 #: is not sampling, it is guessing, and every tool call it emits is malformed.
@@ -82,9 +88,9 @@ class Field:
 FIELDS: tuple[Field, ...] = (
     Field("provider", "str", DEFAULT_PROVIDER, f"Model backend: {', '.join(sorted(BACKENDS))}.", live=False),
     Field("model", "str", DEFAULT_MODEL, "Model to run."),
-    Field("host", "str", DEFAULT_HOST, "Server URL."),
+    Field("host", "str", DEFAULT_HOST, "Model server URL."),
     Field("num_ctx", "int", DEFAULT_NUM_CTX, "Context window to plan for."),
-    Field("temperature", "float", DEFAULT_TEMPERATURE, "Sampling temperature (Ollama only)."),
+    Field("temperature", "float", DEFAULT_TEMPERATURE, "Sampling temperature; low keeps tool calls valid."),
     Field("mode", "str", ASK, f"Permission mode: {', '.join(MODES)}."),
     Field("scout", "bool", True, "Search the workspace before each task."),
     Field("max_iterations", "int", MAX_ITERATIONS, "Cap on loop iterations per task."),

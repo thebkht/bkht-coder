@@ -303,7 +303,7 @@ def test_colour_is_switched_off_so_the_stream_stays_parseable(spawn):
 
 
 def test_both_tools_can_be_named_as_providers():
-    assert sorted(BACKENDS) == ["claude-code", "codex", "ollama"]
+    assert sorted(BACKENDS) == ["claude-code", "codex", "local", "ollama"]
     assert isinstance(build("claude-code"), ClaudeCodeProvider)
     assert isinstance(build("codex"), CodexProvider)
 
