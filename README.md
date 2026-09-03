@@ -935,6 +935,65 @@ name collection is deliberately over-inclusive — it currently reports nothing
 across this repository's own source, which is the bar. One false alarm is enough
 to teach everybody to ignore the next true one.
 
+### Running the tests you already run
+
+The paragraph above declines to execute the model's new code. That refusal is
+about the module just written — but *your* test command is a different
+proposition. It is a command you chose, wrote down, and already run by hand;
+the agent running it is not the agent deciding what to run.
+
+```sh
+coder config set verify_command "pytest -q"     # nothing runs until you do this
+```
+
+After that, a turn that changed a file runs it before it answers, and a failure
+goes back as a tool result the model corrects from — the same path a malformed
+tool call takes:
+
+```
+● write_file(mathy.py)
+  Wrote 6 lines
+● running python3 -m pytest -q
+● python3 -m pytest -q failed (exit 1)
+● edit_file(mathy.py)
+  Edited
+● running python3 -m pytest -q
+● python3 -m pytest -q passed
+```
+
+The details that keep it cheap:
+
+- **It runs once the model says it is finished**, not after every write. A
+  check inside the edit loop puts the test runner in the iteration budget; this
+  costs one run for a turn that edited, and nothing at all for a turn that only
+  read — which is most of them.
+- **Twice per turn at most.** The first run is the check, the second is the fix
+  being checked. A third would mean handing back a failure the model has already
+  failed to fix once, so instead the second failure asks for an account: say
+  what is still broken and stop. An unfinished fix that names the problem is
+  worth more than a third attempt that runs out of iterations mid-edit.
+- **A timeout is not a failure.** Nothing about "it did not finish in 120s"
+  tells the model what to change, so it ends the turn and is reported to you
+  rather than fed back.
+- **Esc does not reach it.** The interrupt is a flag the main thread reads
+  between bytecodes, and this thread is blocked in `waitpid` for the whole run.
+  That is why the timeout is 120 seconds rather than generous: the bound on how
+  long you wait here is the timeout, not the key. A suite slower than that
+  wants a narrower command — one package, one file.
+
+Nothing is ever inferred into `verify_command`. `coder doctor` will *suggest*
+one from what it sees in the directory, and `--verify-command` sets it for a
+single run, but the whole case for running anything here rests on the command
+being yours:
+
+```
+  ok    verify        not set; no test command runs after an edit
+        This project looks like `pytest -q` -- `coder config set verify_command 'pytest -q'` to check edits with it.
+```
+
+`--no-verify` turns it off for a session without erasing what you configured,
+and `/context` says which it is.
+
 ## How it talks to the model
 
 `qwen2.5-coder:14b` emits tool calls as ordinary message **content** with
