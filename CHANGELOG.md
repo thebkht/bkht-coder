@@ -11,6 +11,49 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ### Added
 
+- **The project's own test command, run over what a turn wrote.** `verify.py`
+  has always argued that running the model's new code to find out whether the
+  model's new code is safe to run is not a check -- it is the thing the check
+  exists to avoid. That holds for the module just written. It does not hold for
+  a command the user chose, wrote down, and already runs by hand: the agent
+  running it is not the agent deciding what to run.
+
+  It runs on the answered path, the one moment a turn is known to have stopped
+  writing. After every write it would put the test runner inside the edit loop
+  and spend the iteration budget on it; here a turn that edited costs one run
+  and a turn that only read costs none, which is most of them. A failure goes
+  back as a tool result the model corrects from -- the same path a malformed
+  call takes -- bounded at two runs, where the first is the check and the second
+  is the fix being checked. The second failure asks for an account rather than a
+  third attempt, because a turn that ends naming the failing test is worth more
+  than one that ends having tried again and run out mid-edit.
+
+  Four outcomes, not two. A timeout and a command that could not start are
+  distinct from a failure: neither says anything the model could act on, so
+  neither is fed back. Esc cannot reach a blocked `waitpid`, which is why the
+  timeout is 120 seconds rather than generous -- what bounds the wait here is
+  the timeout, not the key.
+
+  Nothing runs until `verify_command` is set, and nothing infers its way into
+  it. `doctor` suggests one from a marker file and prints the command that
+  would turn it on; a bare `tests/` directory suggests nothing, because it says
+  a project has tests and not what runs them. `--verify-command` sets it for one
+  run, `--no-verify` turns it off for a session without costing what was
+  configured, and `/context` says which it is.
+
+  Two things came out of running it rather than reasoning about it. A bounded
+  turn never reached the check at all -- it ends through `_final_answer`, and a
+  turn that ran out mid-edit is precisely the one most likely to have left the
+  tests broken; it now runs there too, reported and never fed back. And the
+  "did this turn write anything" flag meant *at some point* rather than *since
+  the last check*, so a model that read a failure, correctly judged it
+  unrelated, and answered without editing paid for a second identical run.
+
+- `verify_command` and `verify` settings. `verify_command` is the one text
+  setting permitted to be empty: for every other one an empty value is a
+  session that cannot start, and refusing it puts the error on the keystroke,
+  but empty is exactly how this one says "run nothing".
+
 - `scripts/benchmark.py` -- what a turn costs, per task: seconds, iterations,
   tool calls and how it stopped, with `--out` to save a run and `--compare` to
   put two of them side by side. All of it was already recorded; `Outcome`
