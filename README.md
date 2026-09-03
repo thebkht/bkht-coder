@@ -1,8 +1,8 @@
 ```
 ⣀⣸⣿⣿⣿⣿⣿⣿     bkht.coder
-⣿⣿⠀⠀⠀⠀⣿⣿     A coding agent on a local Ollama.
+⣿⣿⠀⠀⠀⠀⣿⣿     A coding agent on a model server you control.
 ⣿⣿⠀⠀⠀⠀⣿⣿     curl -fsSL https://thebkht.com/install.sh | sh
-⣿⣿⣿⣿⣿⣿⡏⠉     Python 3.12+ · uv · Ollama · nothing leaves the machine
+⣿⣿⣿⣿⣿⣿⡏⠉     Python 3.12+ · uv · Ollama or MLX · nothing leaves the machine
 ```
 
 ```sh
@@ -58,10 +58,24 @@ holds state this one has never seen, so there is nothing honest to resume.
 
 - **Python 3.12+**
 - **[uv](https://docs.astral.sh/uv/)** — used for the venv, the lockfile, and running the tests
-- **[Ollama](https://ollama.com/download)**, serving on `http://localhost:11434`
+- **A model server.** Either one works, and the installer sets up the first:
+  - **[Ollama](https://ollama.com/download)** on `http://localhost:11434`, with
+    `qwen2.5-coder:14b` pulled. Nothing to configure.
+  - **Anything speaking the OpenAI API** on `http://localhost:8080` —
+    `mlx_lm.server`, `llama-server`, vLLM. This is the `local` backend, it is
+    the default, and it is what serves a model you fine-tuned yourself. See
+    [training/README.md](training/README.md).
 - The model: `qwen2.5-coder:14b` (~9 GB on disk). About **16 GB of RAM** is
   enough at the default `num_ctx` of 16384, though turns are slower there;
   on 8 GB use `qwen2.5-coder:7b`.
+
+The default is `local`, and **nothing breaks if you have only Ollama**: with
+nothing serving on 8080 and Ollama up, the session runs on Ollama and says so
+in one line. Only a backend you named yourself fails rather than falling back —
+running a different model than the one you typed would be the worse answer.
+
+`--host` is why the two are worth separating. It may name another machine, so
+the box with the memory can serve while you drive from a laptop.
 
 On a discrete GPU the number that binds is the card, not the machine. What has
 to stay resident is the weights plus the KV cache, and at `num_ctx` 16384 that
@@ -233,11 +247,11 @@ wins over anything on disk.
 
 | Flag                | Default                  | What it does                                                     |
 | ------------------- | ------------------------ | ---------------------------------------------------------------- |
-| `--provider`        | `ollama`                 | Backend: `ollama`, `claude-code`, `codex`                        |
-| `--model`           | `qwen2.5-coder:14b`      | Model tag, or the backend's own default                          |
-| `--host`            | `http://localhost:11434` | Ollama server URL (`ollama` only)                                |
-| `--num-ctx`         | `16384`                  | Context window requested from Ollama (values ≤ 4096 are refused) |
-| `--temperature`     | `0.2`                    | Sampling temperature; low keeps tool calls well-formed (`ollama` only) |
+| `--provider`        | `local`                  | Backend: `local`, `ollama`, `claude-code`, `codex`               |
+| `--model`           | the backend's own        | Model tag, or the backend's own default                          |
+| `--host`            | `http://localhost:8080`  | Model server URL; may name another machine                       |
+| `--num-ctx`         | `16384`                  | Context window (values ≤ 4096 are refused). Requested from Ollama; on `local` the server fixes it and this is what coder plans for |
+| `--temperature`     | `0.2`                    | Sampling temperature; low keeps tool calls well-formed           |
 | `--cwd`             | `.`                      | Workspace root the tools are confined to                         |
 | `--max-iterations`  | `25`                     | Cap on agent loop iterations per task                            |
 | `--no-instructions` | off                      | Ignore `AGENTS.md` / `CLAUDE.md`                                 |
@@ -254,6 +268,11 @@ A few environment variables are read by the **tooling**, not the agent:
 | `BKHT_CODER_REF`        | `scripts/install.sh` — branch or tag to install                               | unset                    |
 | `BKHT_CODER_YES`        | `scripts/install.sh` — skip the confirmation prompt                           | unset                    |
 | `BKHT_CODER_ALLOW_ROOT` | `scripts/install.sh` — permit running as root                                 | unset                    |
+
+One is read by the agent itself: **`CODER_API_KEY`**, sent as a bearer token by
+the `local` backend. Most local servers want no key; set it if you have put
+something in front of yours that does. It is read from the environment rather
+than the config file, because a config file is a thing people commit.
 
 `OLLAMA_HOST` is Ollama's own variable — set it before `ollama serve` to change
 where the _server_ listens (e.g. `OLLAMA_HOST=0.0.0.0:11434`), then pass the
@@ -290,11 +309,25 @@ plainly when it cannot — `provider`, `instructions` and `skills` wait for the
 next session — as does `update_check`. Add `--workspace` to either to write the
 repo's file instead.
 
-## Borrowing a bigger model
+## The four backends
 
-`ollama` is the default and the only backend that keeps the work on this
-machine. Two others exist for when a task is past what a 14b local model can
-do, and both use a login you already have rather than an API key:
+Two keep the work on hardware you own:
+
+| `provider`   | What it talks to                                    | Default host             |
+| ------------ | --------------------------------------------------- | ------------------------ |
+| `local`      | any OpenAI-compatible server — MLX, llama.cpp, vLLM | `http://localhost:8080`  |
+| `ollama`     | Ollama's own API                                    | `http://localhost:11434` |
+| `claude-code`| the `claude` command                                | —                        |
+| `codex`      | the `codex` command                                 | —                        |
+
+`local` is the default because it is the one that can serve a model you trained
+yourself, and because its `host` may point at another machine. If nothing is
+serving there and Ollama is, the session runs on Ollama and tells you.
+
+### Borrowing a bigger model
+
+The other two exist for when a task is past what a 14b local model can do, and
+both use a login you already have rather than an API key:
 
 ```
 coder config set provider claude-code    # the `claude` command
@@ -316,14 +349,17 @@ for them — and asked only to produce text. Every tool call in that text is
 executed by coder, through the same prompt you would have seen locally.
 
 Two things are true of both and of neither by accident. The work leaves the
-machine, which is the thing the Ollama default exists to avoid. And each turn
+machine, which is the thing the two local backends exist to avoid. And each turn
 launches a process, because these tools keep no conversation between calls —
 which costs a second and is otherwise free, since coder resends its whole
 history every turn anyway.
 
-`coder doctor` checks whichever backend is configured: with `ollama` it probes
-the server, the pulled weights and this machine's memory, and with the other
-two it checks that the command is installed. Whether the login is still good is
+`coder doctor` checks whichever backend is configured, and the checks differ
+because the backends do: `ollama` gets the server, the pulled weights, this
+machine's memory and where the weights actually landed; `local` gets the first
+three, since the OpenAI API has no notion of where a model is resident and this
+report does not invent numbers it cannot measure; the other two get a check
+that the command is installed. Whether the login is still good is
 not checked, because asking would spend your own quota to find out; a lapsed
 login shows up on the first turn, in the tool's own words.
 
@@ -748,6 +784,38 @@ checked. Nor is any of it executable — the body is prose sent to the model, an
 a slash command that could run something would be a permission gate with a back
 door in it.
 
+## Training a model of your own
+
+The default backend exists to serve one. `coder dataset` builds a training
+corpus out of the transcripts already on this machine — its own sessions, and
+Claude Code's and Codex's — by translating every call into coder's protocol:
+
+```
+coder dataset build      # collect, translate, and report what was found
+coder dataset show 0     # read one example as the model will read it
+coder dataset stats
+```
+
+Translation is the substance. A model trained on `Read(file_path=…)` learns to
+emit a call coder has no tool for; mapped to `read_file(path=…)` it learns the
+one that exists. Arguments coder's tools do not accept are stripped, because an
+unknown argument is a hard error at runtime rather than a warning. Both foreign
+agents call tools in parallel and narrate before acting — coder's protocol
+forbids both — so results are moved behind the call they answer and the
+narration is dropped. Every rendered call is parsed back through coder's own
+parser before it is written, because a fine-tune whose calls coder cannot read
+is worse than none: it looks fluent, the loop corrects every reply, and no turn
+ever finishes.
+
+Read the histogram `build` prints, and read one example. If there is not much
+data — the usual finding — `training/generate.py` runs real tasks through
+`--provider claude-code`, which produces coder sessions with a frontier model
+choosing the calls, so nothing needs translating afterwards.
+
+Then [training/README.md](training/README.md): a LoRA on a 4-bit 14b that fits
+16 GB, fused into one directory, served on `0.0.0.0:8080` for every device you
+own.
+
 ## Uninstalling
 
 ```sh
@@ -890,6 +958,20 @@ retry, and the retry exists to get a different answer.
 
 `keep_alive` is **30m**, so a conversation does not reload nine gigabytes of
 weights between two turns on Ollama's five-minute idle timer.
+
+The `local` backend speaks the same protocol over a different wire, and three
+things differ in ways a naive port gets wrong. The stream is SSE, so every
+payload arrives behind `data: ` and the stream ends with a literal `[DONE]`
+that is not JSON. Native tool calls arrive in pieces — the `arguments` string
+split across as many deltas as the server felt like, keyed by `index` — so a
+call is only complete at the end of the stream. And usage is omitted entirely
+unless `stream_options.include_usage` is sent, which is what the context meter
+counts with.
+
+`num_ctx` means something different there, too. Ollama takes it as a request;
+an OpenAI-compatible server fixes the window when it starts, so the number is
+what coder *plans* for. If the two disagree the server wins and the meter is
+what is wrong.
 
 **The reply is read on a thread of its own**, and handed to the renderer over a
 queue. Two things follow from that, and the second was the reason for it.
