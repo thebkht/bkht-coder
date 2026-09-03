@@ -9,6 +9,63 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ## [Unreleased]
 
+### Added
+
+- A `plan` tool: a short numbered list the model writes and ticks off. It is
+  kept on the session rather than in the message history, so the two things
+  that free context — summarising and eliding — cannot take it, and it is
+  appended to every request. A turn whose history has just been compacted still
+  reads its own list before it decides what to do next. Persisted, so
+  `--resume` resumes the plan; dropped by `/clear`; shown in full in the
+  transcript and by `/context`; and kept in plan mode's read-only tool set,
+  because producing a plan is what plan mode is for.
+- A `task` tool: one self-contained question handed to a second agent with its
+  own session, a read-only tool set, and its own clock — three minutes and
+  eight round trips. Only its prose comes back, so the files it read cost the
+  parent nothing. It cannot write, run commands, delegate further, or touch the
+  parent's plan. Its tool calls are shown as they happen; its prose is not, so
+  it cannot stream into the middle of the parent's answer. Esc reaches it.
+- `planning` and `delegation` settings, both on, with `--no-planning` and
+  `--no-delegation` to match.
+
+### Measured
+
+The tool set is small on purpose: the registry's standing claim is that every
+extra tool measurably costs selection accuracy on a small model. Two were
+added, so the claim was tested rather than waved at.
+
+Twenty-four single-tool requests against `qwen2.5-coder:14b` at temperature
+0.1, scoring the first call each one makes, with nine tools and then with
+eleven. **Both arms chose identically on all twenty-four** — including the six
+where both disagreed with the answer key, preferring `list_files` to `glob`
+and `codebase_search` to `grep`. Neither arm produced an unparseable call, and
+on a single-file request the two replies were byte-identical at 22 completion
+tokens. The extra tools cost nothing in selection here.
+
+What they do cost is prompt. The system prompt grows from 9,038 to 10,425
+characters, about 347 tokens, or 15% — roughly 2% of a 16k window, paid on
+every request. Wall-clock was not attributable to the tools: the per-call
+spread on this machine, 3.5–11.4s for the same request, is far wider than any
+difference between the arms.
+
+### Known: the opening search suppresses both tools
+
+Delegation fires when the automatic workspace search does not run, and does not
+fire when it does. Asked to summarise a module and say who calls it,
+`qwen2.5-coder:14b` under `--no-scout` called `task` and got its answer from a
+sub-agent that read the files; the identical request with the search block
+present was answered straight out of the search snippet, with no file opened
+and no tool called.
+
+This is the scout's own long-standing hazard rather than something these tools
+introduced — a 7b does the same thing without them, answering from the snippet
+and reading nothing — but it is what decides how often either new tool is
+reached for, so it is stated here rather than left to be discovered. `--no-scout`
+is the lever today. A footer reworded to tell the model to read before it
+*answers*, not only before it changes anything, was tried and did not shift the
+behaviour; it was reverted rather than shipped unvalidated. Making the two
+features agree is the next thing to look at.
+
 ## [0.3.0] - 2026-09-03
 
 ### Added

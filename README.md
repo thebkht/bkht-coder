@@ -653,8 +653,23 @@ coder config set delegation false
 Both switches exist because of the argument the tool registry makes about
 itself: the tool set is small on purpose, and every extra tool measurably costs
 selection accuracy on a small model. That argument applies to these two as much
-as to anything else, which is why they were measured rather than asserted —
-see the CHANGELOG for the numbers.
+as to anything else, so they were measured rather than asserted. Across
+twenty-four single-tool requests a nine-tool and an eleven-tool `qwen2.5-coder:14b`
+chose identically every time; what the pair costs is about 347 tokens of system
+prompt, on every request. The CHANGELOG has the numbers.
+
+### One thing to know
+
+`task` fires when [the opening workspace search](#searching-before-it-answers)
+does not, and does not fire when it does. Asked to summarise a module and say
+who calls it, a 14b under `--no-scout` delegates and answers from files a
+sub-agent actually read; the same request with the search block present is
+answered straight out of the search snippet, nothing opened.
+
+That is the scout's own hazard rather than one these tools introduced — a 7b
+does it without them — but it is what decides how often either tool is reached
+for. `--no-scout` is the lever today, and making the two agree is the next
+thing on the list.
 
 ## Checking the install
 
