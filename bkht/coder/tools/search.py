@@ -16,6 +16,31 @@ from .fs import is_ignored, read_text
 MAX_MATCHES = 200
 MAX_SCANNED_BYTES = 1_000_000
 
+#: What makes a string a glob rather than a path.
+GLOB_CHARS = re.compile(r"[*?\[]")
+
+
+def _path_is_really_a_glob(path: str) -> str:
+    """How to reach the files ``path`` was reaching for, or ``""``.
+
+    A glob written where a path goes is the ordinary way `grep` fails, and
+    ``path not found`` cannot be corrected from: the string it names was never
+    meant to be a path, so the model reads the message, sees nothing wrong with
+    what it sent, and sends it again. One turn watched here spent four rounds
+    on the same call before the loop's bounds ended it, having never found the
+    `glob` argument sitting one place over.
+
+    So the message names that argument, and where the pattern splits cleanly it
+    writes out the call that would have worked.
+    """
+    if not GLOB_CHARS.search(path):
+        return ""
+    parent, name = str(Path(path).parent), Path(path).name
+    if GLOB_CHARS.search(parent) or not GLOB_CHARS.search(name):
+        return "pass it as `glob` instead, and give `path` a real directory"
+    where = f', path="{parent}"' if parent not in (".", "") else ""
+    return f'pass it as `glob` instead: grep(pattern=...{where}, glob="{name}")'
+
 
 def iter_files(root: Path, workspace_root: Path, pattern: str | None = None):
     """Every non-ignored file under ``root``, optionally filtered by a glob.
@@ -80,7 +105,11 @@ def register_search_tools(registry, workspace: Workspace):
 
         root = workspace.resolve(path)
         if not root.exists():
-            raise ToolError(f"path not found: {path}")
+            advice = _path_is_really_a_glob(path)
+            raise ToolError(
+                f"path not found: {path}"
+                + (f" -- that looks like a glob pattern, not a path; {advice}" if advice else "")
+            )
 
         targets = [root] if root.is_file() else iter_files(root, workspace.root, glob)
 

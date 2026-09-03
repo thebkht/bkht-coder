@@ -11,6 +11,13 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ### Changed
 
+- `grep` handed a glob where a path goes now says which argument the pattern
+  belongs in, and writes out the call that would have worked. `path not found:
+  .github/workflows/*.yml` is true and useless -- the string was never meant to
+  be a path, so the model saw nothing to change and resent the same call until
+  the loop's bounds ended the turn. Found in a real session that spent its
+  whole iteration budget that way and answered from vendored workflows it had
+  stumbled into. A path that is simply missing says only that, as before.
 - A pasted image is encoded once instead of once per round trip. The provider
   base64s every image on the message it sends, and a turn sends its whole
   history on each of up to twenty-five iterations, so one screenshot was read

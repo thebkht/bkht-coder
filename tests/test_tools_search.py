@@ -131,3 +131,38 @@ def test_a_directory_symlinked_to_its_own_parent_terminates(project):
 
     (project / "loop").symlink_to(project)
     assert any(path.name == "main.py" for path in iter_files(project, project))
+
+
+def test_a_glob_passed_as_a_path_is_told_which_argument_to_use(registry):
+    """The failure that cost a real turn its whole iteration budget.
+
+    `path not found` is true and useless: the string was never meant to be a
+    path, so the model saw nothing to change and resent the same call until the
+    loop's bounds ended the turn.
+    """
+    with pytest.raises(ToolError) as raised:
+        run(registry, "grep", pattern="import", path="src/*.py")
+
+    said = str(raised.value)
+    assert "glob" in said
+    assert 'glob="*.py"' in said and 'path="src"' in said
+
+
+def test_the_suggested_call_is_one_that_actually_works(registry):
+    with pytest.raises(ToolError):
+        run(registry, "grep", pattern="def", path="src/*.py")
+    found = run(registry, "grep", pattern="def", path="src", glob="*.py")
+    assert "src/main.py" in found
+
+
+def test_a_path_that_is_simply_missing_says_only_that(registry):
+    with pytest.raises(ToolError) as raised:
+        run(registry, "grep", pattern="x", path="src/nope.py")
+    assert "glob" not in str(raised.value)
+
+
+def test_a_glob_too_tangled_to_rewrite_still_names_the_argument(registry):
+    """`src/*/thing.py` has no clean directory to split at; say so anyway."""
+    with pytest.raises(ToolError) as raised:
+        run(registry, "grep", pattern="x", path="src/*/thing.py")
+    assert "glob" in str(raised.value)
