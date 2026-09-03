@@ -473,3 +473,23 @@ def test_sessions_is_offered_in_the_help(repl):
     r, lines = repl
     r.dispatch("/help")
     assert "/sessions" in "\n".join(lines)
+
+
+def test_context_shows_the_plan_it_is_sending(repl):
+    # The plan rides alongside the history rather than in it, so the message
+    # count says nothing about it; /context would otherwise be the one place
+    # that claims to say what is being sent and does not.
+    r, lines = repl
+    r.agent.session.set_plan(["read it", "say what it does"])
+    r.agent.session.tick_plan(1)
+    r.dispatch("/context")
+
+    shown = "\n".join(lines)
+    assert "plan       1/2 steps done" in shown
+    assert "1. [x] read it" in shown
+
+
+def test_context_says_nothing_about_a_plan_that_does_not_exist(repl):
+    r, lines = repl
+    r.dispatch("/context")
+    assert "plan  " not in "\n".join(lines)

@@ -249,6 +249,14 @@ class Repl:
         self.out(f"  session    {session.path or 'not saved'}")
         self.out(f"  undo depth {len(self.snapshots)}")
         self.out(f"  scout      {'on' if self.agent.scout_root else 'off'}")
+        # The plan is not in the message count above -- it rides alongside the
+        # history rather than in it -- so /context would otherwise be the one
+        # place that claims to say what is being sent and does not.
+        if session.plan:
+            done, total = session.plan.progress()
+            self.out(f"  plan       {done}/{total} steps done")
+            for row in session.plan.render().splitlines():
+                self.out(f"             {row}")
         self.out(f"  skills     {len(discover_skills(self.workspace.root))} available")
         if self.jobs is not None:
             self.out(f"  jobs       {len(self.jobs.running())} running")
