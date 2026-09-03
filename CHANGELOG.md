@@ -9,6 +9,8 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-03
+
 ### Added
 
 - A `plan` tool: a short numbered list the model writes and ticks off. It is
@@ -120,7 +122,8 @@ job, GitHub and GitLab tools; resumable sessions; skills and slash commands;
 GitLab Code Quality reports; `coder doctor`; `coder config`; and Claude Code and
 Codex as borrowed model backends.
 
-[Unreleased]: https://github.com/thebkht/bkht-coder/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/thebkht/bkht-coder/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/thebkht/bkht-coder/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/thebkht/bkht-coder/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/thebkht/bkht-coder/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/thebkht/bkht-coder/releases/tag/v0.1.0
