@@ -143,3 +143,66 @@ def test_reminder_is_never_stored_or_persisted(store):
     # A reloaded session has not been spoken to yet, so it has no language.
     assert reloaded.language is None
     assert len(reloaded.payload()) == 2
+
+
+# --- the plan ---------------------------------------------------------------
+
+
+def test_a_resumed_session_brings_its_plan_back(tmp_path):
+    # The plan is persisted for exactly this: a session resumed after a crash,
+    # or tomorrow, opens against the list it was working down rather than a
+    # blank one.
+    session = Session(cwd=str(tmp_path))
+    path = session.start_file(tmp_path)
+    session.add_user("review the review module")
+    session.set_plan(["read reviewer.py", "read ci.py", "write it up"])
+    session.tick_plan(1)
+
+    back = Session.load(path)
+    assert back.plan.render() == session.plan.render()
+    assert back.plan.progress() == (1, 3)
+
+
+def test_only_the_last_plan_written_is_the_plan(tmp_path):
+    # The file is append-only, so it holds every version the plan ever had.
+    # Replaying them in order is what makes the last one win.
+    session = Session(cwd=str(tmp_path))
+    path = session.start_file(tmp_path)
+    session.set_plan(["first idea", "second"])
+    session.set_plan(["it was wrong", "do this instead"])
+
+    back = Session.load(path)
+    assert [step.text for step in back.plan.steps] == ["it was wrong", "do this instead"]
+
+
+def test_clearing_a_persisted_session_clears_its_plan_on_reload(tmp_path):
+    session = Session(cwd=str(tmp_path))
+    path = session.start_file(tmp_path)
+    session.set_plan(["something"])
+    session.clear()
+
+    assert not Session.load(path).plan
+
+
+def test_a_plan_made_before_the_file_existed_is_written_into_it(tmp_path):
+    # Otherwise the plan would be the one piece of the session the transcript
+    # did not describe.
+    session = Session(cwd=str(tmp_path))
+    session.set_plan(["made first"])
+    path = session.start_file(tmp_path)
+
+    assert Session.load(path).plan.render() == "1. [ ] made first"
+
+
+def test_the_language_reminder_and_the_plan_both_ride_on_the_payload(tmp_path):
+    # Two reminders, in order, and the plan is last: it is what the model reads
+    # immediately before writing its reply.
+    session = Session(system="sys")
+    session.language = "Uzbek"
+    session.set_plan(["one"])
+    payload = session.payload()
+
+    assert payload[0]["role"] == "system"
+    assert "Uzbek" in payload[1]["content"]
+    assert "1. [ ] one" in payload[2]["content"]
+    assert session.messages == []

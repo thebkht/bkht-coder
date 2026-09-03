@@ -17,6 +17,7 @@ from pathlib import Path
 
 from . import prompts
 from .language import ENGLISH
+from .plan import Plan
 
 STATE_DIR = Path("~/.bkht-coder").expanduser()
 SESSION_DIR = STATE_DIR / "sessions"
@@ -43,6 +44,11 @@ class Session:
     # follow-up is often too short to identify on its own. Derived state, not
     # transcript: it is never written to the file.
     language: str | None = None
+    # What the turn said it was going to do. Beside the messages rather than in
+    # them, which is the whole point: compaction and elision free space by
+    # dropping message history, and this is the one thing a turn cannot afford
+    # to lose to them. Persisted, so a resumed session resumes the plan too.
+    plan: Plan = field(default_factory=Plan)
 
     # --- history ------------------------------------------------------------
 
@@ -68,12 +74,31 @@ class Session:
         user turn it is plainly an aside attached to the conversation, in the
         one position where it will actually be read.
         """
+        notes = []
         # English needs no reminder: the prompt is already written in it, and
         # that is the common case, so the common case costs nothing.
-        if not self.language or self.language == ENGLISH:
-            return []
-        content = prompts.language_reminder(self.language)
-        return [{"role": "user", "content": content}]
+        if self.language and self.language != ENGLISH:
+            notes.append(prompts.language_reminder(self.language))
+        # Last, so the plan is the final thing read before the reply. An empty
+        # plan says nothing at all: a turn that needed no plan should not pay
+        # for the words explaining that it has none.
+        if self.plan:
+            notes.append(prompts.plan_reminder(self.plan.render()))
+        return [{"role": "user", "content": note} for note in notes]
+
+    def set_plan(self, steps: list[str]) -> None:
+        """Replace the plan and record it, so a resumed session still has it."""
+        self.plan.set(steps)
+        self._persist_plan()
+
+    def tick_plan(self, number: int):
+        """Mark a step done and record it. Raises IndexError for a bad number."""
+        step = self.plan.tick(number)
+        self._persist_plan()
+        return step
+
+    def _persist_plan(self) -> None:
+        self._persist({"type": "plan", "steps": self.plan.as_record()})
 
     def add_user(self, content: str, images: list[str] | None = None) -> None:
         """Record what the user said, and any images they pasted with it.
@@ -104,6 +129,10 @@ class Session:
         self.messages.clear()
         self.prompt_tokens = 0
         self.completion_tokens = 0
+        # The plan described the conversation being dropped. Surviving it would
+        # mean the next turn opens against a checklist for work nobody asked
+        # for -- exactly the confusion the plan exists to prevent.
+        self.plan = Plan()
         self._persist({"type": "clear"})
 
     def record_usage(self, prompt: int | None, completion: int | None) -> None:
@@ -131,6 +160,10 @@ class Session:
         )
         for message in self.messages:
             self._persist({"type": "message", **message})
+        # A plan made before the file existed would otherwise be the one piece
+        # of the session the file did not describe.
+        if self.plan:
+            self._persist_plan()
         return self.path
 
     def _persist(self, record: dict) -> None:
@@ -168,6 +201,11 @@ class Session:
                 session.model = record.get("model", "")
             elif kind == "clear":
                 session.messages = []
+                session.plan = Plan()
+            elif kind == "plan":
+                # Replayed rather than merged: the file is a log of every
+                # version the plan had, and the last one is the plan.
+                session.plan = Plan.from_record(record.get("steps"))
             elif kind == "message":
                 message = {k: v for k, v in record.items() if k != "type"}
                 if message.get("role"):

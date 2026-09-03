@@ -137,6 +137,32 @@ def language_reminder(language: str) -> str:
     return LANGUAGE_REMINDER.format(language=language)
 
 
+PLAN_REMINDER = """\
+(A note about the work, not a new request. This is your plan for the task
+above, as you last wrote it. It is kept outside the conversation, so it is
+still here even when earlier messages have been dropped to free room:
+
+{plan}
+
+Do the first step that is not ticked. Call `plan` with `done` when a step is
+finished, and rewrite the list with `steps` if the plan turned out wrong. When
+every step is ticked, answer in prose. Carry on.)"""
+
+
+def plan_reminder(plan: str) -> str:
+    """The plan, appended to every request while one exists.
+
+    Sent last, for the same reason the language reminder is: by the time the
+    model replies the system prompt is thousands of tokens behind, and a turn
+    that has just had its history compacted has no other record of what it was
+    doing. This is that record, and it is the last thing read before the reply.
+
+    Concatenated into a fixed template rather than formatted from user prose --
+    the steps are the model's own words and may contain braces.
+    """
+    return PLAN_REMINDER.replace("{plan}", plan)
+
+
 INSTRUCTIONS_HEADER = """\
 # Project instructions
 
