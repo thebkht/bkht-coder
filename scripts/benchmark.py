@@ -28,6 +28,14 @@ credit or the blame. Every task below can be run a hundred times over the same
 tree and be asked the same thing each time.
 
 Each run gets a fresh shallow clone, for the same reason.
+
+One reading trap, found on this script's first real run. Every task came back
+`1 iteration, 0 tool calls, answered`: the workspace search injected at the top
+of the turn had already said enough, so the model answered out of the snippet
+without opening a file. A run shaped like that is measuring the scout, not the
+loop, and no change to the loop will move its numbers. Run it again with
+`--no-scout` for the contrast -- the gap between the two is the scout's real
+effect, which is the thing 0.4.0 said was worth looking at next.
 """
 
 from __future__ import annotations
@@ -89,7 +97,7 @@ def outcomes(path: Path) -> list[dict]:
     return found
 
 
-def run_task(task: str, provider: str | None, timeout: float) -> dict:
+def run_task(task: str, provider: str | None, timeout: float, scout: bool = True) -> dict:
     """One task in its own clone, returning what the turn recorded about itself.
 
     The session file is found by watching the directory rather than by asking
@@ -107,6 +115,8 @@ def run_task(task: str, provider: str | None, timeout: float) -> dict:
         argv = [sys.executable, "-m", "bkht.coder.cli", "--auto", "--cwd", str(workspace)]
         if provider:
             argv += ["--provider", provider]
+        if not scout:
+            argv += ["--no-scout"]
         try:
             finished = subprocess.run(
                 argv + [task], cwd=REPO, capture_output=True, text=True, timeout=timeout
@@ -229,6 +239,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--provider", default=None, help="Backend. Default: whatever a session would use.")
     parser.add_argument("--tasks", type=int, default=0, help="How many tasks to run. 0 means all.")
     parser.add_argument("--timeout", type=float, default=TIMEOUT, help="Seconds per task.")
+    parser.add_argument(
+        "--no-scout", action="store_true",
+        help="Run without the workspace search injected at the top of each turn. "
+             "The contrast against a plain run is the scout's real effect.",
+    )
     parser.add_argument("--out", type=Path, default=None, help="Write the run to this JSON file.")
     parser.add_argument("--label", default="", help="A name for this run, shown when comparing.")
     parser.add_argument(
@@ -247,12 +262,16 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     tasks = TASKS[: args.tasks] if args.tasks else TASKS
-    print(f"{len(tasks)} task(s) through {args.provider or 'the default backend'}\n", flush=True)
+    print(
+        f"{len(tasks)} task(s) through {args.provider or 'the default backend'}"
+        + (", no scout" if args.no_scout else "") + "\n",
+        flush=True,
+    )
 
     rows = []
     for number, task in enumerate(tasks, start=1):
         print(f"  {number}/{len(tasks)} {task}", flush=True)
-        row = run_task(task, args.provider, args.timeout)
+        row = run_task(task, args.provider, args.timeout, scout=not args.no_scout)
         print(
             f"      {row['seconds']:.1f}s, {row['iterations']} iterations, "
             f"{row['tool_calls']} tool calls, "
@@ -267,7 +286,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.out:
         args.out.write_text(json.dumps(
             {"label": args.label or args.out.stem, "provider": args.provider or "default",
-             "summary": summary, "rows": rows},
+             "scout": not args.no_scout, "summary": summary, "rows": rows},
             indent=2,
         ) + "\n")
         print(f"\nwritten to {args.out}")
