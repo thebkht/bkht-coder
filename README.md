@@ -778,9 +778,22 @@ remembered and delivered whenever the model happened to speak, which on a 14b
 is most of a minute later. Waiting on a queue in short hops is bytecode, so the
 key now lands when it is pressed.
 
-The socket also stops going undrained while the screen is being written to. One
-thread doing both read a chunk, then parsed and drew it, and only then went
-back for the next one.
+It does **not** make a turn faster, which is worth writing down because it
+looks as though it should: the socket no longer goes undrained while the screen
+is being written to, and one thread used to do both — read a chunk, parse and
+draw it, and only then go back for the next. Measured over six alternating
+turns per version, same prompt, warm weights, `qwen2.5-coder:7b`:
+
+| Version | Median | Mean  | Range       |
+| ------- | ------ | ----- | ----------- |
+| v0.2.0  | 22.8   | 22.9  | 22.1 – 23.6 |
+| v0.3.0  | 22.9   | 22.4  | 19.1 – 24.0 |
+
+Tokens per second, and a 0.6% difference in medians inside overlapping ranges,
+which is no difference. What bounds a turn is the GPU generating tokens, not
+the client collecting them, and draining a socket sooner cannot help when there
+is nothing waiting in it. The turn *feels* quicker because the block stays on
+screen throughout, which is a different claim and the one actually being made.
 
 `options.num_ctx` is always sent. Ollama defaults to 2048 and silently
 truncates past it, which is the most common cause of a bad local-model session;
