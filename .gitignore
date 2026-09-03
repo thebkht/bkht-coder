@@ -9,6 +9,12 @@ build/
 # Written at build time by hatch-vcs from the git tag.
 bkht/coder/_version.py
 
+# Training artifacts: the corpus is rebuilt from transcripts, the adapters and
+# the fused model are gigabytes, and none of the three is source.
+training/data/
+training/adapters/
+training/fused/
+
 .ruff_cache/
 .coverage
 htmlcov/

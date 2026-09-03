@@ -31,6 +31,10 @@ coder = "bkht.coder.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]
+# Training only. Kept out of the runtime dependencies deliberately: the shipped
+# agent depends on httpx and nothing else, and the machine that trains a model
+# is not the machine that has to run one.
+train = ["mlx-lm>=0.21"]
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]

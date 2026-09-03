@@ -1,0 +1,49 @@
+# LoRA on a 4-bit Qwen2.5-Coder-14B, sized for a 16 GB Apple Silicon machine.
+#
+# Every number below is a memory decision before it is a quality one. What has
+# to be resident is the 4-bit weights (~8.5 GB), the KV cache for the sequence
+# being trained, the adapter parameters, and their optimizer state -- on a
+# unified-memory Mac that all comes out of the same 16 GB the OS is using.
+#
+# If a run dies or the machine starts swapping, turn these in order:
+#   1. num_layers    8 -> 4     (fewest adapters, biggest saving)
+#   2. max_seq_length 4096 -> 2048
+#   3. the model     14b -> 7b  (see training/README.md)
+# Raising batch_size is the wrong direction here; there is no headroom for it.
+
+model: "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit"
+train: true
+data: "training/data"
+adapter_path: "training/adapters"
+
+# The last 8 blocks only. Adapting every layer of a 14b does not fit, and the
+# late blocks are where output format lives -- which is what is being taught.
+num_layers: 8
+
+# One example at a time. The examples are long and vary a lot in length, so a
+# larger batch pads to the longest member and pays for the padding in memory.
+batch_size: 1
+
+# Matches the token budget `coder dataset build` filters on. They must agree:
+# a corpus built for 4096 and trained at 2048 is a corpus half of which is
+# silently truncated mid-tool-result during training.
+max_seq_length: 4096
+
+# Recompute activations instead of holding them. Roughly 30% slower per step
+# and the difference between fitting and not.
+grad_checkpoint: true
+
+iters: 600
+learning_rate: 1e-5
+steps_per_report: 10
+steps_per_eval: 100
+save_every: 100
+# The corpus is small, so the holdout is small; capping the batches keeps
+# evaluation from taking as long as the training between two evaluations.
+val_batches: 8
+
+lora_parameters:
+  keys: ["self_attn.q_proj", "self_attn.v_proj"]
+  rank: 16
+  scale: 20.0
+  dropout: 0.05
