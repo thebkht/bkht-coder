@@ -548,6 +548,114 @@ searched, and a search that fails is dropped rather than costing the turn. The
 block says what it is, so the model treats it as a starting point rather than
 the answer, and `--no-scout` turns it off. `/context` shows which it is.
 
+## A plan it keeps, and somewhere else to read
+
+Two settings, `planning` and `delegation`, both on. They are one answer to one
+problem, approached from opposite ends.
+
+The problem is the one the compaction section below describes. Reading is what
+fills the window; most reading is spent finding out where something is rather
+than on the thing itself; and the two mechanisms that free space — summarising
+and eliding — work by throwing message history away. What goes first is the
+model's own account of what it was doing.
+
+Asked to review this codebase, a 14b read five files into its own window,
+compacted, and stopped at the time cap still opening files, having answered
+nothing about any of them. A 7b asked the same thing answered from the opening
+keyword search and never opened a file at all. Different failures, same two
+holes: nowhere to record a decision about what to do, and nowhere to do the
+reading that is not the model's own context.
+
+### `plan`
+
+A short numbered list the model writes and ticks off.
+
+```
+● plan(steps=[read reviewer.py, read ci.py, write it up])
+  0/3 done
+  1. [ ] read reviewer.py
+  2. [ ] read ci.py
+  3. [ ] write it up
+```
+
+The list does not live in the conversation. It sits beside it, on the session,
+and is appended to every single request — so it is still there after a
+compaction has taken the messages that produced it, which is the whole reason
+it exists. It is the last thing the model reads before it replies, the same
+position and the same reasoning as the language reminder.
+
+At most eight steps, one line each. A model that writes twelve has decomposed
+the task instead of doing it, and every step is paid for on every subsequent
+request. Rewriting the list drops the ticks: carrying them across a rewrite
+means guessing which new step each old one became, and a wrong guess reports
+work nobody did as done.
+
+It is persisted with the session, so `--resume` resumes the plan too, and
+`/clear` drops it — a plan that survived would meet the next turn with a
+checklist for work nobody asked for. The plan is also the one tool result
+printed to you in full rather than counted: it is four short lines, it is the
+agent's own account of what it is doing, and a count would hide the single
+thing worth watching, which is whether the list being ticked down is still the
+list the model wrote.
+
+`plan` survives into plan mode's read-only tool set, because producing a plan
+is what plan mode is for.
+
+### `task`
+
+One self-contained question, handed to a second agent that searches and reads
+on its own and hands back prose.
+
+```
+● task(instruction=summarise what review/ci.py does and who calls it)
+  ● read_file(bkht/coder/review/ci.py)
+    268 lines
+  ● grep(from .ci import)
+    4 matches in 3 files
+  12 lines back
+```
+
+The sub-agent's reading is done in a window of its own and then thrown away.
+The parent's history grows by one paragraph instead of by two files, and the
+search that produced it is simply gone — which is correct, because the parent
+never wanted the search.
+
+Three bounds, all deliberate:
+
+- **Read-only.** It cannot write files, run a shell, or start a job.
+  Delegation exists to save context; a nested agent making changes you were
+  never shown is a different feature with a different set of questions.
+- **No nesting.** Its tool set has no `task`, so a turn cannot fan out into a
+  tree of agents whose cost nobody bounded. It has no `plan` either, so it
+  cannot rewrite the plan of the turn that delegated to it.
+- **Its own clock** — three minutes and eight round trips, not the parent's
+  ten minutes. A delegated search that runs the whole budget has spent the
+  turn rather than saved it.
+
+Its tool calls are shown to you as they happen, because a turn that goes quiet
+for ninety seconds looks stuck. Its prose is not: that would stream into the
+middle of the parent's answer. Esc reaches into it without anything arranging
+that — the sub-agent runs on the thread the interrupt is raised on.
+
+A sub-agent that stops without an answer is reported as a failed tool call
+rather than as an empty success, so the parent goes and looks itself instead
+of writing up an answer it never received.
+
+### Turning them off
+
+```sh
+coder --no-planning               # this session
+coder --no-delegation
+coder config set planning false   # for good
+coder config set delegation false
+```
+
+Both switches exist because of the argument the tool registry makes about
+itself: the tool set is small on purpose, and every extra tool measurably costs
+selection accuracy on a small model. That argument applies to these two as much
+as to anything else, which is why they were measured rather than asserted —
+see the CHANGELOG for the numbers.
+
 ## Checking the install
 
 ```sh

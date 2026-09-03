@@ -80,10 +80,14 @@ def register_plan_tool(registry: Registry, session) -> None:
             said.append(f"Ticked step {done}: {step.text}")
 
         finished, total = session.plan.progress()
-        said.append(f"\n{session.plan.render()}\n\n{finished}/{total} done.")
         if session.plan.finished():
             said.append("Every step is ticked. Answer the user now, in prose.")
-        return ToolResult.success(" ".join(said))
+        # The list itself last, so what the model reads immediately before
+        # deciding what to do next is the list rather than the acknowledgement.
+        return ToolResult.success(
+            " ".join(said)
+            + f"\n\n{session.plan.render()}\n\n{finished}/{total} done."
+        )
 
     registry.add(
         Tool(
