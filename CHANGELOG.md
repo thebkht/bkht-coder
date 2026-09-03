@@ -25,6 +25,36 @@ below it, and the release workflow refuses a tag this file does not describe.
   second run of a comparison is not measuring the same work as the first, and
   the change under test gets credit or blame that belongs to the edit.
 
+### Measured
+
+The first thing the benchmark was pointed at was the scout, because its own
+first run kept landing on it: two read-heavy tasks both came back
+`1 iteration, 0 tool calls, answered`, the model having answered out of the
+injected search snippet without opening a file. 0.4.0 recorded that shape as a
+hazard and left it there. With `--no-scout` to compare against, on
+`qwen2.5-coder:14b`:
+
+    task                                with scout        without
+    what does the agent loop do when
+      a tool call is malformed?      112.6s  1 iter    167.6s  1 iter
+    which module decides whether a
+      tool call needs permission?     43.3s  1 iter    309.6s  3 iters, 2 calls
+
+    total                            155.9s            477.2s   (+206%)
+
+So the snippet is not only a shortcut past reading -- it is the difference
+between one round trip and three, and on the second task it saved four and a
+half minutes. That is the opposite of what "hazard" suggests, and it is worth
+having the number before anyone reaches for the lever.
+
+Two limits on the reading, stated because the figure invites more weight than
+it can carry. It is two tasks on one machine, and this one is spilling 1 GB of
+KV cache to CPU, so the per-turn cost is high and its variance with it. And the
+benchmark measures what a turn *costs*, never whether it was right -- the first
+task answered a question about the agent loop without opening a file in either
+arm, which is fast in both and only useful if the answer is true. Correctness
+is a different instrument, and this is not it.
+
 ### Changed
 
 - `grep` handed a glob where a path goes now says which argument the pattern
