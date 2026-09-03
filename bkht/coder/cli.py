@@ -170,11 +170,22 @@ class TerminalListener:
 
         Counted in columns the terminal actually draws, so the colour a
         renderer wrapped a word in does not push the count past the word.
+
+        Prose landing exactly on the right-hand edge is wrapped here rather
+        than left to the terminal. A terminal in that position has not moved
+        the cursor down yet -- it holds it against the last column with the
+        wrap pending -- so there is no column to come back to that is not
+        either the end of the line or the start of it. Writing the newline
+        ourselves puts the cursor somewhere nameable, and the screen looks the
+        same either way because that is where it would have wrapped.
         """
         if "\n" in text:
             self._at = 0 if text.endswith("\n") else terminal.visible(text.rsplit("\n", 1)[1])
         else:
             self._at += terminal.visible(text)
+        if self._at and self._at % max(1, terminal.width()) == 0:
+            self.stream.write("\n")
+            self._at = 0
         return self._at
 
     # --- loop events --------------------------------------------------------

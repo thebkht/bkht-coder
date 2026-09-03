@@ -223,3 +223,17 @@ def test_a_changed_block_replaces_the_one_on_screen():
     assert painted.startswith(CURSOR_UP + ERASE_BELOW), "the old block must go first"
     assert "second" in painted
     assert line._drawn == 2
+
+
+def test_the_cursor_comes_back_to_where_the_prose_wrapped_to(monkeypatch):
+    # A sentence longer than the screen is already several rows. The caller
+    # counts the columns it wrote and cannot know where they wrapped; asked for
+    # column 148 of a 145-column terminal the cursor stops at the edge, and
+    # every token after it arrives behind a run of spaces.
+    monkeypatch.setattr("bkht.coder.status.width", lambda *a, **k: 40)
+    writer = io.StringIO()
+    line = Status(writer=writer, clock=lambda: 0, colour=False)
+    line.block = lambda: ["pinned"]
+    line.inline(95)
+    line._draw()
+    assert writer.getvalue().endswith("\r\033[15C")  # 95 wrapped over 40

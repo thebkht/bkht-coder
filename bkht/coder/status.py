@@ -231,8 +231,16 @@ class Status:
             self._write(self._up(len(rows)) + self._back())
 
     def _back(self) -> str:
-        """Back to where the prose stopped, so the next token carries on there."""
-        return f"\r\033[{self._column}C" if self._column else "\r"
+        """Back to where the prose stopped, so the next token carries on there.
+
+        Modulo the terminal, because a sentence longer than the screen is
+        already several rows: the caller counts the columns it has written and
+        cannot know where they wrapped. Asked for column 148 of a 145-column
+        terminal, the cursor stops at the right-hand edge, and every token after
+        that arrives with a run of spaces in front of it.
+        """
+        column = self._column % max(1, width())
+        return f"\r\033[{column}C" if column else "\r"
 
     @staticmethod
     def _up(rows: int) -> str:

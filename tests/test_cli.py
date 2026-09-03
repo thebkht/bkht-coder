@@ -333,3 +333,17 @@ def test_a_release_waiting_is_a_row_above_the_frame():
     assert set(rows[1].strip()) == {"─"}
     # And nowhere else: it used to crowd the right-hand end of the status row.
     assert "v0.3.0" not in rows[4]
+
+
+def test_prose_landing_on_the_edge_is_wrapped_rather_than_left_pending(monkeypatch):
+    # A terminal whose cursor is against the last column has not moved down
+    # yet, so there is no column to come back to that is not either the end of
+    # the line or the start of it. The newline is written here instead.
+    monkeypatch.setattr("bkht.coder.cli.terminal.width", lambda *a, **k: 10)
+    listen, stream = listener(live=True)
+    with listen.turn():
+        listen._emit("0123456789")
+        assert listen._at == 0
+        listen._emit("next")
+        assert listen._at == 4
+    assert "0123456789\n" in stream.getvalue()
