@@ -99,6 +99,7 @@ class TerminalListener:
         self.streamed = False
         self._streaming = False
         self._blocks = 0
+        self._at = 0  # columns of prose on the line the cursor is on
 
     # --- turn boundary ------------------------------------------------------
 
@@ -107,6 +108,7 @@ class TerminalListener:
         """Bracket one agent.run(), so the spinner and the gate are bounded."""
         self.streamed = False
         self._blocks = 0
+        self._at = 0
         self.status.start("thinking")
         try:
             yield self
@@ -157,10 +159,23 @@ class TerminalListener:
         with self.status.pause():
             self.stream.write(text)
             self.stream.flush()
-            # Set inside the pause, so its redraw already knows to hold off.
-            self.status.suspend(not text.endswith("\n"))
+            # Set inside the pause, so its redraw already knows where the
+            # sentence got to and draws itself below rather than over it.
+            self.status.inline(self._column(text))
         self.streamed = True
         self._streaming = not text.endswith("\n")
+
+    def _column(self, text: str) -> int:
+        """How far along the line the prose just written reached.
+
+        Counted in columns the terminal actually draws, so the colour a
+        renderer wrapped a word in does not push the count past the word.
+        """
+        if "\n" in text:
+            self._at = 0 if text.endswith("\n") else terminal.visible(text.rsplit("\n", 1)[1])
+        else:
+            self._at += terminal.visible(text)
+        return self._at
 
     # --- loop events --------------------------------------------------------
 
@@ -181,7 +196,8 @@ class TerminalListener:
             self.stream.write("\n")
             self.stream.flush()
             self._streaming = False
-        self.status.suspend(False)
+        self._at = 0
+        self.status.inline(0)
 
     def _say(self, text: str) -> None:
         with self.status.pause():

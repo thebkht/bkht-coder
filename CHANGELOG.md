@@ -17,7 +17,10 @@ below it, and the release workflow refuses a tag this file does not describe.
   next thing to happen. A narrow terminal drops fields from the right rather
   than wrapping.
 - The prompt block stays on screen while a turn runs, pinned under the spinner,
-  instead of the session emptying out to one line until the answer arrives.
+  instead of the session emptying out to one line until the answer arrives. It
+  stays up while the answer streams too: a half-written sentence keeps its own
+  line and the block sits below it, rather than being taken down for every
+  fragment that does not end on a newline — which is most of them.
 - A release waiting to be installed is shown on its own row above the frame.
 
 ### Changed

@@ -60,7 +60,7 @@ class Status:
         self._step = 0
         self._drawn = 0  # how many rows the last paint left on screen
         self._pinned: list[str] = []  # the block rows as they were last painted
-        self._suspended = False
+        self._column = 0  # columns of half-written prose on the line above
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         # Re-entrant because pause() may nest: an approval prompt inside a
@@ -103,17 +103,23 @@ class Status:
 
     # --- updates ------------------------------------------------------------
 
-    def suspend(self, suspended: bool = True) -> None:
-        """Stop drawing while prose occupies the current line.
+    def inline(self, column: int) -> None:
+        """Say how much unfinished prose sits on the line the cursor is on.
 
-        The spinner repaints with a carriage return and a line clear, so
-        sharing a line with half-written prose does not interleave -- it erases
-        it. Silence is the only thing this line is allowed to fill.
+        Zero means the last thing written ended in a newline, so this owns the
+        line it is standing on. Anything else means a sentence is half-written
+        there: the block moves down a row to leave it alone, and the cursor is
+        put back at ``column`` afterwards so the next token carries on where the
+        last one stopped.
+
+        Before this the answer simply took the block off the screen -- prose
+        arrives a fragment at a time and almost never ends on a newline, so
+        "while the model is answering" was most of a turn.
         """
         with self._lock:
-            if suspended and self._drawn:
+            if column != self._column and self._drawn:
                 self._erase()
-            self._suspended = suspended
+            self._column = max(0, column)
 
     def note(self, label: str) -> None:
         """Change what the line says without restarting the clock."""
@@ -177,22 +183,64 @@ class Status:
         return [spinner, *(self.block() if self.block is not None else [])]
 
     def _draw(self) -> None:
-        if self._suspended:
-            return
         spinner, *block = self.rows()
+
+        # A sentence half-written on this line and nothing pinned to keep on
+        # screen: the spinner has nothing to add that the arriving prose does
+        # not already say, and a row of it under every fragment is noise. This
+        # is what a one-shot run and a session with no block still do.
+        if self._column and not block:
+            return
 
         # Ten times a second, and the block below is the same ten times out of
         # ten -- the spinner is the only row with a new frame in it. Repainting
         # all six was six rows of flicker for one row of news, so the usual
-        # frame reaches up for the spinner's row alone and steps back down.
+        # frame reaches for the spinner's row alone and comes back.
+        #
+        # Where it reaches from is the whole of the arithmetic: the cursor rests
+        # on the half-written prose line when there is one, and on the bottom
+        # row of the block when there is not. Walking up from the wrong one of
+        # those painted the spinner over the answer.
         if self._drawn == len(block) + 1 and block == self._pinned:
-            down = f"\033[{len(block)}B" if len(block) > 1 else CURSOR_DOWN * len(block)
-            self._write(f"{CURSOR_UP * len(block)}{CLEAR_LINE}{spinner}{down}\r")
+            if self._column:
+                self._write(f"{CURSOR_DOWN}{CLEAR_LINE}{spinner}{CURSOR_UP}{self._back()}")
+            else:
+                self._write(
+                    f"{self._up(len(block))}{CLEAR_LINE}{spinner}{self._down(len(block))}\r"
+                )
             return
 
-        self._write("\n".join(f"{CLEAR_LINE}{row}" for row in [spinner, *block]))
-        self._drawn = len(block) + 1
+        # Back to the top of what is already there. A one-line spinner erased
+        # itself -- every paint began with a line clear on the row it stood on
+        # -- and a block cannot: the cursor rests at the bottom of it, so
+        # painting from there stranded the rows above and drew a second block
+        # under them. It happened whenever the block's own text changed, which
+        # is every time the token count ticks.
+        self._erase()
+
+        rows = [spinner, *block]
+        # A newline first when a sentence is half-written above: it is the row
+        # this would otherwise paint over. Everything after moves relative to
+        # where the cursor already is, which is what makes it survive the scroll
+        # that drawing at the bottom of the screen causes.
+        lead = "\n" if self._column else ""
+        self._write(lead + "\n".join(f"{CLEAR_LINE}{row}" for row in rows))
+        self._drawn = len(rows)
         self._pinned = block
+        if self._column:
+            self._write(self._up(len(rows)) + self._back())
+
+    def _back(self) -> str:
+        """Back to where the prose stopped, so the next token carries on there."""
+        return f"\r\033[{self._column}C" if self._column else "\r"
+
+    @staticmethod
+    def _up(rows: int) -> str:
+        return "" if rows <= 0 else (CURSOR_UP if rows == 1 else f"\033[{rows}A")
+
+    @staticmethod
+    def _down(rows: int) -> str:
+        return "" if rows <= 0 else (CURSOR_DOWN if rows == 1 else f"\033[{rows}B")
 
     def _erase(self) -> None:
         """Take back every row the last paint left, ending where it started.
@@ -203,7 +251,12 @@ class Status:
         """
         if not self._drawn:
             return
-        self._write(CURSOR_UP * (self._drawn - 1) + ERASE_BELOW)
+        if self._column:
+            # The cursor is on the half-written line above the block. Step down
+            # onto the block, take all of it, and come back to the prose.
+            self._write(f"{CURSOR_DOWN}{ERASE_BELOW}{CURSOR_UP}{self._back()}")
+        else:
+            self._write(self._up(self._drawn - 1) + ERASE_BELOW)
         self._drawn = 0
         self._pinned = []
 
