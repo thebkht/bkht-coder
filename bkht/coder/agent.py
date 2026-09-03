@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-from . import prompts
+from . import prompts, verify
 from .cancel import interruptible
 from .context import compact, elide_tool_results, should_compact
 from .language import detect as detect_language
@@ -110,6 +110,8 @@ class Agent:
         max_seconds: float = MAX_SECONDS,
         scout_root: Path | str | None = None,
         track_language: bool = True,
+        verify_command: str = "",
+        verify_root: Path | str | None = None,
         clock=time.monotonic,
     ) -> None:
         self.provider = provider
@@ -127,10 +129,17 @@ class Agent:
         # None means no scouting. The review passes drive their own conversation
         # from a diff they already have, so retrieval would only be noise there.
         self.scout_root = Path(scout_root) if scout_root else None
+        # "" means nothing is run. The command is the user's, written down in
+        # their config; there is no inferred default here, because the case for
+        # running anything at all rests on the command being one they chose.
+        self.verify_command = verify_command.strip()
+        self.verify_root = Path(verify_root) if verify_root else self.scout_root
         # All reset at the top of every turn; see _loop.
         self._summarized = False
         self._made: dict[tuple[str, str], str] = {}
         self._replays = 0
+        self._wrote = False
+        self._verified = 0
 
     def run(self, user_message: str, images: list[str] | None = None) -> Outcome:
         """Run the loop until the model answers, or a bound is hit."""
@@ -209,6 +218,11 @@ class Agent:
         # repeat can be answered from here rather than run again.
         self._made: dict[tuple[str, str], str] = {}
         self._replays = 0
+        # Whether anything has been written since the last check, and how many
+        # checks this turn has spent. Both per-turn: a turn that only read has
+        # nothing to check, and last turn's edits were checked last turn.
+        self._wrote = False
+        self._verified = 0
 
         deadline = self.clock() + self.max_seconds
         for _ in range(self.max_iterations):
@@ -244,6 +258,13 @@ class Agent:
                 # which is exactly the shape the review passes return.
                 answer = reply.prose or reply.content.strip()
                 if answer:
+                    # The one moment the turn is known to have finished
+                    # writing. Running the suite after every write would spend
+                    # the iteration budget on the test runner; running it here
+                    # costs one run for a turn that edited, and none at all for
+                    # a turn that only read.
+                    if self._check_work(outcome):
+                        continue
                     outcome.answer = answer
                     outcome.raw = reply.content
                     outcome.stopped = "answered"
@@ -272,6 +293,9 @@ class Agent:
 
                 if result.ok:
                     progressed = True
+                    tool = self.registry.get(call.name)
+                    if tool is not None and tool.mutating:
+                        self._wrote = True
                 else:
                     outcome.errors.append(result.error)
                     if result.error.startswith("permission denied"):
@@ -303,6 +327,67 @@ class Agent:
         self._final_answer(outcome)
         return outcome
 
+    def _check_work(self, outcome: Outcome, feedback: bool = True) -> bool:
+        """Run the project's tests over what this turn wrote. Keep going?
+
+        Returns True when the loop should carry on -- the suite failed and the
+        model has been handed the failure to correct from. False means the turn
+        is free to end, which covers every case where nothing was run: no
+        command configured, nothing written, or the tests passed.
+
+        ``feedback=False`` runs the check and reports it without handing
+        anything back, and always returns False. That is the bounded-turn case:
+        a turn that hit the iteration cap has no room left to act on a failure,
+        but it is also the turn most likely to have stopped halfway through an
+        edit -- so whether it left the tests broken is exactly what the person
+        reading it needs to know.
+
+        The suite runs *after* the model has said it is finished, which is what
+        makes it cheap. A check after every write would put the test runner
+        inside the edit loop and spend the iteration budget on it; a turn that
+        only read runs nothing at all.
+
+        Bounded at two runs. The first is the check, the second is the fix
+        being checked, and a third would mean handing back a failure the model
+        has already failed to fix once -- the least promising thing left to
+        try, at the price of the iterations a clear account of the problem
+        would have cost.
+        """
+        if not (self.verify_command and self._wrote and self.verify_root):
+            return False
+        if self._verified >= verify.MAX_RUNS:
+            return False
+
+        # Cleared here, not at the end of the turn, so `_wrote` means "wrote
+        # since the last check" rather than "wrote at some point". A model that
+        # reads a failure and answers without editing has changed nothing, and
+        # running the suite again to watch it fail identically spends the
+        # timeout budget to learn what the previous run already said.
+        self._wrote = False
+        self._verified += 1
+        self.listener.on_retry(f"running {self.verify_command}")
+        report = verify.suite(self.verify_command, self.verify_root)
+        self.listener.on_retry(report.summary())
+
+        if report.ok:
+            return False
+        if not feedback:
+            outcome.errors.append(report.summary())
+            return False
+        if report.status in (verify.TIMED_OUT, verify.BROKEN):
+            # Not the model's problem and not something it can fix. The turn
+            # ends; the failure is recorded so the CLI can say the check did
+            # not happen rather than let a passing silence imply that it did.
+            outcome.errors.append(report.summary())
+            return False
+
+        output = truncate(report.output, max_chars=verify.OUTPUT_LIMIT)
+        last = self._verified >= verify.MAX_RUNS
+        say = prompts.suite_still_failing if last else prompts.suite_failed
+        self.session.add_tool_result("system", say(self.verify_command, output))
+        outcome.errors.append(report.summary())
+        return True
+
     def _final_answer(self, outcome: Outcome) -> None:
         """One last round asking for prose, when the loop ran out of room.
 
@@ -312,6 +397,11 @@ class Agent:
         turn is bounded the model has usually read enough to say something
         useful. It was simply never asked.
         """
+        # Reported, never fed back. There is no room left to act on a failure
+        # here -- that is what being bounded means -- but a turn that ran out
+        # mid-edit is the one most likely to have left the tests broken, and
+        # ending in silence about that is worse than the extra run costs.
+        self._check_work(outcome, feedback=False)
         self.session.add_tool_result("system", prompts.out_of_steps())
         try:
             reply = self._ask()

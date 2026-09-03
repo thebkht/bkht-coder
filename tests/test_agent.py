@@ -518,3 +518,294 @@ def test_the_clock_does_not_end_a_turn_before_it_starts(loop):
     agent, _ = loop(["Done."], clock=lambda: next(ticks))
     outcome = agent.run("go")
     assert outcome.stopped == "answered"
+
+
+# --- the verify loop --------------------------------------------------------
+
+
+class Suite:
+    """A scripted `verify.suite`, so the loop is tested without a test runner."""
+
+    def __init__(self, *reports) -> None:
+        from bkht.coder import verify
+
+        self.reports = list(reports) or [verify.Report(verify.PASSED, "check")]
+        self.runs: list[str] = []
+
+    def __call__(self, command, root, timeout=None, runner=None):
+        self.runs.append(command)
+        return self.reports[min(len(self.runs), len(self.reports)) - 1]
+
+
+def writing(project, script, monkeypatch, suite, **kwargs):
+    """An agent that can write, with `verify.suite` replaced by ``suite``."""
+    from bkht.coder import agent as agent_module
+
+    monkeypatch.setattr(agent_module.verify, "suite", suite)
+    registry, workspace = build_registry(project)
+    provider = FakeProvider(script)
+    made = Agent(
+        provider, registry, Session(system=""),
+        verify_command="check", verify_root=project, **kwargs,
+    )
+    return made, provider
+
+
+def test_a_turn_that_edited_runs_the_command_before_it_answers(project, monkeypatch):
+    from bkht.coder import verify
+
+    suite = Suite(verify.Report(verify.PASSED, "check"))
+    agent, _ = writing(
+        project,
+        [call("write_file", path="a.py", content="x = 1\n"), "done"],
+        monkeypatch, suite,
+    )
+    outcome = agent.run("write a file")
+
+    assert outcome.answer == "done"
+    assert suite.runs == ["check"]
+
+
+def test_a_turn_that_only_read_runs_nothing(project, monkeypatch):
+    # The cheapness of this rests entirely on it: most turns are questions,
+    # and a question has no edits to check.
+    suite = Suite()
+    agent, _ = writing(
+        project, [call("read_file", path="src/util.py"), "it doubles"],
+        monkeypatch, suite,
+    )
+    assert agent.run("what does helper do?").answer == "it doubles"
+    assert suite.runs == []
+
+
+def test_a_failure_goes_back_as_a_tool_result_and_the_turn_continues(project, monkeypatch):
+    # The correction path, and the whole point of the feature: the model gets
+    # to see what broke and fix it, in the same turn.
+    from bkht.coder import verify
+
+    suite = Suite(
+        verify.Report(verify.FAILED, "check", "E   assert 3 == 4", 1),
+        verify.Report(verify.PASSED, "check"),
+    )
+    agent, provider = writing(
+        project,
+        [
+            call("write_file", path="a.py", content="x = 1\n"),
+            "done",
+            call("write_file", path="a.py", content="x = 2\n"),
+            "fixed it",
+        ],
+        monkeypatch, suite,
+    )
+    outcome = agent.run("write a file")
+
+    assert outcome.answer == "fixed it"
+    assert suite.runs == ["check", "check"]
+    fed = [m for m in agent.session.messages if m["role"] == "tool"]
+    assert any("assert 3 == 4" in m["content"] for m in fed)
+
+
+def test_the_suite_runs_at_most_twice_in_one_turn(project, monkeypatch):
+    # The first run is the check, the second is the fix being checked. A third
+    # would hand back a failure the model has already failed to fix once.
+    from bkht.coder import verify
+
+    suite = Suite(verify.Report(verify.FAILED, "check", "still broken", 1))
+    agent, _ = writing(
+        project,
+        [
+            call("write_file", path="a.py", content="x = 1\n"), "done",
+            call("write_file", path="a.py", content="x = 2\n"), "try again",
+            call("write_file", path="a.py", content="x = 3\n"), "and again",
+        ],
+        monkeypatch, suite,
+    )
+    outcome = agent.run("write a file")
+
+    assert len(suite.runs) == verify.MAX_RUNS
+    assert outcome.stopped == "answered"
+
+
+def test_the_last_run_asks_for_an_account_rather_than_another_fix(project, monkeypatch):
+    from bkht.coder import verify
+
+    suite = Suite(verify.Report(verify.FAILED, "check", "still broken", 1))
+    agent, _ = writing(
+        project,
+        [
+            call("write_file", path="a.py", content="x = 1\n"), "done",
+            call("write_file", path="a.py", content="x = 2\n"), "second try",
+            # The account itself. Being asked to stop and explain still costs a
+            # reply, which is the point -- the turn ends with the explanation
+            # rather than with the failure nobody described.
+            "test_add still fails; my change was not the cause.",
+        ],
+        monkeypatch, suite,
+    )
+    outcome = agent.run("write a file")
+
+    fed = [m["content"] for m in agent.session.messages if m["role"] == "tool"]
+    assert any("Stop editing and answer now" in text for text in fed)
+    assert outcome.answer == "test_add still fails; my change was not the cause."
+
+
+def test_a_timeout_ends_the_turn_instead_of_being_fed_back(project, monkeypatch):
+    # Nothing about a timeout tells the model what to change, so handing it
+    # back would spend an iteration on a message it cannot act on.
+    from bkht.coder import verify
+
+    suite = Suite(verify.Report(verify.TIMED_OUT, "check"))
+    agent, _ = writing(
+        project, [call("write_file", path="a.py", content="x = 1\n"), "done"],
+        monkeypatch, suite,
+    )
+    outcome = agent.run("write a file")
+
+    assert outcome.answer == "done"
+    assert len(suite.runs) == 1
+    assert any("timed out" in error for error in outcome.errors)
+
+
+def test_no_command_configured_runs_nothing(project, monkeypatch):
+    from bkht.coder import agent as agent_module
+
+    suite = Suite()
+    monkeypatch.setattr(agent_module.verify, "suite", suite)
+    registry, _ = build_registry(project)
+    made = Agent(
+        FakeProvider([call("write_file", path="a.py", content="x = 1\n"), "done"]),
+        registry, Session(system=""), verify_root=project,
+    )
+    assert made.run("write a file").answer == "done"
+    assert suite.runs == []
+
+
+def test_each_turn_gets_its_own_budget(project, monkeypatch):
+    # Last turn's edits were checked last turn, and a second turn that edits
+    # deserves the same two runs the first one had.
+    from bkht.coder import verify
+
+    suite = Suite(verify.Report(verify.PASSED, "check"))
+    agent, provider = writing(
+        project,
+        [
+            call("write_file", path="a.py", content="x = 1\n"), "done",
+            call("write_file", path="b.py", content="y = 2\n"), "done again",
+        ],
+        monkeypatch, suite,
+    )
+    agent.run("write a file")
+    agent.run("write another")
+    assert suite.runs == ["check", "check"]
+
+
+def test_the_check_is_reported_as_it_happens(project, monkeypatch):
+    # A turn that goes quiet for two minutes running someone's test suite has
+    # to say that is what it is doing.
+    from bkht.coder import verify
+
+    said = []
+
+    class Listener:
+        def on_token(self, text): pass
+        def on_tool_call(self, call): pass
+        def on_tool_result(self, call, result): pass
+        def on_retry(self, reason): said.append(reason)
+
+    suite = Suite(verify.Report(verify.PASSED, "check"))
+    agent, _ = writing(
+        project, [call("write_file", path="a.py", content="x = 1\n"), "done"],
+        monkeypatch, suite, listener=Listener(),
+    )
+    agent.run("write a file")
+
+    assert "running check" in said
+    assert "check passed" in said
+
+
+def test_a_bounded_turn_still_reports_whether_it_broke_the_tests(project, monkeypatch):
+    # A turn that ran out mid-edit is the one most likely to have left the
+    # tests broken, and ending in silence about that is the worst of both: the
+    # work is half done and nothing says so.
+    from bkht.coder import verify
+
+    suite = Suite(verify.Report(verify.FAILED, "check", "1 failed", 1))
+    agent, _ = writing(
+        project,
+        [call("write_file", path="a.py", content="x = 1\n")] * 3 + ["ran out"],
+        monkeypatch, suite, max_iterations=3,
+    )
+    outcome = agent.run("write a file")
+
+    assert outcome.stopped == "iteration-cap"
+    assert suite.runs == ["check"]
+    assert any("check failed" in error for error in outcome.errors)
+
+
+def test_a_bounded_turn_is_not_handed_the_failure_to_fix(project, monkeypatch):
+    # There is no room left to act on it -- that is what being bounded means --
+    # so the message would only crowd out the wrap-up prose it is asked for.
+    from bkht.coder import verify
+
+    suite = Suite(verify.Report(verify.FAILED, "check", "1 failed", 1))
+    agent, _ = writing(
+        project,
+        [call("write_file", path="a.py", content="x = 1\n")] * 3 + ["ran out"],
+        monkeypatch, suite, max_iterations=3,
+    )
+    agent.run("write a file")
+
+    fed = [m["content"] for m in agent.session.messages if m["role"] == "tool"]
+    assert not any("was run to check the work" in text for text in fed)
+
+
+def test_a_bounded_turn_that_wrote_nothing_runs_nothing(project, monkeypatch):
+    suite = Suite()
+    agent, _ = writing(
+        project,
+        [call("read_file", path="src/util.py")] * 3 + ["ran out"],
+        monkeypatch, suite, max_iterations=3,
+    )
+    agent.run("read a file")
+    assert suite.runs == []
+
+
+def test_the_suite_is_not_rerun_when_nothing_changed_since_the_last_run(project, monkeypatch):
+    # Seen live: the model read a failure, decided it was not about its change,
+    # and answered without editing. Running the suite again there watches
+    # identical code fail identically, at the price of the whole timeout.
+    from bkht.coder import verify
+
+    suite = Suite(verify.Report(verify.FAILED, "check", "unrelated failure", 1))
+    agent, _ = writing(
+        project,
+        [
+            call("write_file", path="a.py", content="x = 1\n"),
+            "done",
+            "that failure is not about my change",
+        ],
+        monkeypatch, suite,
+    )
+    outcome = agent.run("write a file")
+
+    assert suite.runs == ["check"]
+    assert outcome.answer == "that failure is not about my change"
+
+
+def test_a_second_run_happens_when_the_model_actually_edited_again(project, monkeypatch):
+    from bkht.coder import verify
+
+    suite = Suite(
+        verify.Report(verify.FAILED, "check", "broken", 1),
+        verify.Report(verify.PASSED, "check"),
+    )
+    agent, _ = writing(
+        project,
+        [
+            call("write_file", path="a.py", content="x = 1\n"), "done",
+            call("write_file", path="a.py", content="x = 2\n"), "fixed",
+        ],
+        monkeypatch, suite,
+    )
+    assert agent.run("write a file").answer == "fixed"
+    assert suite.runs == ["check", "check"]
