@@ -648,20 +648,8 @@ class StatusLine:
             "ratio": usage_ratio(session, num_ctx),
             "model": self.agent.provider.model,
             "spent": session.prompt_tokens + session.completion_tokens,
-            "note": self.note,
             "width": terminal.width(),
         }
-
-
-def notice_line(notice: str) -> str:
-    """An update notice, cut down for the right edge of the status row.
-
-    The greeting has room for `v0.3.0 available · coder update`; a row that
-    also has to hold a path, a branch and a meter has room for the half that
-    is news. What to type about it is a `coder update` away, and in the
-    greeting directly above.
-    """
-    return notice.split(" · ")[0] if notice else ""
 
 
 def pinned_block(permissions, line, stream=None):
@@ -683,9 +671,17 @@ def pinned_block(permissions, line, stream=None):
 
     def rows() -> list[str]:
         stream_ = sys.stdout if stream is None else stream
-        rule = paint(banner.rule(terminal.width()), DIM, stream_)
+        width = terminal.width()
+        rule = paint(banner.rule(width), DIM, stream_)
         footer = lineedit.footer_rows(permissions.mode, **line.fields())
-        return [rule, paint(PROMPT.rstrip(), ACCENT + BOLD, stream_), rule, *footer.split("\n")]
+        above = lineedit.aside(line.note, width, stream_)
+        return [
+            *([above] if above else []),
+            rule,
+            paint(PROMPT.rstrip(), ACCENT + BOLD, stream_),
+            rule,
+            *footer.split("\n"),
+        ]
 
     return rows
 
@@ -842,11 +838,12 @@ def interactive(agent, snapshots, permissions, workspace, listener,
     # The footer is a callable, not a string: the mode it names is the thing
     # Shift+Tab changes, and the editor redraws it on the same keypress -- and
     # the row above it counts tokens that change with every turn.
-    line = StatusLine(agent, workspace, note=notice_line(notice))
+    line = StatusLine(agent, workspace, note=notice)
     reader = Reader(
         repl,
         enabled=terminal.interactive(),
         footer=lambda: lineedit.footer_rows(permissions.mode, **line.fields()),
+        header=lambda: lineedit.aside(line.note, terminal.width()),
         cycle=lambda: setattr(permissions, "mode", next_mode(permissions.mode)),
         attach=attach_image,
         on_image=lambda path: announce_image(agent.provider, path),

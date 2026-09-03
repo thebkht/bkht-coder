@@ -311,6 +311,21 @@ def test_a_folded_paste_grows_the_block_by_one_row_not_forty():
     assert ed.drawn == 3
 
 
+def test_a_header_grows_the_block_above_the_top_rule():
+    ed = editor(header=lambda: "v0.3.0 available")
+    ed._redraw("> ")
+    assert ed.drawn == 4  # the aside, the rule, the line, the rule
+    # The caret has to come down past the aside as well as past the rule, or
+    # every keystroke is typed a row above the line it belongs to.
+    assert ed.caret == 2
+
+
+def test_no_header_leaves_the_block_the_shape_it_was():
+    ed = editor()
+    ed._redraw("> ")
+    assert (ed.drawn, ed.caret) == (3, 1)
+
+
 def test_history_remembers_the_fold_not_the_whole_file():
     # Up should not paste forty lines back into a block that folded them.
     ed = editor()
@@ -427,10 +442,10 @@ def test_the_meter_outlives_the_model_and_the_spend():
     # run is worth more than which model is running or what the last one cost.
     row = lineedit.status(
         "bkht-coder", branch="main", ratio=0.5, model="qwen2.5-coder:14b",
-        spent=8000, note="v0.3.0 available", width=62,
+        spent=8000, width=62,
     )
     assert "ctx" in row
-    assert "qwen" not in row and "tokens" not in row and "v0.3.0" not in row
+    assert "qwen" not in row and "tokens" not in row
 
 
 def test_the_status_row_drops_fields_rather_than_wrapping():
@@ -454,16 +469,24 @@ def test_no_row_is_ever_wider_than_the_terminal():
     for width in range(10, 100, 7):
         row = lineedit.status(
             "workspace", branch="feature/long-branch-name", ratio=0.9,
-            model="qwen2.5-coder:14b", spent=120_000, note="update available",
-            width=width,
+            model="qwen2.5-coder:14b", spent=120_000, width=width,
         )
         assert terminal.visible(row) <= width, width
 
 
-def test_the_note_is_pushed_to_the_right_edge():
-    row = lineedit.status("here", branch="main", note="v0.3.0", width=60)
-    assert row.rstrip().endswith("v0.3.0")
-    assert terminal.visible(row) <= 60
+def test_an_aside_is_set_against_the_right_edge():
+    row = lineedit.aside("v0.3.0 available", 60)
+    assert row.rstrip().endswith("v0.3.0 available")
+    assert row.startswith(" ")
+    assert terminal.visible(row) == 60
+
+
+def test_an_aside_with_nothing_to_say_is_no_row_at_all():
+    assert lineedit.aside("", 60) == ""
+
+
+def test_an_aside_too_wide_for_the_terminal_is_cut():
+    assert terminal.visible(lineedit.aside("v0.3.0 available · coder update", 20)) <= 20
 
 
 def test_the_meter_warms_when_compaction_is_close():

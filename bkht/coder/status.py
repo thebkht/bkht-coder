@@ -17,6 +17,7 @@ import time
 
 from .terminal import (
     CLEAR_LINE,
+    CURSOR_DOWN,
     CURSOR_UP,
     DIM,
     ERASE_BELOW,
@@ -58,6 +59,7 @@ class Status:
         self._started: float | None = None
         self._step = 0
         self._drawn = 0  # how many rows the last paint left on screen
+        self._pinned: list[str] = []  # the block rows as they were last painted
         self._suspended = False
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -177,9 +179,20 @@ class Status:
     def _draw(self) -> None:
         if self._suspended:
             return
-        rows = self.rows()
-        self._write("\n".join(f"{CLEAR_LINE}{row}" for row in rows))
-        self._drawn = len(rows)
+        spinner, *block = self.rows()
+
+        # Ten times a second, and the block below is the same ten times out of
+        # ten -- the spinner is the only row with a new frame in it. Repainting
+        # all six was six rows of flicker for one row of news, so the usual
+        # frame reaches up for the spinner's row alone and steps back down.
+        if self._drawn == len(block) + 1 and block == self._pinned:
+            down = f"\033[{len(block)}B" if len(block) > 1 else CURSOR_DOWN * len(block)
+            self._write(f"{CURSOR_UP * len(block)}{CLEAR_LINE}{spinner}{down}\r")
+            return
+
+        self._write("\n".join(f"{CLEAR_LINE}{row}" for row in [spinner, *block]))
+        self._drawn = len(block) + 1
+        self._pinned = block
 
     def _erase(self) -> None:
         """Take back every row the last paint left, ending where it started.
@@ -192,6 +205,7 @@ class Status:
             return
         self._write(CURSOR_UP * (self._drawn - 1) + ERASE_BELOW)
         self._drawn = 0
+        self._pinned = []
 
     def _write(self, text: str) -> None:
         if not self.enabled or self.writer is None:

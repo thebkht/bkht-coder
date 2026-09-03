@@ -98,6 +98,7 @@ class Editor:
         *,
         completions: Callable[[], Sequence[str]] | None = None,
         footer: Callable[[], str] | None = None,
+        header: Callable[[], str] | None = None,
         cycle: Callable[[], None] | None = None,
         history: list[str] | None = None,
         attach: Callable[[], str | None] | None = None,
@@ -107,6 +108,11 @@ class Editor:
     ) -> None:
         self.completions = completions or (lambda: ())
         self.footer = footer or (lambda: "")
+        #: Rows above the top rule. An aside about the session rather than
+        #: about the line -- a release waiting to be installed -- so it sits
+        #: outside the frame the line is typed into rather than in the footer,
+        #: which is about the line.
+        self.header = header or (lambda: "")
         self.cycle = cycle
         #: Returns the path of an image taken off the clipboard, or None.
         #: Injected so the editor never has to know what a clipboard is.
@@ -449,13 +455,23 @@ class Editor:
         painted = terminal.paint(prompt, terminal.ACCENT, self.stdout)
         return [painted] + [CONTINUATION] * (len(lines) - 1)
 
+    def _header_rows(self) -> list[str]:
+        """Whatever sits above the top rule, as rows. Usually none."""
+        header = self.header()
+        return header.split("\n") if header else []
+
     def _rows(self, prompt: str, width: int) -> list[str]:
-        """The block as it should appear, top rule to footer."""
+        """The block as it should appear, header to footer."""
         rule = terminal.paint(banner.rule(width), DIM, self.stdout)
         lines = self.buffer.split("\n")
         prefixes = self._prefixes(prompt)
         footer = self.footer()
-        rows = [rule, *(prefix + line for prefix, line in zip(prefixes, lines)), rule]
+        rows = [
+            *self._header_rows(),
+            rule,
+            *(prefix + line for prefix, line in zip(prefixes, lines)),
+            rule,
+        ]
         if footer:
             # Split rather than appended whole: the footer is one string so that
             # the callable stays one shape, but every row below has to be a row
@@ -502,7 +518,8 @@ class Editor:
         # in the (possibly wrapped) line it is actually on.
         index, column = self._locate()
         offset = terminal.visible(self._prefixes(prompt)[index]) + column
-        caret_row = 1 + sum(counts[:index]) + offset // width
+        above = len(self._header_rows())
+        caret_row = above + 1 + sum(counts[:index]) + offset // width
         total = 1 + sum(counts) + 1 + (len(rows) - 2 - len(counts))
         up = total - 1 - caret_row
         if up > 0:
@@ -610,6 +627,21 @@ def tokens(count: int) -> str:
     return f"{count / 1_000_000:.1f}M".replace(".0M", "M")
 
 
+def aside(text: str, width: int = 80, stream=None) -> str:
+    """A line set against the right edge, or nothing when there is no text.
+
+    Right because it is not part of the exchange: the eye reads the prompt and
+    the mode down the left edge, and news about the *next* version of the
+    program should not be in that column. Dim for the same reason.
+    """
+    if not text:
+        return ""
+    text = terminal.fit(text, width)
+    # Padded before it is painted: colour is bytes the terminal never draws, so
+    # a `rjust` on the finished string pads by the length of the escapes too.
+    return " " * max(0, width - len(text)) + terminal.paint(text, DIM, stream)
+
+
 def status(
     name: str = "",
     *,
@@ -617,7 +649,6 @@ def status(
     ratio: float = 0.0,
     model: str = "",
     spent: int = 0,
-    note: str = "",
     width: int = 80,
     stream=None,
 ) -> str:
@@ -651,12 +682,6 @@ def status(
     if spent:
         left.append((f"{tokens(spent)} tokens", DIM))
 
-    #: How many of those survive to the last: the name, the branch, and the
-    #: meter. The first two say which checkout is about to be edited and the
-    #: third says whether the next turn has room to do it -- the three things
-    #: here that change what a keystroke means.
-    KEPT = 3
-
     # Measured plain and painted afterwards: `terminal.fit` hands coloured text
     # back whole rather than cutting an escape in half, so a row assembled in
     # colour could not be trimmed at all.
@@ -667,16 +692,8 @@ def status(
     def plain(parts: list[tuple[str, str]]) -> str:
         return "  ".join(text for text, _ in parts)
 
-    reserved = terminal.visible(note) + 1 if note else 0
-    while len(plain(left)) + reserved > width - 1:
-        if len(left) > KEPT:
-            left.pop()
-        elif note:
-            # The note goes once the spend and the model have: it is news about
-            # a release, and a terminal this narrow should spend its columns on
-            # the session in front of it rather than on the next one.
-            note, reserved = "", 0
-        elif len(left) > 1:
+    while len(plain(left)) > width - 1:
+        if len(left) > 1:
             left.pop()
         else:
             # Nothing left to drop. The name alone is wider than the terminal,
@@ -684,11 +701,7 @@ def status(
             left = [(terminal.fit(plain(left), width - 1), left[0][1])]
             break
 
-    row = "  ".join(terminal.paint(text, colour, stream) for text, colour in left)
-    if not note:
-        return f" {row}"
-    pad = max(1, width - 1 - len(plain(left)) - terminal.visible(note))
-    return f" {row}{' ' * pad}{terminal.paint(note, DIM, stream)}"
+    return " " + "  ".join(terminal.paint(text, colour, stream) for text, colour in left)
 
 
 def footer_rows(mode: str, cycles: bool = True, stream=None, **fields) -> str:

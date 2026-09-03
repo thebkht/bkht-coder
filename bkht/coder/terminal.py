@@ -53,6 +53,7 @@ ACCENT = _hue("\033[38;5;33m", BLUE)
 
 CLEAR_LINE = "\r\033[2K"
 CURSOR_UP = "\033[A"
+CURSOR_DOWN = "\033[B"
 #: Clear from the cursor to the bottom of the screen. What takes back a block
 #: several rows tall: one code, and it does not care which of those rows wrapped.
 ERASE_BELOW = "\r\033[J"

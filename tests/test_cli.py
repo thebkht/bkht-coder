@@ -288,10 +288,12 @@ class _Permissions:
 class _Line:
     """A StatusLine with nothing to look up."""
 
+    note = ""
+
     def fields(self):
         return {
             "name": "bkht-coder", "branch": "main", "ratio": 0.24,
-            "model": "qwen2.5-coder:7b", "spent": 3100, "note": "", "width": 100,
+            "model": "qwen2.5-coder:7b", "spent": 3100, "width": 100,
         }
 
 
@@ -316,3 +318,18 @@ def test_the_pinned_block_says_what_the_turn_is_changing():
     line.fields = lambda: {**_Line().fields(), "ratio": 0.91, "spent": 12000}
     assert block()[3] != before
     assert "91% used" in block()[3]
+
+
+def test_a_release_waiting_is_a_row_above_the_frame():
+    # Above and to the right: it is news about the next version of the program,
+    # not about the line being typed, so it sits outside the frame the line is
+    # typed into rather than in the footer, which is about the line.
+    line = _Line()
+    line.note = "v0.3.0 available · coder update"
+    rows = cli.pinned_block(_Permissions(), line, stream=io.StringIO())()
+    assert len(rows) == 6
+    assert rows[0].strip() == "v0.3.0 available · coder update"
+    assert rows[0].startswith(" ")
+    assert set(rows[1].strip()) == {"─"}
+    # And nowhere else: it used to crowd the right-hand end of the status row.
+    assert "v0.3.0" not in rows[4]
