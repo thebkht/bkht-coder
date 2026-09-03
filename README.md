@@ -511,6 +511,14 @@ frame pinned under itself and the answer scrolls above it. The input in it is
 empty, and stays empty — this is a picture of the prompt, not an editor, and a
 box with words in it would promise a turn could read what was typed into it.
 
+It stays up while the answer is still arriving, too. Prose comes a fragment at
+a time and almost never ends on a newline, so a block that stood down for an
+unfinished sentence stood down for the whole answer. A half-written line keeps
+its own row and the block sits below it, and the cursor is put back at the
+column the sentence stopped at — modulo the terminal, because a sentence longer
+than the screen has already wrapped and the count of what was written is not
+the column it is in.
+
 Where there is no line editor — Windows, a pipe, an IDE console — the same two
 footer rows are printed above the input instead of under it. Above is the only
 side `readline` leaves free, and the rows are worth more out of place than
@@ -759,6 +767,20 @@ retry, and the retry exists to get a different answer.
 
 `keep_alive` is **30m**, so a conversation does not reload nine gigabytes of
 weights between two turns on Ollama's five-minute idle timer.
+
+**The reply is read on a thread of its own**, and handed to the renderer over a
+queue. Two things follow from that, and the second was the reason for it.
+
+Esc raises `KeyboardInterrupt` in the main thread, and the main thread only
+notices between bytecodes. Blocked in a socket read it is running no bytecode
+at all — so an Esc pressed during the wait before the first token was
+remembered and delivered whenever the model happened to speak, which on a 14b
+is most of a minute later. Waiting on a queue in short hops is bytecode, so the
+key now lands when it is pressed.
+
+The socket also stops going undrained while the screen is being written to. One
+thread doing both read a chunk, then parsed and drew it, and only then went
+back for the next one.
 
 `options.num_ctx` is always sent. Ollama defaults to 2048 and silently
 truncates past it, which is the most common cause of a bad local-model session;
