@@ -182,3 +182,53 @@ def test_text_on_the_clipboard_is_not_saved_as_an_image(monkeypatch):
     monkeypatch.setattr(cli.clipboard, "read_image", lambda: b"just copied text")
     stream_said = spoken(lambda stream: cli.attach_image(stream))
     assert "no image on the clipboard" in stream_said
+
+
+def test_an_image_is_encoded_once_and_then_remembered(tmp_path, monkeypatch):
+    """The provider encodes every image on every round trip; a turn makes many."""
+    monkeypatch.setattr(clipboard, "_ENCODED", {})
+    path = tmp_path / "shot.png"
+    path.write_bytes(b"first")
+
+    reads = []
+    real = type(path).read_bytes
+    monkeypatch.setattr(
+        type(path), "read_bytes", lambda self: (reads.append(self), real(self))[1]
+    )
+
+    assert clipboard.encode(path) == clipboard.encode(path) == clipboard.encode(path)
+    assert len(reads) == 1
+
+
+def test_an_image_replaced_at_the_same_path_is_encoded_again(tmp_path, monkeypatch):
+    """A stale image is a wrong answer, not a slow one, so identity is checked."""
+    monkeypatch.setattr(clipboard, "_ENCODED", {})
+    path = tmp_path / "shot.png"
+
+    path.write_bytes(b"first")
+    before = clipboard.encode(path)
+    path.write_bytes(b"second image entirely")
+    assert clipboard.encode(path) != before
+
+
+def test_a_deleted_image_still_raises_so_the_caller_can_drop_it(tmp_path, monkeypatch):
+    """`_with_images` drops an unreadable path rather than losing the turn."""
+    monkeypatch.setattr(clipboard, "_ENCODED", {})
+    path = tmp_path / "gone.png"
+    path.write_bytes(b"here")
+    clipboard.encode(path)
+    path.unlink()
+
+    with pytest.raises(OSError):
+        clipboard.encode(path)
+    sent = _with_images({"role": "user", "content": "hi", "images": [str(path)]})
+    assert "images" not in sent and sent["content"] == "hi"
+
+
+def test_the_cache_does_not_grow_without_bound(tmp_path, monkeypatch):
+    monkeypatch.setattr(clipboard, "_ENCODED", {})
+    for index in range(clipboard._ENCODED_LIMIT * 2):
+        path = tmp_path / f"{index}.png"
+        path.write_bytes(bytes([index]))
+        clipboard.encode(path)
+    assert len(clipboard._ENCODED) == clipboard._ENCODED_LIMIT

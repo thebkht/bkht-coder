@@ -116,6 +116,38 @@ def save(data: bytes, directory: Path | None = None) -> Path:
     return path
 
 
+#: Encoded images, keyed by path, holding the identity the encoding was made
+#: from so a file replaced in place is noticed. Small, because a session pastes
+#: images one at a time and only the ones still in the history are ever asked
+#: for again; the oldest entry goes when it fills.
+_ENCODED: dict[str, tuple[int, int, str]] = {}
+_ENCODED_LIMIT = 8
+
+
 def encode(path: Path | str) -> str:
-    """A saved image as base64, which is how Ollama takes one."""
-    return base64.b64encode(Path(path).read_bytes()).decode("ascii")
+    """A saved image as base64, which is how a model takes one.
+
+    Remembered between calls. The provider encodes every image on the message
+    it sends, and a turn sends its whole history once per round trip -- so a
+    single pasted screenshot was read off disk and encoded up to twenty-five
+    times to produce twenty-five identical strings.
+
+    Keyed on the file's identity rather than its name: an image re-saved at the
+    same path is a different image, and returning the old bytes for it would be
+    a wrong answer rather than a slow one. A missing file still raises, which
+    is what lets the caller drop it and keep the turn.
+    """
+    path = Path(path)
+    key = str(path)
+    stat = path.stat()  # raises OSError for a path that is gone, as before
+    identity = (stat.st_mtime_ns, stat.st_size)
+
+    remembered = _ENCODED.get(key)
+    if remembered is not None and remembered[:2] == identity:
+        return remembered[2]
+
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    if len(_ENCODED) >= _ENCODED_LIMIT and key not in _ENCODED:
+        del _ENCODED[next(iter(_ENCODED))]
+    _ENCODED[key] = (*identity, encoded)
+    return encoded

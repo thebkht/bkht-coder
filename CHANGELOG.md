@@ -9,6 +9,35 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ## [Unreleased]
 
+### Changed
+
+- A pasted image is encoded once instead of once per round trip. The provider
+  base64s every image on the message it sends, and a turn sends its whole
+  history on each of up to twenty-five iterations, so one screenshot was read
+  off disk and encoded twenty-five times to produce twenty-five identical
+  strings. Keyed on the file's identity rather than its name, so an image
+  re-saved at the same path is encoded again.
+
+### Measured
+
+Two other candidates were built, measured and dropped, which is the more useful
+half of the result:
+
+- **Running a round's tool calls concurrently.** The protocol is one call per
+  reply and says so in the prompt; across 558 sessions on this machine, 187 of
+  189 replies carrying a call carried exactly one. Concurrency in the loop
+  would apply to 1% of rounds, so it was not added.
+- **Caching the workspace read that scouting does before every turn.** Built
+  and measured at **8%** of scout on this repository -- 94 ms to 87 ms -- because
+  reading is not where scout's time goes; the per-line regex scan is, and that
+  depends on the terms, which change every turn. Seven milliseconds against an
+  eleven-second turn does not pay for a cache that can serve a stale file, so
+  it was reverted.
+
+The image change was kept on the opposite reasoning: 4.2 ms to 0.012 ms on the
+repeated call, and unlike the scout cache its saving grows with the file rather
+than staying a fixed fraction of it.
+
 ## [0.5.0] - 2026-09-03
 
 ### Added
