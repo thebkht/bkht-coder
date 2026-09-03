@@ -636,17 +636,26 @@ def status(
     """
     if not name:
         return ""
+    # Ordered by what is worth reading first, which is also the reverse of the
+    # order they are dropped in: where you are, then how much room is left,
+    # then what is answering, then what it has spent.
     left: list[tuple[str, str]] = [(name, terminal.BOLD)]
     if branch:
         left.append((f"({branch})", terminal.ACCENT))
-    if model:
-        left.append((f"[{model}]", DIM))
     if ratio or spent:
         meter = terminal.bar(ratio, METER, stream)
         colour = terminal.ORANGE if ratio >= WARM_AT else DIM
         left.append((f"ctx {meter} {round(ratio * 100)}% used", colour))
+    if model:
+        left.append((f"[{model}]", DIM))
     if spent:
         left.append((f"{tokens(spent)} tokens", DIM))
+
+    #: How many of those survive to the last: the name, the branch, and the
+    #: meter. The first two say which checkout is about to be edited and the
+    #: third says whether the next turn has room to do it -- the three things
+    #: here that change what a keystroke means.
+    KEPT = 3
 
     # Measured plain and painted afterwards: `terminal.fit` hands coloured text
     # back whole rather than cutting an escape in half, so a row assembled in
@@ -660,12 +669,15 @@ def status(
 
     reserved = terminal.visible(note) + 1 if note else 0
     while len(plain(left)) + reserved > width - 1:
-        if len(left) > 1:
+        if len(left) > KEPT:
             left.pop()
         elif note:
-            # The note goes last but one: it is an aside, and a terminal too
-            # narrow for both should spend its columns on where you are.
+            # The note goes once the spend and the model have: it is news about
+            # a release, and a terminal this narrow should spend its columns on
+            # the session in front of it rather than on the next one.
             note, reserved = "", 0
+        elif len(left) > 1:
+            left.pop()
         else:
             # Nothing left to drop. The name alone is wider than the terminal,
             # so it is cut -- the only case in this row where a field is.

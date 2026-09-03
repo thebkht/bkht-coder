@@ -415,6 +415,24 @@ def test_the_status_row_is_nothing_without_a_workspace_to_name():
     assert lineedit.status("") == ""
 
 
+def test_the_row_reads_in_the_order_it_is_worth_reading():
+    row = lineedit.status(
+        "bkht-coder", branch="main", ratio=0.5, model="m", spent=8000, width=120,
+    )
+    assert row.index("bkht-coder") < row.index("(main)") < row.index("ctx") < row.index("[m]")
+
+
+def test_the_meter_outlives_the_model_and_the_spend():
+    # Narrowing drops what is worth least. Whether the next turn has room to
+    # run is worth more than which model is running or what the last one cost.
+    row = lineedit.status(
+        "bkht-coder", branch="main", ratio=0.5, model="qwen2.5-coder:14b",
+        spent=8000, note="v0.3.0 available", width=62,
+    )
+    assert "ctx" in row
+    assert "qwen" not in row and "tokens" not in row and "v0.3.0" not in row
+
+
 def test_the_status_row_drops_fields_rather_than_wrapping():
     wide = lineedit.status(
         "bkht-coder", branch="main", ratio=0.5, model="qwen2.5-coder:14b",
