@@ -158,11 +158,18 @@ jobs:
           BKHT_CODER_REPO: '.'
         run: ./scripts/install.ps1
 
+      # `coder doctor` exits non-zero when a check fails, and on a runner with
+      # no model server one does -- correctly. So its exit code is the wrong
+      # thing to gate on; that it emits parseable JSON is the right one, and
+      # says the whole import graph loaded rather than merely that a binary
+      # exists.
       - name: And installed something that works
         run: |
           $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
           coder --version
-          coder doctor --json | Out-Null
+          coder --help | Out-Null
+          coder doctor --json | python -c "import json, sys; json.load(sys.stdin)"
+          Write-Host 'coder runs
 
   installer-posix:
     name: install.sh (${{ matrix.os }})
@@ -183,7 +190,10 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update -qq && sudo apt-get install -y shellcheck
-          shellcheck --shell=sh scripts/install.sh
+          # Warnings and up. The info level fires on `printf '... $HOME ...'`,
+          # which is a line whose whole job is to print shell syntax literally
+          # for the reader to paste.
+          shellcheck --severity=warning --shell=sh scripts/install.sh
 
       - name: A server for it to find
         run: |
@@ -205,7 +215,7 @@ jobs:
           HTTPServer(("127.0.0.1", 11434), Tags).serve_forever()
           PY
           python3 stub-ollama.py &
-          for i in $(seq 30); do
+          for _ in $(seq 30); do
             if curl -sf -o /dev/null http://127.0.0.1:11434/api/tags; then exit 0; fi
             sleep 1
           done
@@ -219,8 +229,12 @@ jobs:
           BKHT_CODER_REPO: '.'
         run: sh scripts/install.sh
 
+      # See the note on the Windows job: doctor's exit code reports the checks,
+      # not whether it ran.
       - name: And installed something that works
         run: |
           PATH="$HOME/.local/bin:$PATH"
           coder --version
-          coder doctor --json > /dev/null
+          coder --help > /dev/null
+          coder doctor --json | python3 -c "import json, sys; json.load(sys.stdin)"
+          echo 'coder runs'

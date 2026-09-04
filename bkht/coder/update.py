@@ -202,15 +202,28 @@ def notice(settings=None, stream=None) -> str:
 #: uv verifies TLS against roots it bundles itself, so a proxy or antivirus
 #: that re-signs HTTPS -- the ordinary managed-laptop setup -- fails with
 #: `invalid peer certificate: UnknownIssuer` on a machine where git, curl and
-#: the browser all work. These tell uv to trust the platform's certificate
+#: the browser all work. This tells uv to trust the platform's certificate
 #: store instead.
 #:
-#: Set as environment variables rather than passed as a flag, and in both
-#: spellings, because the flag was renamed (`--native-tls` to `--system-certs`)
-#: and this has to work on whichever uv the user already has: an environment
-#: variable uv does not know is ignored, where a flag it does not know is a
-#: hard error that would replace the real failure with a worse one.
-SYSTEM_CERTS = {"UV_NATIVE_TLS": "1", "UV_SYSTEM_CERTS": "1"}
+#: Set as an environment variable rather than passed as a flag, because a flag
+#: uv does not know is a hard error that would replace the real failure with a
+#: worse one. Which variable is asked of uv itself: the setting was renamed
+#: from `--native-tls` to `--system-certs`, and a uv new enough to have the
+#: second warns about the first -- so setting both would put a scolding in the
+#: middle of an install that is already going badly.
+NEW_CERTS, OLD_CERTS = "UV_SYSTEM_CERTS", "UV_NATIVE_TLS"
+
+
+def _certs_variable() -> str:
+    """Whichever spelling this uv understands, its own help being the authority."""
+    try:
+        help_text = subprocess.run(
+            ["uv", "tool", "install", "--help"],
+            capture_output=True, encoding="utf-8", errors="replace", timeout=30,
+        ).stdout or ""
+    except (OSError, subprocess.SubprocessError):
+        return NEW_CERTS
+    return NEW_CERTS if "--system-certs" in help_text else OLD_CERTS
 
 TLS_HELP = """\
 That is uv failing to verify TLS, not coder failing to build. It usually means
@@ -245,7 +258,7 @@ def _install(tag: str) -> int:
             return 0
 
         print("\nRetrying with this machine's certificate store.")
-        code = subprocess.call(argv, env={**os.environ, **SYSTEM_CERTS})
+        code = subprocess.call(argv, env={**os.environ, _certs_variable(): "1"})
         if code != 0:
             print("\n" + TLS_HELP.format(target=target))
         return code

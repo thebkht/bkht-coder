@@ -246,11 +246,12 @@ if ($env:BKHT_CODER_REPO) {
 # and everything else work. Retried against the platform certificate store,
 # which is where that machine's real root already is.
 #
-# Set as environment variables rather than passed as a flag, and in both
-# spellings, because the flag was renamed (`--native-tls` to `--system-certs`)
-# and this has to work on whichever uv the user already has: an environment
-# variable uv does not know is ignored, where a flag it does not know is a hard
-# error that would replace the real failure with a worse one.
+# Set as an environment variable rather than passed as a flag, because a flag
+# uv does not know is a hard error that would replace the real failure with a
+# worse one. Which variable is asked of uv itself: the setting was renamed from
+# `--native-tls` to `--system-certs`, and a uv new enough to have the second
+# prints a deprecation warning for the first -- so setting both would put a
+# scolding in the middle of an install that is already going badly.
 # PowerShell 7.4 turned `$PSNativeCommandUseErrorActionPreference` on by
 # default, which makes a non-zero exit from a native command throw under
 # `$ErrorActionPreference = 'Stop'`. That would end the script on the first
@@ -265,8 +266,11 @@ if (Test-Path Variable:PSNativeCommandUseErrorActionPreference) {
 uv tool install --force $target
 if ($LASTEXITCODE -ne 0) {
     Write-Warn "retrying with this machine's certificate store"
-    $env:UV_NATIVE_TLS = '1'
-    $env:UV_SYSTEM_CERTS = '1'
+    if ((uv tool install --help 2>&1 | Out-String) -match '--system-certs') {
+        $env:UV_SYSTEM_CERTS = '1'
+    } else {
+        $env:UV_NATIVE_TLS = '1'
+    }
     uv tool install --force $target
 }
 

@@ -285,9 +285,23 @@ def test_a_failed_install_is_retried_against_the_system_cert_store(monkeypatch, 
         return 1 if env is None else 0
 
     monkeypatch.setattr(update.subprocess, "call", call)
+    monkeypatch.setattr(update, "_certs_variable", lambda: update.NEW_CERTS)
     assert update._install("0.7.1") == 0
     assert calls[0] is None
-    assert calls[1]["UV_NATIVE_TLS"] == "1" and calls[1]["UV_SYSTEM_CERTS"] == "1"
+    assert calls[1][update.NEW_CERTS] == "1"
+
+
+def test_the_certificate_variable_is_whichever_this_uv_understands(monkeypatch):
+    # uv renamed it, and a uv new enough to have the new spelling scolds you
+    # for the old one -- in the middle of an install that is already failing.
+    def helped(text):
+        return lambda *a, **k: type("R", (), {"stdout": text})()
+
+    monkeypatch.setattr(update.subprocess, "run", helped("  --system-certs  ..."))
+    assert update._certs_variable() == update.NEW_CERTS
+
+    monkeypatch.setattr(update.subprocess, "run", helped("  --native-tls  ..."))
+    assert update._certs_variable() == update.OLD_CERTS
 
 
 def test_a_successful_install_is_not_retried(monkeypatch):

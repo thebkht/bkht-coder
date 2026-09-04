@@ -275,12 +275,22 @@ fi
 # uv verifies TLS against roots it bundles itself, so a proxy or antivirus that
 # re-signs HTTPS fails here with `invalid peer certificate: UnknownIssuer` on a
 # machine where git, curl and the browser all work. Retried against the
-# platform certificate store, in both spellings of the setting, because the
-# flag was renamed and an environment variable uv does not know is ignored
-# where an unknown flag would be a hard error hiding the real one.
+# platform certificate store.
+#
+# Set as an environment variable rather than passed as a flag, because a flag
+# uv does not know is a hard error that would replace the real failure with a
+# worse one. Which variable is asked of uv itself: the setting was renamed from
+# `--native-tls` to `--system-certs`, and a uv new enough to have the second
+# warns about the first -- so setting both would put a scolding in the middle
+# of an install that is already going badly.
 if ! uv tool install --force "$TARGET"; then
   warn "retrying with this machine's certificate store"
-  if ! UV_NATIVE_TLS=1 UV_SYSTEM_CERTS=1 uv tool install --force "$TARGET"; then
+  if uv tool install --help 2>&1 | grep -q -- '--system-certs'; then
+    CERTS="UV_SYSTEM_CERTS=1"
+  else
+    CERTS="UV_NATIVE_TLS=1"
+  fi
+  if ! env "$CERTS" uv tool install --force "$TARGET"; then
     printf '\n'
     printf 'If that failed on a certificate error, a proxy or antivirus is signing\n'
     printf 'HTTPS here. Either install from a Python you already have, so uv\n'
