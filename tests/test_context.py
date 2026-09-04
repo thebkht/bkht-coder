@@ -251,3 +251,15 @@ def test_a_turn_summarizes_at_most_once(project):
     assert agent.run("carry on").answer == "done"
     summarizing = [c for c in provider.calls if SUMMARY_INSTRUCTION in c[0]["content"]]
     assert len(summarizing) == 1, "summarized more than once in a single turn"
+
+
+def test_a_fresh_session_reads_as_empty():
+    session = Session(system="x" * 40000)
+    assert usage_ratio(session, 32768) == 0.0
+
+
+def test_clearing_puts_the_bar_back_to_nothing():
+    session = Session(system="x" * 4000, messages=history(6))
+    session.record_usage(8192, 10)
+    session.clear()
+    assert usage_ratio(session, 32768) == 0.0

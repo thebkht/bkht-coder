@@ -9,6 +9,17 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A fresh session's context bar read a fifth full before anything was sent.**
+  `usage_ratio` falls back to estimating from the payload when the backend has
+  not reported a token count, and the payload includes the system prompt -- so
+  with no messages at all it answered with the size of a prompt the model had
+  not been given, and `/clear` could not put the bar back to zero. On this
+  repository that was 19% before a word had been typed. It now reads 0% until
+  there is something in the history, which is the question the row was always
+  asking.
+
 ## [0.6.0] - 2026-09-04
 
 ### Added

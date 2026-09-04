@@ -107,8 +107,16 @@ def _walk(root: Path):
 
 
 def usage_ratio(session, num_ctx: int) -> float:
-    """How full the context window is, as a fraction."""
-    if not num_ctx:
+    """How full the context window is, as a fraction.
+
+    Zero until something has actually been sent. The estimate below is a
+    fallback for backends that never report a count, and it reads the whole
+    payload -- system prompt included -- so on a session with no messages yet
+    it answers with the size of the prompt the model has not been given. That
+    made a fresh window open at a fifth full and a `/clear` refuse to go back
+    to nothing, which is a bar measuring the wrong thing.
+    """
+    if not num_ctx or not session.messages:
         return 0.0
     used = session.prompt_tokens or estimate_tokens(
         "".join(m.get("content", "") for m in session.payload())
