@@ -138,13 +138,19 @@ class Editor:
 
     # --- reading ------------------------------------------------------------
 
-    def read(self, prompt: str = "› ") -> str:
-        """Read one line. Ctrl-D on an empty line raises ``EOFError``."""
+    def read(self, prompt: str = "› ", prefill: str = "") -> str:
+        """Read one line. Ctrl-D on an empty line raises ``EOFError``.
+
+        ``prefill`` is text the line opens with, cursor at its end -- what was
+        typed while the last turn was running, which the Esc watcher held on
+        to. It is a draft, not a submission: it is edited and sent like
+        anything else typed here.
+        """
         import termios
         import tty
 
-        self.buffer = ""
-        self.cursor = 0
+        self.buffer = prefill
+        self.cursor = len(prefill)
         self.drawn = 0
         self.caret = 0
         self.recall = len(self.history)

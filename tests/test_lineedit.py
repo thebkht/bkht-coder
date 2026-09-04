@@ -513,3 +513,26 @@ def test_the_footer_is_two_rows_when_there_is_a_workspace_to_name():
 
 def test_the_footer_is_the_mode_alone_when_there_is_not():
     assert lineedit.footer_rows("ask") == lineedit.footer("ask")
+
+
+# --- type-ahead from a running turn -----------------------------------------
+
+
+def test_a_prefilled_line_is_an_editable_draft():
+    """What was typed mid-turn opens the line, cursor at its end.
+
+    A draft, not a submission: the user sees it, edits it, and sends it like
+    anything else typed here.
+    """
+    ed = editor()
+    # The state `read(prefill=...)` opens with.
+    ed.buffer, ed.cursor = "what about", len("what about")
+    assert type(ed, " the tests") is None
+    assert type(ed, "\r") == "what about the tests"
+
+
+def test_a_prefilled_line_can_be_backspaced_away():
+    ed = editor()
+    ed.buffer, ed.cursor = "oops", 4
+    type(ed, "\x7f" * 4)
+    assert ed.buffer == ""

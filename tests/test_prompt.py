@@ -82,3 +82,37 @@ def test_the_editor_writes_history_the_readline_path_can_read(tmp_path, monkeypa
     reader.save()
 
     assert Reader(repl=None, history=history).editor.history == ["add a --verbose flag"]
+
+
+# --- type-ahead -------------------------------------------------------------
+
+
+class _Editor:
+    """Just the two things :meth:`Reader.read` asks of an editor."""
+
+    def __init__(self):
+        self.seen = []
+        self.images = []
+
+    def read(self, prompt, prefill=""):
+        self.seen.append((prompt, prefill))
+        return "line"
+
+
+def test_the_editor_is_handed_what_was_typed_during_the_turn():
+    reader = Reader(enabled=False)
+    reader.editor = _Editor()
+    reader.read("> ", "half a question")
+    assert reader.editor.seen == [("> ", "half a question")]
+
+
+def test_the_input_path_is_not_seeded_twice(monkeypatch):
+    """Without our editor the terminal buffered those keys itself.
+
+    They will be delivered to the read below, so seeding the line here would
+    type them a second time.
+    """
+    reader = Reader(enabled=False)
+    reader.editor = None
+    monkeypatch.setattr("builtins.input", lambda prompt: "typed at the prompt")
+    assert reader.read("> ", "already in the tty buffer") == "typed at the prompt"

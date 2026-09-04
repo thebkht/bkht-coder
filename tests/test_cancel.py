@@ -87,12 +87,67 @@ def test_an_arrow_key_is_not_a_cancellation(terminal):
     settle(made)
 
 
-def test_ordinary_typing_is_ignored(terminal):
+def test_ordinary_typing_is_not_a_cancellation(terminal):
     made, fired = watch(terminal)
     terminal.press("hello there")
     assert not fired.wait(timeout=0.3)
     assert made.cancelled is False
     settle(made)
+
+
+def test_ordinary_typing_is_kept_for_the_next_prompt(terminal):
+    """It used to be read and dropped.
+
+    This thread owns the terminal for the length of a turn, so a key pressed
+    during one arrives here and the loop's own read is not running to receive
+    it. A user who typed their next question while waiting watched it vanish.
+    """
+    made, fired = watch(terminal)
+    terminal.press("what about the tests")
+    time.sleep(0.3)
+    settle(made)
+    assert made.typed() == "what about the tests"
+
+
+def test_taking_the_type_ahead_empties_it(terminal):
+    """A draft handed to one prompt must not turn up in the next one too."""
+    made, _ = watch(terminal)
+    terminal.press("once")
+    time.sleep(0.3)
+    settle(made)
+    assert made.typed() == "once"
+    assert made.typed() == ""
+
+
+def test_enter_is_not_carried_over(terminal):
+    """It was meant to send a message nothing was reading.
+
+    Carried over, it would send whatever had been typed the instant the turn
+    ended -- without the user having seen a word of it.
+    """
+    made, _ = watch(terminal)
+    terminal.press("send this\r\n")
+    time.sleep(0.3)
+    settle(made)
+    assert made.typed() == "send this"
+
+
+def test_an_arrow_key_leaves_nothing_behind(terminal):
+    """Its tail is a terminal instruction, not something anybody typed."""
+    made, _ = watch(terminal)
+    terminal.press("\x1b[A")
+    time.sleep(0.3)
+    settle(made)
+    assert made.typed() == ""
+
+
+def test_the_type_ahead_is_bounded(terminal):
+    """This reads whatever the terminal hands over, redirected files included."""
+    made, _ = watch(terminal)
+    terminal.press("x" * (cancel.TYPEAHEAD_LIMIT + 500))
+    time.sleep(0.5)
+    settle(made)
+    assert len(made.typed()) == cancel.TYPEAHEAD_LIMIT
 
 
 def test_an_esc_after_an_arrow_key_still_cancels(terminal):

@@ -44,6 +44,11 @@ SEQUENCE_WAIT = 0.05
 #: how long `pause` waits to take the terminal back, so it is small.
 POLL = 0.05
 
+#: How much type-ahead is carried over from a running turn. A prompt is a
+#: sentence, not a file, and this thread reads whatever the terminal hands it
+#: -- which includes anything somebody redirected into it.
+TYPEAHEAD_LIMIT = 4096
+
 #: What :func:`interruptible` puts on the queue to say the source is finished.
 _DONE = object()
 
@@ -132,6 +137,13 @@ class Watch:
         self.interrupt = interrupt or _thread.interrupt_main
         self.enabled = enabled
         self.cancelled = False
+        #: What was typed while the turn ran. Kept rather than dropped: this
+        #: thread owns the terminal for the length of a turn, so a key pressed
+        #: during one arrives here, and the loop's own read is not running to
+        #: receive it. Read and discarded is what it used to be -- a user who
+        #: typed their next question while waiting watched it vanish -- and
+        #: the honest thing to do with it is hand it to the next prompt.
+        self.buffered = ""
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         # Held for as long as the terminal belongs to somebody: the reader
@@ -210,6 +222,7 @@ class Watch:
                 except Exception:
                     return
                 if key != ESC:
+                    self._keep(key)
                     continue
                 # An arrow key is an Esc with a tail. Wait for one; if none
                 # comes, the Esc was meant on its own.
@@ -227,8 +240,33 @@ class Watch:
             return False
         return bool(ready)
 
+    def _keep(self, key: str) -> None:
+        """Remember one typed character for the next prompt.
+
+        Printable text only. A control character typed mid-turn means
+        something to the terminal and nothing to a line that does not exist
+        yet -- Enter most of all: it was meant to send a message the loop was
+        never reading, and carrying it over would send the text the moment the
+        turn ended, without the user seeing what they had typed.
+
+        Bounded, because this reads whatever the terminal hands over and that
+        includes a file somebody redirected into it.
+        """
+        if len(self.buffered) >= TYPEAHEAD_LIMIT or not key.isprintable():
+            return
+        self.buffered += key
+
+    def typed(self) -> str:
+        """What was typed during the turn, taken rather than copied."""
+        text, self.buffered = self.buffered, ""
+        return text
+
     def _swallow(self, select) -> None:
-        """Read the rest of an escape sequence, so its tail is not typed."""
+        """Read the rest of an escape sequence, so its tail is not typed.
+
+        Not kept: an arrow key is an Esc plus a tail, and the tail is a
+        terminal instruction rather than something anybody typed.
+        """
         while self._pending(select, 0.0):
             try:
                 self.stdin.read(1)

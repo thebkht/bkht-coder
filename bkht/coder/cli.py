@@ -905,7 +905,7 @@ def divider() -> str:
     return f"\n{paint(banner.rule(terminal.width()), DIM)}"
 
 
-def read_line(reader, prompt: str, stream=None) -> str:
+def read_line(reader, prompt: str, stream=None, prefill: str = "") -> str:
     """Read one line, however this reader draws one.
 
     A reader with its own editor draws its own frame -- rules above and below
@@ -924,7 +924,7 @@ def read_line(reader, prompt: str, stream=None) -> str:
     in the scrollback above an answer it says nothing about.
     """
     if getattr(reader, "cycles", False):
-        return reader.read(prompt)
+        return reader.read(prompt, prefill)
 
     stream = sys.stdout if stream is None else stream
     if not terminal.interactive(stream):
@@ -1030,7 +1030,12 @@ def interactive(agent, snapshots, permissions, workspace, listener,
                     print(rows)
             elif reader.cycles:
                 print()
-            text = read_line(reader, PROMPT)
+            # Whatever was typed while the last turn ran opens the line. The
+            # watcher owns the terminal for the length of a turn, so those
+            # keys reached it rather than this read; before it kept them they
+            # were read and dropped, and a user who typed their next question
+            # while waiting watched it disappear.
+            text = read_line(reader, PROMPT, prefill=watch.typed())
         except EOFError:
             print()
             return 0

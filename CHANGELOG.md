@@ -11,6 +11,18 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ### Fixed
 
+- **Typing while a turn ran lost what you typed.** The thread watching for Esc
+  owns the terminal for the length of a turn, and it read every key to find
+  out whether it was one -- then dropped the ones that were not. So a user who
+  started writing their next question while waiting on a local model watched it
+  disappear, with no sign it had ever arrived. What is typed mid-turn is now
+  kept and opens the next prompt as a draft, cursor at its end, editable and
+  sent like anything else typed there. Enter is not carried over: it was meant
+  to send a message nothing was reading, and honouring it would fire the text
+  the instant the turn ended without the user having seen a word of it. Arrow
+  keys leave nothing behind, and the buffer is bounded -- this reads whatever
+  the terminal hands over, including a file somebody redirected into it.
+
 - **A reply that carried a whole imagined turn had all of it executed.** The
   prompt has always promised that a call's result comes back before the next
   call is made, and the loop has never enforced it: `parse_tool_calls` returns

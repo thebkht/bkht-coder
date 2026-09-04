@@ -128,10 +128,16 @@ class Reader:
         except (OSError, ValueError):
             pass
 
-    def read(self, prompt: str = "> ") -> str:
-        """Read one line. Raises EOFError on Ctrl-D, as ``input`` does."""
+    def read(self, prompt: str = "> ", prefill: str = "") -> str:
+        """Read one line. Raises EOFError on Ctrl-D, as ``input`` does.
+
+        ``prefill`` is carried only by our own editor. On the ``input()`` and
+        readline paths the terminal buffered those keystrokes itself and will
+        deliver them to the read below, so seeding the line here would type
+        them twice.
+        """
         if self.editor is not None:
-            return self.editor.read(prompt)
+            return self.editor.read(prompt, prefill)
         return input(prompt)
 
     def images(self) -> list[str]:
