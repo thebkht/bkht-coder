@@ -176,6 +176,13 @@ jobs:
           $report = (coder doctor --json | Out-String)
           $null = $report | ConvertFrom-Json
           Write-Host 'coder runs'
+          # Actions ends a PowerShell step with `exit $LASTEXITCODE`, and
+          # doctor's is the last one set -- so without this the step inherits
+          # the very exit code the lines above went out of their way not to
+          # gate on. Nothing is being swallowed: ConvertFrom-Json throws under
+          # this shell's Stop preference, and a throw fails the step before
+          # ever reaching here.
+          exit 0
 
   installer-posix:
     name: install.sh (${{ matrix.os }})
