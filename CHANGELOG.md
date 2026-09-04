@@ -18,9 +18,14 @@ below it, and the release workflow refuses a tag this file does not describe.
   to study this repo, `qwen2.5-coder:7b` answered in fluent Uzbek having called
   no tool at all, in one run out of four. The language rule is stated first
   now, and the note closes on the work: if the task is not finished, the next
-  reply is a tool call, not prose. Stated as a judgement rather than a measured
-  fix -- the same four runs produced three different outcomes, so nothing at
-  this sample size can tell a prompt change from a dice roll.
+  reply is a tool call, and when it is finished, answer. Both halves matter --
+  this note is appended to every request, including the one `_final_answer`
+  sends after a bounded turn has been told to stop calling tools and answer.
+  A closing line that named only the call contradicted that, and being last it
+  won: two runs out of two were recorded with no answer at all. Stated as a
+  judgement rather than a measured fix -- runs of the same request produce
+  different outcomes, so nothing at this sample size tells a prompt change from
+  a dice roll.
 
 ### Fixed
 

@@ -128,8 +128,22 @@ def test_the_language_reminder_ends_on_the_work_not_the_prose():
     unfinished task is answered with a tool call.
     """
     reminder = language_reminder("Uzbek")
-    assert reminder.rstrip().endswith("your next reply is a tool call, not prose.)")
+    assert reminder.rstrip().endswith("When it is finished, answer.)")
     assert reminder.index("Uzbek") < reminder.index("not finished")
+
+
+def test_the_reminder_does_not_contradict_the_final_answer_request():
+    """It is appended to every request, `_final_answer`'s included.
+
+    That turn has just been told to stop calling tools and answer from what it
+    has. A reminder saying an unfinished task is answered with a call and
+    nothing else is read after it, so it wins -- and the turn is recorded with
+    no answer at all. The rule has to name when to stop as well as when to
+    call.
+    """
+    reminder = language_reminder("Uzbek")
+    assert "not prose" not in reminder
+    assert "When it is finished, answer." in reminder
 
 
 def test_the_reminder_still_marks_itself_as_an_aside_and_names_the_language():

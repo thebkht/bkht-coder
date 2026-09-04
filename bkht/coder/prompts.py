@@ -191,8 +191,8 @@ LANGUAGE_REMINDER = """\
 File paths, code, command lines, and the JSON of a tool call are unaffected --
 they keep their exact form, and a call carries no language at all.
 
-None of that is a reason to answer yet. If the task above is not finished,
-your next reply is a tool call, not prose.)"""
+None of that is a reason to answer yet: if the task above is not finished, your
+next reply is a tool call. When it is finished, answer.)"""
 
 
 def language_reminder(language: str) -> str:
@@ -210,6 +210,13 @@ def language_reminder(language: str) -> str:
     in fluent Uzbek having called nothing at all, in one run out of four. So
     the language rule is stated first and the note ends on the work: the final
     line it reads is the one saying an unfinished task is answered with a call.
+
+    Which is why that line names both halves. It said only the first --
+    "your next reply is a tool call, not prose" -- and this note is appended to
+    every request, `_final_answer`'s included. So a bounded turn read
+    `out_of_steps` telling it to stop calling tools and answer, and then read
+    this telling it not to; last wins, and the turn was recorded with no answer
+    at all. A rule about when to call has to say when to stop.
     """
     return LANGUAGE_REMINDER.format(language=language)
 
