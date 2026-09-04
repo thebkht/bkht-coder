@@ -1,10 +1,13 @@
 """User commands fired on tool events."""
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from bkht.coder import hooks
+from bkht.coder import hooks as hooks_module
+from bkht.coder.hooks import POST_TOOL, Hooks
 
 
 class Ran:
@@ -246,3 +249,91 @@ def test_a_command_the_shell_cannot_find_fails_closed(tmp_path):
     fired = build({"pre_tool": ["gate.sh"]}, tmp_path, runner=ran).fire(hooks.PRE_TOOL)
     assert not fired[0].broken
     assert fired[0].blocked
+
+
+# --- hooks written as files -----------------------------------------------
+
+
+def write_hook(root, event, name="run.sh", executable=True):
+    directory = root / "agent" / "hooks" / event
+    directory.mkdir(parents=True, exist_ok=True)
+    (root / "agent" / "agent.json").write_text("{}")
+    path = directory / name
+    path.write_text("#!/bin/sh\necho ran\n")
+    if executable:
+        path.chmod(0o755)
+    return path
+
+
+@pytest.fixture(autouse=True)
+def no_global_agent(monkeypatch, tmp_path):
+    monkeypatch.setattr(hooks_module.layout, "GLOBAL_ROOT", tmp_path / "nowhere")
+
+
+def test_the_directory_names_the_event(tmp_path):
+    write_hook(tmp_path, "post_tool", "format.sh")
+
+    found, problems = hooks_module.discover(tmp_path)
+    assert found == {"post_tool": ["agent/hooks/post_tool/format.sh"]}
+    assert problems == []
+
+
+def test_a_file_without_the_execute_bit_is_reported_not_skipped(tmp_path):
+    # Silently ignoring it looks exactly like a hook that fired and did nothing.
+    write_hook(tmp_path, "post_tool", "format.sh", executable=False)
+
+    found, problems = hooks_module.discover(tmp_path)
+    assert found == {}
+    assert "not executable" in problems[0]
+
+
+def test_an_unknown_event_directory_is_reported(tmp_path):
+    write_hook(tmp_path, "post_turn", "build.sh")
+
+    found, problems = hooks_module.discover(tmp_path)
+    assert found == {} and "unknown hook event" in problems[0]
+
+
+def test_hooks_on_one_event_keep_their_name_order(tmp_path):
+    write_hook(tmp_path, "post_tool", "20-lint.sh")
+    write_hook(tmp_path, "post_tool", "10-format.sh")
+
+    found, _ = hooks_module.discover(tmp_path)
+    assert [Path(command).name for command in found["post_tool"]] == [
+        "10-format.sh", "20-lint.sh",
+    ]
+
+
+def test_a_path_with_a_space_in_it_is_quoted(tmp_path):
+    write_hook(tmp_path, "post_tool", "run it.sh")
+
+    found, _ = hooks_module.discover(tmp_path)
+    assert found["post_tool"] == ["'agent/hooks/post_tool/run it.sh'"]
+
+
+def test_an_unmarked_agent_directory_contributes_no_hooks(tmp_path):
+    # Arbitrary commands out of somebody else's repository, fired without
+    # asking, is the exact thing the marker exists to prevent.
+    directory = tmp_path / "agent" / "hooks" / "post_tool"
+    directory.mkdir(parents=True)
+    (directory / "theirs.sh").write_text("#!/bin/sh\n")
+    (directory / "theirs.sh").chmod(0o755)
+
+    assert hooks_module.discover(tmp_path) == ({}, [])
+
+
+def test_config_hooks_and_file_hooks_both_run_config_first(tmp_path):
+    combined = hooks_module.combine(
+        {"post_tool": ["ruff format"]}, {"post_tool": ["agent/hooks/post_tool/x.sh"]}
+    )
+    assert combined == {"post_tool": ["ruff format", "agent/hooks/post_tool/x.sh"]}
+
+
+def test_a_file_hook_actually_fires(tmp_path):
+    path = write_hook(tmp_path, "post_tool", "format.sh")
+    path.write_text("#!/bin/sh\necho formatted\n")
+    path.chmod(0o755)
+
+    found, _ = hooks_module.discover(tmp_path)
+    [result] = Hooks(commands=found, root=tmp_path).fire(POST_TOOL, tool="write_file")
+    assert result.code == 0 and "formatted" in result.output

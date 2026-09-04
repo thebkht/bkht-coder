@@ -17,8 +17,12 @@ Three events, and only one of them can say no:
 ``turn_end``
     Once, after the turn has stopped, however it stopped.
 
-Hooks are read from ``config.json`` beside the settings, as ``event -> list of
-commands``. They are shell commands, run in the workspace root, so **a hook is
+Hooks are read from two places. ``config.json``, beside the settings, holds
+``event -> list of commands``; and ``agent/hooks/<event>/`` holds one
+executable file per hook, where the directory names the event and the file is
+the command. The second exists because a hook is a script that grew: written
+inline it is a JSON string with escaped quotes in it, and written as a file it
+is a file, reviewable in a diff like any other. Both fire, config first. They are shell commands, run in the workspace root, so **a hook is
 arbitrary code from a config file** -- see ``SECURITY.md``, and see ``coder
 doctor``, which lists every hook it can find precisely so that none of them is
 invisible.
@@ -37,9 +41,12 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from . import layout
 
 PRE_TOOL = "pre_tool"
 POST_TOOL = "post_tool"
@@ -148,6 +155,70 @@ def parse(raw: object) -> tuple[dict[str, list[str]], list[str]]:
         if kept:
             parsed[event] = kept
     return parsed, problems
+
+
+def discover(root, include_global: bool = True) -> tuple[dict[str, list[str]], list[str]]:
+    """The hooks written as files under ``agent/hooks/``, and what was refused.
+
+    The event is the directory, so ``agent/hooks/post_tool/format.sh`` needs
+    nothing written inside it to say when it runs. Files are taken in name
+    order within an event, which is the only order there is to offer: two
+    hooks on one event run one after the other, and a user who cares which
+    numbers them.
+
+    The execute bit is required. Everything in a directory is a candidate to
+    run, and without that check a README dropped in beside the hooks would be
+    executed as one -- so a file without it is reported rather than skipped,
+    because a hook that silently never fires is worse than one that never
+    existed.
+    """
+    found: dict[str, list[str]] = {}
+    problems: list[str] = []
+
+    for directory in layout.surface(root, include_global=include_global).slot("hooks"):
+        for event_directory in sorted(directory.iterdir()):
+            name = event_directory.name
+            if not event_directory.is_dir():
+                problems.append(
+                    f"{layout.label(event_directory, root)}: not a hook event directory"
+                )
+                continue
+            if name not in EVENTS:
+                problems.append(
+                    f"{layout.label(event_directory, root)}: unknown hook event "
+                    f"{name!r}; known: {', '.join(EVENTS)}"
+                )
+                continue
+            for path in sorted(event_directory.iterdir()):
+                if not path.is_file():
+                    continue
+                if not os.access(path, os.X_OK):
+                    problems.append(
+                        f"{layout.label(path, root)}: not executable, so it will "
+                        f"never run (`chmod +x` it)"
+                    )
+                    continue
+                # Named relative to the root it runs in where it can be, so the
+                # listing `doctor` prints is both the command and the path to
+                # the file that holds it.
+                found.setdefault(name, []).append(shlex.quote(layout.label(path, root)))
+
+    return found, problems
+
+
+def combine(*blocks: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Every source's hooks for an event, in the order they were given.
+
+    Appended rather than shadowed, which is the opposite of how the two config
+    files layer. A setting is one value and the specific one wins; a hook is a
+    thing that happens, and a project asking for a formatter has not asked for
+    the user's own hook to stop running.
+    """
+    merged: dict[str, list[str]] = {}
+    for block in blocks:
+        for event, commands in block.items():
+            merged.setdefault(event, []).extend(commands)
+    return merged
 
 
 @dataclass

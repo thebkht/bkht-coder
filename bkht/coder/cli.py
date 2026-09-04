@@ -18,6 +18,7 @@ from .doctor import running_from, version
 from .context import file_tree, usage_ratio
 from .instructions import load_instructions, render, summarize as summarize_instructions
 from .parsing import ToolCall
+from . import hooks as hooks_module
 from .hooks import Hooks
 from .permissions import ASK, AUTO, PLAN, Permissions, cycle as next_mode
 from .prompts import system_prompt
@@ -305,7 +306,7 @@ def add_agent_arguments(parser) -> None:
     parser.add_argument("--no-planning", action="store_true", default=None, help="Omit the plan tool.")
     parser.add_argument("--no-delegation", action="store_true", default=None, help="Omit the task tool, which runs a sub-agent.")
     parser.add_argument("--no-verify", action="store_true", default=None, help="Do not run verify_command after a turn.")
-    parser.add_argument("--no-hooks", action="store_true", help="Do not run the hooks configured in config.json.")
+    parser.add_argument("--no-hooks", action="store_true", help="Do not run any hook, from config.json or agent/hooks/.")
     parser.add_argument("--max-iterations", type=int, default=None, help="Cap on loop iterations per task.")
     add_common_arguments(parser)
 
@@ -464,7 +465,8 @@ def configured(args):
     is running the model you configured, and is not, is the one case where the
     next surprise is unattributable.
     """
-    settings = config.load(Path(args.cwd).expanduser().resolve())
+    root = Path(args.cwd).expanduser().resolve()
+    settings = config.load(root)
     if settings.error:
         print(paint(settings.error, YELLOW, sys.stderr), file=sys.stderr)
     settings.apply(args)
@@ -472,7 +474,15 @@ def configured(args):
     # `doctor` read hooks the same way they read every other setting -- even
     # though this one never became a flag, because a list per event is not
     # something anybody types at a prompt.
-    args.hooks = settings.hooks
+    #
+    # Two sources, appended rather than shadowed: `combine` says why. The files
+    # are found here rather than in `config.load` because they are not config
+    # -- they are the other half of the same feature, and this is the one place
+    # that has to know both.
+    written, problems = hooks_module.discover(root)
+    args.hooks = hooks_module.combine(settings.hooks, written)
+    for problem in problems:
+        print(paint(problem, YELLOW, sys.stderr), file=sys.stderr)
     # Said out loud, always. Resolution may have moved the session onto a
     # different backend than the default names, and a session running a model
     # the user did not pick is exactly the case where the next surprise has no
