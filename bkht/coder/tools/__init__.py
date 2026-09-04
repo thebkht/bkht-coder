@@ -30,6 +30,7 @@ def build_registry(
     jobs=None,
     session=None,
     delegate=None,
+    agent_tools=None,
 ) -> tuple[Registry, Workspace]:
     """Build the tool set for a workspace rooted at ``root``.
 
@@ -38,6 +39,10 @@ def build_registry(
     is omitted for the same reason when a workspace has none: no skills, no
     ``skill`` tool, and a tool set byte-for-byte what it was before skills
     existed.
+
+    ``agent_tools`` is what a workspace wrote for itself, already discovered
+    and already permitted -- see :mod:`~bkht.coder.usertools` for the three
+    things that have to be true before there is anything in it.
 
     ``session`` and ``delegate`` follow that same rule, and are why a sub-agent
     gets neither ``plan`` nor ``task``: the first is offered only to a loop that
@@ -97,5 +102,14 @@ def build_registry(
             from .background import register_background_tools
 
             register_background_tools(registry, workspace, jobs)
+
+    # Last, so that every built-in name already exists to collide with: a
+    # user tool may add to this set and may not quietly take a name over.
+    if agent_tools:
+        from .. import usertools
+
+        agent_tools.problems.extend(
+            usertools.register(registry, agent_tools, read_only=read_only)
+        )
 
     return registry, workspace

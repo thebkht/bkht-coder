@@ -84,6 +84,7 @@ Flags:
   --verify-command <cmd>  Test command to run after a turn's edits
   --no-verify             Do not run it for this session
   --no-hooks              Do not run any hook, from config.json or agent/hooks/
+  --no-agent-tools        Do not load the tools written under agent/tools/
   --max-iterations <n>    Cap on loop iterations per task
 {COMMON}
   -h, --help              Display this help and exit

@@ -439,3 +439,53 @@ def test_no_hooks_turns_off_a_configured_one(wired, tmp_path):
     # The point of the flag: one session where nothing out of that file runs,
     # for the moment you are not sure what is in it.
     assert wired("--no-hooks").hooks is None
+
+
+# --- what a workspace writes for itself -------------------------------------
+
+
+def write_agent_tool(root):
+    directory = root / "agent" / "tools"
+    directory.mkdir(parents=True, exist_ok=True)
+    (root / "agent" / "agent.json").write_text("{}")
+    (directory / "greet.py").write_text(
+        "from bkht.coder.tools.base import Tool, ToolResult\n\n"
+        "TOOL = Tool(name='x', description='Says hello.',\n"
+        "            parameters={'type': 'object', 'properties': {}},\n"
+        "            run=lambda: ToolResult.success('hello'))\n"
+    )
+
+
+def test_agent_tools_are_not_loaded_until_the_setting_says_so(wired, project):
+    # The marker says the skills and instructions in agent/ are meant. It does
+    # not say the Python in it should be imported.
+    write_agent_tool(project)
+    assert "greet" not in wired().registry.names()
+
+
+def test_agent_tools_load_when_the_setting_is_on(wired, project):
+    write_agent_tool(project)
+    (project / ".bkht-coder").mkdir(exist_ok=True)
+    (project / ".bkht-coder" / "config.json").write_text('{"agent_tools": true}')
+
+    agent = wired()
+    assert "greet" in agent.registry.names()
+    assert agent.registry.get("greet").run().content == "hello"
+
+
+def test_no_agent_tools_turns_them_off_for_one_session(wired, project):
+    write_agent_tool(project)
+    (project / ".bkht-coder").mkdir(exist_ok=True)
+    (project / ".bkht-coder" / "config.json").write_text('{"agent_tools": true}')
+
+    assert "greet" not in wired("--no-agent-tools").registry.names()
+
+
+def test_a_subagent_reaches_the_task_tool(wired, project):
+    directory = project / "agent" / "subagents" / "reviewer"
+    directory.mkdir(parents=True)
+    (project / "agent" / "agent.json").write_text("{}")
+    (directory / "agent.md").write_text("---\ndescription: Reviews a diff.\n---\n")
+
+    task = wired().registry.get("task")
+    assert task.parameters["properties"]["agent"]["enum"] == ["reviewer"]

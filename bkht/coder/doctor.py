@@ -28,6 +28,8 @@ from .provider import DEFAULT_PROVIDER, ProviderError, build
 from .session import STATE_DIR
 from .skills import discover as discover_skills
 from .subagents import discover as discover_subagents
+from . import usertools
+from .tools.base import Workspace
 from .tools.shell import resolve_shell
 from . import verify
 
@@ -701,6 +703,40 @@ def check_verify(root: Path, command: str = "") -> Check:
     )
 
 
+def check_agent_tools(root: Path, enabled: bool = False) -> Check:
+    """Which of the workspace's own tools would be imported, and whether any is.
+
+    Listed for the reason hooks are listed: this is code out of the workspace
+    running in this process, and the whole safety argument for the feature is
+    that it is never invisible. Listed when the setting is off, too -- a
+    workspace that wrote tools and has not turned them on should be told that,
+    not left wondering why the model never calls them.
+    """
+    found = usertools.discover(root, workspace=Workspace(root))
+    if not (found.tools or found.problems):
+        return Check("agent tools", OK, "none")
+
+    if not enabled:
+        return Check(
+            "agent tools", OK,
+            f"{len(found.tools)} written, not loaded (agent_tools is off)",
+            "`coder config set agent_tools true` runs this workspace's Python "
+            "in the agent's own process -- read it first.",
+        )
+
+    if found.problems:
+        return Check(
+            "agent tools", WARN,
+            f"{len(found.tools)} loaded; {len(found.problems)} skipped: "
+            + "; ".join(found.problems),
+            f"A tool file defines {usertools.ATTRIBUTE}, or "
+            f"{usertools.FACTORY}(workspace) returning one.",
+        )
+
+    named = ", ".join(f"{name} ({source})" for name, source in found.listing())
+    return Check("agent tools", OK, named, "These run in this process, without asking.")
+
+
 def check_hooks(configured: dict | None = None) -> Check:
     """Every hook that would run, named.
 
@@ -878,6 +914,7 @@ def run_checks(
     provider: str = DEFAULT_PROVIDER,
     verify_command: str = "",
     hooks: dict | None = None,
+    agent_tools: bool = False,
 ) -> list[Check]:
     """Every check, in the order a failing install should be read in.
 
@@ -897,6 +934,7 @@ def run_checks(
         check_instructions(root),
         check_skills(root),
         check_subagents(root),
+        check_agent_tools(root, agent_tools),
         check_verify(root, verify_command),
         check_hooks(hooks),
     ]
@@ -929,13 +967,14 @@ def report(
     provider: str = DEFAULT_PROVIDER,
     verify_command: str = "",
     hooks: dict | None = None,
+    agent_tools: bool = False,
     as_json: bool = False,
     out=print,
 ) -> int:
     """Run every check and print it. Non-zero exit when one failed, for CI."""
     checks = run_checks(
         root, model=model, host=host, num_ctx=num_ctx, provider=provider,
-        verify_command=verify_command, hooks=hooks,
+        verify_command=verify_command, hooks=hooks, agent_tools=agent_tools,
     )
     out(json.dumps([c.payload() for c in checks], indent=2) if as_json else render(checks))
     return 1 if any(check.failed for check in checks) else 0

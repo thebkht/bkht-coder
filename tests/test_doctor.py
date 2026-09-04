@@ -612,3 +612,42 @@ def test_a_broken_marker_warns_and_says_what_it_should_hold(tmp_path, monkeypatc
 
     check = doctor.check_agent_surface(tmp_path)
     assert check.status == doctor.WARN and "agent.json" in check.fix
+
+
+# --- tools written as files ------------------------------------------------
+
+
+def write_agent_tool(root, name="greet"):
+    directory = root / "agent" / "tools"
+    directory.mkdir(parents=True, exist_ok=True)
+    (root / "agent" / "agent.json").write_text("{}")
+    (directory / f"{name}.py").write_text(
+        "from bkht.coder.tools.base import Tool, ToolResult\n\n"
+        "TOOL = Tool(name='x', description='Says hello.',\n"
+        "            parameters={'type': 'object', 'properties': {}},\n"
+        "            run=lambda: ToolResult.success('hello'))\n"
+    )
+
+
+def test_agent_tools_that_are_written_but_off_are_still_named(tmp_path, monkeypatch):
+    # A workspace that wrote tools and has not turned them on should be told,
+    # not left wondering why the model never calls them.
+    monkeypatch.setattr(doctor.layout, "GLOBAL_ROOT", tmp_path / "nowhere")
+    write_agent_tool(tmp_path)
+
+    check = doctor.check_agent_tools(tmp_path, enabled=False)
+    assert check.status == doctor.OK and "not loaded" in check.detail
+    assert "agent_tools" in check.fix
+
+
+def test_agent_tools_that_are_on_are_named_with_their_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(doctor.layout, "GLOBAL_ROOT", tmp_path / "nowhere")
+    write_agent_tool(tmp_path)
+
+    check = doctor.check_agent_tools(tmp_path, enabled=True)
+    assert "greet (agent/tools/greet.py)" in check.detail
+
+
+def test_a_workspace_with_no_agent_tools_says_none(tmp_path, monkeypatch):
+    monkeypatch.setattr(doctor.layout, "GLOBAL_ROOT", tmp_path / "nowhere")
+    assert doctor.check_agent_tools(tmp_path).detail == "none"

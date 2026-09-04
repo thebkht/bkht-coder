@@ -38,6 +38,19 @@ def no_backend_probe(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def no_personal_agent_directory(monkeypatch, tmp_path):
+    """Point the global ``agent/`` root somewhere empty.
+
+    It is a real directory in a real home, so without this the suite would
+    load whatever the developer running it happens to keep there -- and a test
+    that passes on one machine and fails on the next is worse than no test.
+    """
+    from bkht.coder import layout
+
+    monkeypatch.setattr(layout, "GLOBAL_ROOT", tmp_path / "no-such-home" / "agent")
+
+
 @pytest.fixture
 def workspace(tmp_path: Path) -> Workspace:
     """An empty workspace rooted at a temp directory."""

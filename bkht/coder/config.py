@@ -114,6 +114,10 @@ FIELDS: tuple[Field, ...] = (
     # Two tools, two switches. The registry's standing argument -- every extra
     # tool costs selection accuracy on a small model -- applies to these as
     # much as to anything else, so both are turned off from one line.
+    # The one setting that runs code out of the workspace. Off, and it stays
+    # off until somebody types this: marking agent/ as ours says the skills and
+    # instructions in it are meant, not that its Python should be imported.
+    Field("agent_tools", "bool", False, "Load the tools written under agent/tools/.", live=False),
     Field("planning", "bool", True, "Offer the plan tool.", live=False),
     Field("delegation", "bool", True, "Offer the task tool, which runs a sub-agent.", live=False),
     # Empty by default, and that is the safety: nothing is ever run until the
@@ -322,6 +326,7 @@ class Settings:
         for name, dest in (
             ("scout", "no_scout"), ("instructions", "no_instructions"), ("skills", "no_skills"),
             ("planning", "no_planning"), ("delegation", "no_delegation"),
+            ("agent_tools", "no_agent_tools"),
             ("verify", "no_verify"),
         ):
             if getattr(args, dest, "missing") is None:

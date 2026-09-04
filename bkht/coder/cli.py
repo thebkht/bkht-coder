@@ -33,12 +33,14 @@ from . import sessions as saved
 from .skills import Discovery, discover as discover_skills, render as render_skills
 from .skills import summarize as summarize_skills
 from . import subagents
+from . import usertools
 from .subagents import summarize as summarize_subagents
 from .status import Status
 from .streaming import Gate
 from .terminal import ACCENT, BOLD, DIM, GREEN, ORANGE, RED, YELLOW, paint
 from . import usage
 from .tools import build_registry
+from .tools.base import Workspace
 from .tools.background import Jobs
 from .tools.base import ToolResult, set_output_budget
 
@@ -308,6 +310,7 @@ def add_agent_arguments(parser) -> None:
     parser.add_argument("--no-planning", action="store_true", default=None, help="Omit the plan tool.")
     parser.add_argument("--no-delegation", action="store_true", default=None, help="Omit the task tool, which runs a sub-agent.")
     parser.add_argument("--no-verify", action="store_true", default=None, help="Do not run verify_command after a turn.")
+    parser.add_argument("--no-agent-tools", action="store_true", default=None, help="Do not load the tools written under agent/tools/.")
     parser.add_argument("--no-hooks", action="store_true", help="Do not run any hook, from config.json or agent/hooks/.")
     parser.add_argument("--max-iterations", type=int, default=None, help="Cap on loop iterations per task.")
     add_common_arguments(parser)
@@ -506,12 +509,13 @@ class Loaded(NamedTuple):
     instructions: str
     skills: str
     subagents: str = ""
+    tools: str = ""
 
     def lines(self) -> list[str]:
         """One entry per line: a skipped skill is reported on its own row."""
         return [
             line
-            for summary in (self.instructions, self.skills, self.subagents)
+            for summary in (self.instructions, self.skills, self.subagents, self.tools)
             for line in summary.splitlines()
             if line
         ]
@@ -535,6 +539,14 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
     # at all depends on whether there is anything for it to fetch.
     found_skills = (
         Discovery() if getattr(args, "no_skills", False) else discover_skills(root)
+    )
+
+    # Three things have to be true before a line of the workspace's Python is
+    # imported: agent/ marked as ours, `agent_tools` turned on, and this flag
+    # not passed. usertools says why each of them is there.
+    found_tools = (
+        usertools.Found() if getattr(args, "no_agent_tools", True)
+        else usertools.discover(root, workspace=Workspace(root))
     )
 
     # Same rule, one level down: with no specialists written, the `task` tool
@@ -595,6 +607,7 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
     registry, workspace = build_registry(
         root, read_only=(mode == PLAN), snapshots=snapshots, skills=found_skills,
         jobs=jobs,
+        agent_tools=found_tools,
         session=None if getattr(args, "no_planning", False) else session,
         # The sub-agent shares this session's provider and skills, and reports
         # its tool calls through this session's listener -- a delegated task is
@@ -638,6 +651,7 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
         summarize_instructions(loaded) if loaded else "",
         summarize_skills(found_skills) if found_skills.skills or found_skills.problems else "",
         summarize_subagents(found_subagents),
+        usertools.summarize(found_tools),
     )
     # Recorded rather than assigned. The prompt is the input half of every
     # exchange in this file, and it is built here, from this registry -- so a
@@ -1159,6 +1173,7 @@ def main(argv: list[str] | None = None) -> int:
             provider=args.provider,
             verify_command=getattr(args, "verify_command", "") or "",
             hooks=getattr(args, "hooks", None),
+            agent_tools=not getattr(args, "no_agent_tools", True),
             as_json=args.json,
         )
 
