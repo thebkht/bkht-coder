@@ -9,6 +9,20 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ## [Unreleased]
 
+### Added
+
+- **The system prompt now says how to answer, not only how to work.** It
+  described the job in detail -- read before claiming, small verified steps,
+  plan a long task -- and said nothing at all about the reply, which left the
+  register to the model. That is most of what a user means when an agent feels
+  wrong: a preamble announcing the plan, a summary repeating the tool calls
+  they just watched happen, a whole file pasted back to make a two-line point,
+  a comment explaining the change to the person who asked for it, a README
+  nobody wanted. There is now an `# Answering` section that rules each of those
+  out, asks for `file:line` so a claim can be opened, and asks for a failed
+  step to be reported with what it printed. It sits above the tool section,
+  because the emission format has to stay the last thing read.
+
 ## [0.7.4] - 2026-09-04
 
 ### Fixed

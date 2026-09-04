@@ -40,3 +40,36 @@ def test_the_reminder_marks_itself_as_an_aside():
     reminder = language_reminder("Uzbek")
     assert "not a new request" in reminder
     assert "Uzbek" in reminder
+
+
+# --- how the answer is written ----------------------------------------------
+
+def test_the_prompt_says_how_to_answer_not_only_how_to_work():
+    """The prompt used to describe the work and say nothing about the reply.
+
+    A procedural prompt with no output contract leaves the register to the
+    model, and the register is most of what a user means when they say an agent
+    feels wrong: a preamble announcing the plan, a summary repeating the tool
+    calls they just watched, a whole file pasted back to make one point.
+    """
+    assert "# Answering" in SYSTEM
+    assert "No preamble" in SYSTEM
+    assert "path/to/file.py:42" in SYSTEM
+
+
+def test_the_prompt_rules_out_the_unasked_for_artifacts():
+    """Comments, docs, and commits nobody asked for."""
+    assert "Do not add\ncomments explaining what your change does" in SYSTEM
+    assert "documentation nobody asked for" in SYSTEM
+    assert "do not commit or push unless you\nwere asked to" in SYSTEM
+
+
+def test_the_answering_section_sits_above_the_tool_protocol(registry_and_root):
+    """Ordering is load-bearing: the protocol has to be read last.
+
+    Drifting off the emission format is this model's characteristic failure, so
+    anything added to the prompt goes above the tool section, never below it.
+    """
+    registry, root = registry_and_root
+    prompt = system_prompt(registry, root)
+    assert prompt.index("# Answering") < prompt.index("# Calling a tool")
