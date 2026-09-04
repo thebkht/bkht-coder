@@ -34,6 +34,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .. import subagents as subagents_module
 from .base import Registry, Tool, ToolError, ToolResult
 
 #: How long a delegated task may run. Short next to the parent's ten minutes:
@@ -55,6 +56,14 @@ DESCRIPTION = (
     "comes back, so ask for everything you need in one go. It cannot change "
     "files, run commands, or delegate further. Do not use it for work you can "
     "do in a call or two yourself."
+)
+
+#: Appended to the description when a workspace has written subagents. The
+#: roster is the whole of what the model chooses on, so it is shown in full
+#: rather than summarised into a count.
+SPECIALISTS = (
+    "\n\nThis workspace has specialists. Name one in `agent` when the task is "
+    "what it is for; leave it out for a general search.\n{roster}"
 )
 
 SCHEMA = {
@@ -106,14 +115,32 @@ def register_task_tool(
     skills=None,
     listener=None,
     hooks=None,
+    subagents=None,
     seconds: float = TASK_SECONDS,
     iterations: int = TASK_ITERATIONS,
 ) -> None:
-    """Offer `task`, delegating to a read-only agent under ``root``."""
+    """Offer `task`, delegating to a read-only agent under ``root``.
 
-    def run(instruction: str) -> ToolResult:
+    ``subagents`` are the specialists this workspace has written. With none --
+    the common case -- the tool's schema and the sub-agent's prompt are what
+    they were before subagents existed, because a parameter offering a choice
+    of nothing is a parameter that can only be got wrong.
+    """
+
+    def run(instruction: str, agent: str | None = None) -> ToolResult:
         if not instruction.strip():
             raise ToolError("task: `instruction` must say what to find out")
+
+        # Named rather than counted, the same recovery the `skill` tool gives:
+        # the model picked from a list it was shown, so show the list again.
+        specialist = None
+        if agent and agent.strip():
+            specialist = subagents.get(agent) if subagents else None
+            if specialist is None:
+                available = ", ".join(subagents.names()) if subagents else "none"
+                raise ToolError(
+                    f"task: no subagent named '{agent}'. Available: {available}"
+                )
 
         # Imported here rather than at module scope: `agent` imports this
         # package's `base`, and importing it at the top would make the tool
@@ -125,8 +152,13 @@ def register_task_tool(
         from ..skills import render as render_skills
         from . import build_registry
 
+        # A specialist brings its own skills and its own standing rules; a
+        # general delegation runs on the session's, as it always has.
+        available = specialist.skills if specialist is not None else skills
+        instructions = specialist.instructions if specialist is not None else ""
+
         try:
-            tools, workspace = build_registry(root, read_only=True, skills=skills)
+            tools, workspace = build_registry(root, read_only=True, skills=available)
         except Exception as exc:
             raise ToolError(f"task: could not prepare a sub-agent: {exc}") from None
 
@@ -135,8 +167,8 @@ def register_task_tool(
                 tools,
                 str(workspace.root),
                 file_tree(workspace.root),
-                "",
-                render_skills(skills) if skills else "",
+                instructions,
+                render_skills(available) if available else "",
             ),
             cwd=str(workspace.root),
             model=getattr(provider, "model", ""),
@@ -175,11 +207,28 @@ def register_task_tool(
 
         return ToolResult.success(outcome.answer.strip())
 
+    description, schema = DESCRIPTION, SCHEMA
+    if subagents:
+        names = ", ".join(subagents.names())
+        description += SPECIALISTS.format(roster=subagents_module.roster(subagents))
+        schema = {
+            "type": "object",
+            "properties": {
+                **SCHEMA["properties"],
+                "agent": {
+                    "type": "string",
+                    "enum": subagents.names(),
+                    "description": f"Which specialist to ask. One of: {names}.",
+                },
+            },
+            "required": ["instruction"],
+        }
+
     registry.add(
         Tool(
             name="task",
-            description=DESCRIPTION,
-            parameters=SCHEMA,
+            description=description,
+            parameters=schema,
             run=run,
             # Reading only, so nothing to approve. The sub-agent's own tools
             # are the read-only set for exactly this reason.

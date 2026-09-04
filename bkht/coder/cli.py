@@ -32,6 +32,8 @@ from .session import Session, Snapshots
 from . import sessions as saved
 from .skills import Discovery, discover as discover_skills, render as render_skills
 from .skills import summarize as summarize_skills
+from . import subagents
+from .subagents import summarize as summarize_subagents
 from .status import Status
 from .streaming import Gate
 from .terminal import ACCENT, BOLD, DIM, GREEN, ORANGE, RED, YELLOW, paint
@@ -493,7 +495,8 @@ def configured(args):
 
 
 class Loaded(NamedTuple):
-    """What shaped this session before the first turn: instructions, and skills.
+    """What shaped this session before the first turn: instructions and skills,
+    and the specialists a delegated task can be handed to.
 
     One line each, already summarised, and empty when there was nothing to say.
     The greeting sets them inside the box; a one-shot run prints them above its
@@ -502,12 +505,13 @@ class Loaded(NamedTuple):
 
     instructions: str
     skills: str
+    subagents: str = ""
 
     def lines(self) -> list[str]:
         """One entry per line: a skipped skill is reported on its own row."""
         return [
             line
-            for summary in (self.instructions, self.skills)
+            for summary in (self.instructions, self.skills, self.subagents)
             for line in summary.splitlines()
             if line
         ]
@@ -531,6 +535,15 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
     # at all depends on whether there is anything for it to fetch.
     found_skills = (
         Discovery() if getattr(args, "no_skills", False) else discover_skills(root)
+    )
+
+    # Same rule, one level down: with no specialists written, the `task` tool
+    # keeps the schema it had, because a parameter offering a choice of nothing
+    # is a parameter that can only be got wrong. --no-skills takes these too --
+    # a subagent is standing instructions with a name on them.
+    found_subagents = (
+        subagents.Found() if getattr(args, "no_skills", False)
+        else subagents.discover(root)
     )
 
     # Built before the registry, because the sub-agent behind the `task` tool
@@ -588,7 +601,7 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
         # the one stretch of a turn the user cannot otherwise see.
         delegate=None if getattr(args, "no_delegation", False) else {
             "provider": provider, "skills": found_skills, "listener": listener,
-            "hooks": hooks,
+            "hooks": hooks, "subagents": found_subagents,
         },
     )
     # The prompt pauses the status line for the whole exchange: without it the
@@ -624,6 +637,7 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
     announced = Loaded(
         summarize_instructions(loaded) if loaded else "",
         summarize_skills(found_skills) if found_skills.skills or found_skills.problems else "",
+        summarize_subagents(found_subagents),
     )
     # Recorded rather than assigned. The prompt is the input half of every
     # exchange in this file, and it is built here, from this registry -- so a

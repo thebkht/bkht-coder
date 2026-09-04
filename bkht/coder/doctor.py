@@ -27,6 +27,7 @@ from .provider import DEFAULTS, DEFAULT_NUM_CTX
 from .provider import DEFAULT_PROVIDER, ProviderError, build
 from .session import STATE_DIR
 from .skills import discover as discover_skills
+from .subagents import discover as discover_subagents
 from .tools.shell import resolve_shell
 from . import verify
 
@@ -659,6 +660,25 @@ def check_skills(root: Path) -> Check:
     return Check("skills", OK, ", ".join(skill.name for skill in found.skills))
 
 
+def check_subagents(root: Path) -> Check:
+    """The specialists a delegated task can be handed to, named.
+
+    Named for the reason skills are: a subagent that never loads and one the
+    model never chose look identical from outside the session.
+    """
+    found = discover_subagents(root)
+    if found.problems:
+        return Check(
+            "subagents", WARN,
+            f"{len(found.agents)} loaded; {len(found.problems)} skipped: "
+            + "; ".join(found.problems),
+            "A subagent needs a description in the frontmatter of its agent.md.",
+        )
+    if not found.agents:
+        return Check("subagents", OK, "none")
+    return Check("subagents", OK, ", ".join(found.names()))
+
+
 def check_verify(root: Path, command: str = "") -> Check:
     """What runs after a turn's edits, or what could.
 
@@ -876,6 +896,7 @@ def run_checks(
         check_agent_surface(root),
         check_instructions(root),
         check_skills(root),
+        check_subagents(root),
         check_verify(root, verify_command),
         check_hooks(hooks),
     ]

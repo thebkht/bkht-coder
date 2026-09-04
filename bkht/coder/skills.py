@@ -232,6 +232,16 @@ def discover(root, include_global: bool = True) -> Discovery:
     directories.extend(root / relative for relative in WORKSPACE_ROOTS)
     directories.extend(surface.slot("skills", layout.WORKSPACE))
 
+    return scan(directories, root)
+
+
+def scan(directories, root) -> Discovery:
+    """Every skill in the given directories, least specific first.
+
+    Split out of :func:`discover` for the one other caller that has skills but
+    not the layered roots they usually come from: a subagent, whose ``skills/``
+    is its own and is not layered over anything.
+    """
     found: dict[str, Skill] = {}
     problems: list[str] = []
     for directory in directories:
