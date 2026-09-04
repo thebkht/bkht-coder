@@ -142,11 +142,27 @@ def test_a_mutating_user_tool_is_left_out_of_a_read_only_registry(tmp_path):
     assert "deploy" not in registry
 
 
-def test_a_read_only_user_tool_survives_plan_mode(tmp_path):
+def test_no_user_tool_loads_into_a_read_only_registry_whatever_it_declares(tmp_path):
+    # `mutating` gates a built-in because this package wrote it and knows what
+    # it does. Here it is an assertion by the code it would be gating, and a
+    # file that writes to disk while claiming otherwise must not reach a --plan
+    # session, whose whole promise is that it refuses every change.
+    write_tool(tmp_path, "sneaky", body=SIMPLE.replace(
+        'run=lambda: ToolResult.success("hello"),',
+        'run=lambda: ToolResult.success("hello"),  # writes, and does not say so',
+    ))
+
+    registry, _ = build_registry(tmp_path, read_only=True, agent_tools=discover(tmp_path))
+    assert "sneaky" not in registry
+
+
+def test_a_delegated_sub_agent_gets_none_of_them_either(tmp_path):
+    # The sub-agent behind `task` is documented as unable to write, and it is
+    # given a read-only registry to make that true.
     write_tool(tmp_path, "greet")
 
     registry, _ = build_registry(tmp_path, read_only=True, agent_tools=discover(tmp_path))
-    assert "greet" in registry
+    assert "greet" not in registry
 
 
 def test_nothing_is_registered_when_nothing_was_found(tmp_path):

@@ -193,7 +193,24 @@ def register(registry, found: Found, read_only: bool = False) -> list[str]:
     Built-ins win every collision. A user tool answering to ``write_file``
     would take calls the permission layer approved under that name, which is
     not a tool but a way around the gate.
+
+    **None of them load into a read-only registry**, whatever they declare.
+    ``mutating`` is how a built-in tool is gated, and it works there because
+    this package writes those tools and knows what they do. Here it is an
+    assertion by the same code it would be gating: a file that writes to disk
+    and says ``mutating=False`` would be handed to a ``--plan`` session, whose
+    whole promise is that it refuses every change to the workspace, and to the
+    sub-agent behind ``task``, which is documented as unable to write. A
+    boundary the rest of the registry keeps structurally, by leaving tools out,
+    cannot be left to the good faith of the thing on the other side of it.
+
+    The cost is a genuinely read-only tool of yours being unavailable in plan
+    mode. That is the right side to err on: the alternative is that the
+    guarantee holds only for tools that chose to keep it.
     """
+    if read_only:
+        return []
+
     refused = []
     for tool in found.tools:
         if tool.name in registry:
@@ -201,10 +218,6 @@ def register(registry, found: Found, read_only: bool = False) -> list[str]:
                 f"{found.sources.get(tool.name, tool.name)}: '{tool.name}' is "
                 f"already a built-in tool, so it was not loaded"
             )
-            continue
-        if read_only and tool.mutating:
-            # Left out rather than denied, the rule the whole registry follows
-            # in plan mode: the model is never shown a tool it cannot use.
             continue
         registry.add(tool)
     return refused

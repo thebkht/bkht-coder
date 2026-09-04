@@ -9,6 +9,8 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-09-04
+
 ### Added
 
 - **Hooks can be files.** `agent/hooks/<event>/format.sh` -- the directory names
@@ -53,6 +55,12 @@ below it, and the release workflow refuses a tag this file does not describe.
   and its file. A user tool cannot take a built-in's name -- one answering to
   `write_file` would take calls the permission layer had already approved under
   that name, which is not a tool but a way around the gate.
+
+  None of them load in plan mode or into the sub-agent behind `task`, whatever
+  they declare. `mutating` gates a built-in because this package wrote it and
+  knows what it does; on a user tool it is an assertion by the code it would be
+  gating, and a boundary the rest of the registry keeps structurally cannot be
+  left to the good faith of the thing on the other side of it.
 
 - **`coder info` says what loaded, not only what is on disk**, and `/agent`
   prints the same view mid-session. The tree alone cannot show a skill refused
@@ -487,7 +495,8 @@ job, GitHub and GitLab tools; resumable sessions; skills and slash commands;
 GitLab Code Quality reports; `coder doctor`; `coder config`; and Claude Code and
 Codex as borrowed model backends.
 
-[Unreleased]: https://github.com/thebkht/bkht-coder/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/thebkht/bkht-coder/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/thebkht/bkht-coder/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/thebkht/bkht-coder/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/thebkht/bkht-coder/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/thebkht/bkht-coder/compare/v0.4.0...v0.5.0

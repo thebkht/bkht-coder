@@ -605,9 +605,16 @@ coder config set agent_tools true --workspace
 Then every tool that loaded is named by `coder doctor` and `/tools`, with the
 file it came from. A tool may not take a built-in's name: one answering to
 `write_file` would take calls the permission layer had already approved under
-that name, which is not a tool but a way around the gate. Mutating tools are
-left out of plan mode and out of a delegated sub-agent's registry, like every
-other mutating tool.
+that name, which is not a tool but a way around the gate.
+
+**None of them load in plan mode**, or into the sub-agent behind `task`,
+whatever they declare. `mutating` gates a built-in tool because this project
+wrote that tool and knows what it does; on yours it is an assertion by the code
+it would be gating, and a file that writes to disk while claiming otherwise
+would reach a `--plan` session whose whole promise is that it refuses every
+change. The cost is that a genuinely read-only tool of yours is unavailable
+there too — which is the right side to err on, because the alternative is a
+guarantee that holds only for the tools that chose to keep it.
 
 ## Skills
 
