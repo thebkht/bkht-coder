@@ -678,3 +678,54 @@ def test_turning_verify_off_leaves_the_command_written_down(home, project):
     config.load(project).apply(args)
     assert args.no_verify is True
     assert args.verify_command == "pytest -q"
+
+
+# --- hooks, which are in the file but are not a setting ----------------------
+
+
+def test_hooks_are_read_out_of_the_global_file(home, project):
+    write(home, hooks={"post_tool": "ruff format ."})
+    settings = config.load(project)
+    assert settings.hooks == {"post_tool": ["ruff format ."]}
+    assert settings.error == ""
+
+
+def test_the_workspace_shadows_the_global_per_event(home, project):
+    write(home, hooks={"post_tool": ["ruff format ."], "turn_end": ["make docs"]})
+    write(project / config.WORKSPACE_NAME, hooks={"post_tool": ["cargo fmt"]})
+    settings = config.load(project)
+    # Shadowed, not merged: a project saying what happens after a write is
+    # saying it instead of, not as well as, whatever the personal file said.
+    assert settings.hooks == {"post_tool": ["cargo fmt"], "turn_end": ["make docs"]}
+
+
+def test_a_broken_hooks_block_costs_the_hooks_not_the_session(home, project):
+    write(home, model="qwen2.5-coder:7b", hooks={"pre_write": ["x"]})
+    settings = config.load(project)
+    assert settings.hooks == {}
+    assert "pre_write" in settings.error
+    # The rest of the file still loaded, which is the point.
+    assert settings.model == "qwen2.5-coder:7b"
+
+
+def test_hooks_are_not_reported_as_an_unknown_setting(home, project):
+    write(home, hooks={"turn_end": ["make"]})
+    assert config.load(project).error == ""
+
+
+def test_setting_hooks_at_the_prompt_says_where_they_live(home, project):
+    with pytest.raises(ConfigError) as raised:
+        config.set_value("hooks", "ruff format .", root=project)
+    assert "config.json" in str(raised.value)
+
+
+def test_unsetting_hooks_says_the_same_thing(home, project):
+    with pytest.raises(ConfigError) as raised:
+        config.unset("hooks", root=project)
+    assert "config.json" in str(raised.value)
+
+
+def test_a_hooks_block_survives_a_write_to_a_real_setting(home, project):
+    write(home, hooks={"turn_end": ["make"]})
+    config.set_value("model", "qwen2.5-coder:7b")
+    assert json.loads(home.read_text())["hooks"] == {"turn_end": ["make"]}

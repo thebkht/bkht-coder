@@ -105,6 +105,7 @@ def register_task_tool(
     provider,
     skills=None,
     listener=None,
+    hooks=None,
     seconds: float = TASK_SECONDS,
     iterations: int = TASK_ITERATIONS,
 ) -> None:
@@ -155,6 +156,11 @@ def register_task_tool(
             max_iterations=iterations,
             max_seconds=seconds,
             scout_root=workspace.root,
+            # The parent's hooks, on purpose. A `pre_tool` gate keeping the
+            # agent out of a directory is not a gate if delegating the read is
+            # the way around it. The sub-agent's `turn_end` fires too, and
+            # that is the honest reading: its turn did end.
+            hooks=hooks,
         )
 
         outcome = sub.run(instruction)

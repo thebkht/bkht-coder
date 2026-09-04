@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-from . import prompts, verify
+from . import hooks, prompts, verify
 from .cancel import interruptible
 from .context import compact, elide_tool_results, should_compact
 from .language import detect as detect_language
@@ -112,6 +112,7 @@ class Agent:
         track_language: bool = True,
         verify_command: str = "",
         verify_root: Path | str | None = None,
+        hooks=None,
         clock=time.monotonic,
     ) -> None:
         self.provider = provider
@@ -134,11 +135,16 @@ class Agent:
         # running anything at all rests on the command being one they chose.
         self.verify_command = verify_command.strip()
         self.verify_root = Path(verify_root) if verify_root else self.scout_root
+        # None rather than an empty Hooks so the common case -- nobody has
+        # configured any -- is one identity check per call rather than a dict
+        # lookup and a shell resolution.
+        self.hooks = hooks or None
         # All reset at the top of every turn; see _loop.
         self._summarized = False
         self._made: dict[tuple[str, str], str] = {}
         self._replays = 0
         self._wrote = False
+        self._edited = False
         self._verified = 0
 
     def run(self, user_message: str, images: list[str] | None = None) -> Outcome:
@@ -206,6 +212,12 @@ class Agent:
         """
         outcome.seconds = max(0.0, self.clock() - started)
         self.session.record_outcome(outcome)
+        self._fire(
+            hooks.TURN_END,
+            stopped=outcome.stopped,
+            edited=self._edited,
+            tool_calls=outcome.tool_calls,
+        )
         return outcome
 
     def _loop(self) -> Outcome:
@@ -222,6 +234,10 @@ class Agent:
         # checks this turn has spent. Both per-turn: a turn that only read has
         # nothing to check, and last turn's edits were checked last turn.
         self._wrote = False
+        # `_wrote` is cleared each time the suite runs -- it means "since the
+        # last check". A hook that wants to know whether the turn changed
+        # anything at all needs the question that is never un-asked.
+        self._edited = False
         self._verified = 0
 
         deadline = self.clock() + self.max_seconds
@@ -296,6 +312,7 @@ class Agent:
                     tool = self.registry.get(call.name)
                     if tool is not None and tool.mutating:
                         self._wrote = True
+                        self._edited = True
                 else:
                     outcome.errors.append(result.error)
                     if result.error.startswith("permission denied"):
@@ -513,15 +530,53 @@ class Agent:
             if not decision.allowed:
                 return ToolResult.failure(f"permission denied: {decision.reason}")
 
+        # After permission, not before: a hook is the user's own command, and
+        # firing one for a call the user is about to refuse would run it for a
+        # call that never happens.
+        refused = self._fire(hooks.PRE_TOOL, tool=tool.name, arguments=arguments)
+        if refused is not None:
+            return ToolResult.failure(f"blocked by a hook: {refused.reason}")
+
         try:
             result = tool.run(**arguments)
         except ToolError as exc:
-            return ToolResult.failure(str(exc))
+            result = ToolResult.failure(str(exc))
         except Exception as exc:  # a tool bug must not kill the session
-            return ToolResult.failure(f"{tool.name} failed unexpectedly: {exc}")
+            result = ToolResult.failure(f"{tool.name} failed unexpectedly: {exc}")
+
+        # Fired for a failed call too. "The write did not happen" is exactly
+        # what a hook watching writes needs to hear, and hearing nothing is
+        # indistinguishable from not being configured.
+        self._fire(hooks.POST_TOOL, tool=tool.name, arguments=arguments, ok=result.ok)
+        if not result.ok:
+            return result
 
         # Remembered only once it has actually run, and only its own text: a
         # call that was refused permission or failed to validate never happened,
         # and should not be replayed as though it had.
         self._made[signature] = truncate(result.as_message(), max_chars=REPLAY_LIMIT)
         return result
+
+    def _fire(self, event: str, **context):
+        """Run the hooks for ``event``; return the first that blocked, if any.
+
+        A hook that went wrong is reported to the listener the same way a verify
+        run is, because a hook that silently rewrote the file the model just
+        wrote is a hook that makes the next tool result inexplicable.
+
+        With one exception: a hook that *blocked* is not announced here. Its
+        sentence is about to be the tool result, and saying it twice would say
+        it twice in the wrong order -- the listener prints a call and its
+        result together, so a notice raised mid-call lands above the call it
+        was fired for and reads as though it belonged to the previous one.
+        """
+        if self.hooks is None:
+            return None
+        blocked = None
+        for result in self.hooks.fire(event, **context):
+            if result.blocked:
+                blocked = blocked or result
+                continue
+            if result.broken or result.timed_out or result.code:
+                self.listener.on_retry(result.summary())
+        return blocked

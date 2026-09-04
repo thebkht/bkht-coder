@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import re
 
 import pytest
@@ -412,3 +413,29 @@ def test_plan_mode_keeps_the_plan_tool(wired):
     agent = wired("--plan")
     assert "plan" in agent.registry.names()
     assert "write_file" not in agent.registry.names()
+
+
+# --- hooks reach the loop ----------------------------------------------------
+
+
+def test_a_session_with_no_hooks_configured_carries_none(wired):
+    assert wired().hooks is None
+
+
+def test_hooks_in_the_config_file_reach_the_agent(wired, project, tmp_path):
+    (tmp_path / "config.json").write_text(
+        json.dumps({"hooks": {"turn_end": ["make docs"]}}), encoding="utf-8"
+    )
+    agent = wired()
+    assert agent.hooks.listing() == [("turn_end", "make docs")]
+    # Run where the agent works, not where coder was started from.
+    assert str(agent.hooks.root) == str(project)
+
+
+def test_no_hooks_turns_off_a_configured_one(wired, tmp_path):
+    (tmp_path / "config.json").write_text(
+        json.dumps({"hooks": {"turn_end": ["make docs"]}}), encoding="utf-8"
+    )
+    # The point of the flag: one session where nothing out of that file runs,
+    # for the moment you are not sure what is in it.
+    assert wired("--no-hooks").hooks is None

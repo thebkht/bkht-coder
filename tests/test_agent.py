@@ -809,3 +809,162 @@ def test_a_second_run_happens_when_the_model_actually_edited_again(project, monk
     )
     assert agent.run("write a file").answer == "fixed"
     assert suite.runs == ["check", "check"]
+
+
+# --- hooks --------------------------------------------------------------------
+
+
+class Fired:
+    """A ``Hooks`` that records rather than runs."""
+
+    def __init__(self, *results) -> None:
+        self.results = list(results)
+        self.events: list[tuple] = []
+
+    def fire(self, event, **context):
+        self.events.append((event, context))
+        return [r for r in self.results if r.event == event]
+
+
+def hooked(project, script, results=()):
+    """An agent that can write, with its hooks recorded rather than run."""
+    registry, _ = build_registry(project)
+    fired = Fired(*results)
+    made = Agent(FakeProvider(script), registry, Session(system=""), hooks=fired)
+    return made, fired
+
+
+def test_a_turn_with_no_hooks_configured_fires_nothing(loop):
+    agent, _ = loop(["done"])
+    # `None` rather than an empty Hooks: the common case is one identity check
+    # per call, not a dict lookup and a shell resolution.
+    assert agent.hooks is None
+    assert agent.run("hello").answer == "done"
+
+
+def test_both_tool_events_fire_around_a_call(project):
+    from bkht.coder import hooks as hooks_module
+
+    agent, fired = hooked(
+        project, [call("read_file", path="src/util.py"), "it doubles"]
+    )
+    agent.run("what does helper do?")
+    events = [event for event, _ in fired.events]
+    assert events == [hooks_module.PRE_TOOL, hooks_module.POST_TOOL, hooks_module.TURN_END]
+    assert fired.events[0][1]["tool"] == "read_file"
+    assert fired.events[1][1]["ok"] is True
+
+
+def test_a_pre_tool_hook_can_refuse_a_call(project):
+    from bkht.coder import hooks as hooks_module
+
+    refusal = hooks_module.Result(
+        hooks_module.PRE_TOOL, "gate", code=1, output="nothing under src/"
+    )
+    agent, fired = hooked(
+        project,
+        [call("read_file", path="src/util.py"), "I could not read it."],
+        results=[refusal],
+    )
+    outcome = agent.run("read it")
+
+    # The hook's own sentence reaches the model, which is the whole mechanism:
+    # a refusal it cannot read is one it can only guess at.
+    assert "nothing under src/" in agent.session.messages[-2]["content"]
+    assert outcome.answer == "I could not read it."
+    # And the tool never ran, so nothing after it was fired for it.
+    assert [e for e, _ in fired.events].count(hooks_module.POST_TOOL) == 0
+
+
+def test_a_post_tool_hook_hears_about_a_failed_call(project):
+    from bkht.coder import hooks as hooks_module
+
+    agent, fired = hooked(
+        project, [call("read_file", path="nope.py"), "there is no such file"]
+    )
+    agent.run("read nope.py")
+    post = [c for e, c in fired.events if e == hooks_module.POST_TOOL]
+    # "The write did not happen" is exactly what a hook watching writes needs
+    # to hear, and hearing nothing is indistinguishable from not configured.
+    assert post and post[0]["ok"] is False
+
+
+def test_the_turn_end_hook_hears_whether_anything_changed(project):
+    from bkht.coder import hooks as hooks_module
+
+    agent, fired = hooked(
+        project, [call("write_file", path="a.py", content="x = 1\n"), "done"]
+    )
+    outcome = agent.run("write a file")
+    end = [c for e, c in fired.events if e == hooks_module.TURN_END][0]
+    assert end == {"stopped": outcome.stopped, "edited": True, "tool_calls": 1}
+
+
+def test_a_turn_that_only_read_says_so(project):
+    from bkht.coder import hooks as hooks_module
+
+    agent, fired = hooked(project, [call("read_file", path="src/util.py"), "done"])
+    agent.run("read it")
+    end = [c for e, c in fired.events if e == hooks_module.TURN_END][0]
+    assert end["edited"] is False
+
+
+def test_the_turn_end_hook_fires_even_when_the_turn_did_not_answer(project):
+    from bkht.coder import hooks as hooks_module
+
+    agent, fired = hooked(project, ["", "", "", "", "", ""])
+    outcome = agent.run("hello")
+    assert outcome.stopped == "retry-cap"
+    assert [c for e, c in fired.events if e == hooks_module.TURN_END]
+
+
+def test_a_blocking_hook_is_not_also_announced(project):
+    """Its sentence is about to be the tool result; twice is once too many.
+
+    And in the wrong order: the listener prints a call together with its
+    result, so a notice raised mid-call lands above the call it was fired for
+    and reads as though it belonged to the one before.
+    """
+    from bkht.coder import hooks as hooks_module
+
+    said: list[str] = []
+
+    class Listens:
+        def on_token(self, text): pass
+        def on_tool_call(self, call): pass
+        def on_tool_result(self, call, result): pass
+        def on_retry(self, reason): said.append(reason)
+
+    refusal = hooks_module.Result(hooks_module.PRE_TOOL, "gate", code=1, output="no")
+    registry, _ = build_registry(project)
+    agent = Agent(
+        FakeProvider([call("read_file", path="src/util.py"), "blocked"]),
+        registry, Session(system=""), listener=Listens(), hooks=Fired(refusal),
+    )
+    agent.run("read it")
+
+    assert not [line for line in said if "gate" in line]
+    assert "no" in agent.session.messages[-2]["content"]
+
+
+def test_a_hook_that_went_wrong_and_blocks_nothing_is_still_said_out_loud(project):
+    from bkht.coder import hooks as hooks_module
+
+    said: list[str] = []
+
+    class Listens:
+        def on_token(self, text): pass
+        def on_tool_call(self, call): pass
+        def on_tool_result(self, call, result): pass
+        def on_retry(self, reason): said.append(reason)
+
+    # A formatter that silently rewrote the file the model just wrote is a hook
+    # that makes the next tool result inexplicable.
+    broke = hooks_module.Result(hooks_module.POST_TOOL, "fmt", code=2, output="boom")
+    registry, _ = build_registry(project)
+    agent = Agent(
+        FakeProvider([call("read_file", path="src/util.py"), "done"]),
+        registry, Session(system=""), listener=Listens(), hooks=Fired(broke),
+    )
+    agent.run("read it")
+    assert [line for line in said if "fmt" in line and "exited 2" in line]

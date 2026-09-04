@@ -9,6 +9,54 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ## [Unreleased]
 
+### Added
+
+- **Hooks: your own commands, fired on tool events.** `permissions.json`
+  remembers what you allowed but cannot *do* anything. A `hooks` block in
+  `config.json` can -- run the formatter after a write, refuse a call whose
+  shape this project never wants, kick off a build when the turn ends.
+
+  Three events. `pre_tool` fires before a call runs, after validation and
+  permission -- after, because firing a hook for a call the user is about to
+  refuse would run it for a call that never happens. `post_tool` fires once the
+  call has run, including when it failed: "the write did not happen" is exactly
+  what a hook watching writes needs to hear, and hearing nothing is
+  indistinguishable from not being configured. `turn_end` fires once, however
+  the turn stopped.
+
+  Only `pre_tool` can say no. A non-zero exit blocks the call and what the hook
+  printed becomes the tool result, so the model reads the refusal and works
+  around it -- the same correction path a malformed call already takes. A
+  `post_tool` exit code is reported and ignored; the call already happened. A
+  hook that went wrong without blocking is said out loud, because a formatter
+  that silently rewrote the file the model just wrote makes the next tool
+  result inexplicable; a hook that blocked is not, because its sentence is
+  already the tool result.
+
+  Everything a hook might want is in the environment rather than on the command
+  line, because a command line means quoting and quoting means a hook that
+  silently does the wrong thing on a path with a space in it. `CODER_PATH` is
+  lifted out of the arguments JSON on its own, because every hook anybody
+  actually writes wants exactly that value and making each of them parse JSON in
+  a shell would make hooks a thing only people who like `jq` can use.
+
+  Bounded, and asymmetrically. Every hook is timed out at 30 seconds -- a
+  formatter that hangs must not be indistinguishable from a model that hangs. A
+  `pre_tool` hook that times out **blocks**: it is the one place failing open is
+  worse than failing loudly, because a gate nobody heard from is not a gate. A
+  gate whose script has gone missing blocks too -- the shell answered `127`, and
+  a gate that waves calls through because it can no longer find itself is not
+  one. The only case that blocks nothing is a machine with no shell at all,
+  where nothing was heard from because nothing could be spawned.
+
+  The sub-agent behind `task` gets the parent's hooks. A `pre_tool` gate is not
+  a gate if delegating the read is the way around it.
+
+  Hooks are arbitrary commands out of a config file that fire without anyone
+  asking, so they are never invisible: `coder doctor` names every one it finds,
+  `/context` counts them, `SECURITY.md` says what they are, and `--no-hooks`
+  runs a session with none of them.
+
 ### Fixed
 
 - **A fresh session's context bar read a fifth full before anything was sent.**

@@ -34,6 +34,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import hooks as hooks_module
 from .agent import MAX_ITERATIONS
 from .permissions import ASK, AUTO, MODES, PLAN
 from .provider import settle
@@ -46,6 +47,12 @@ from .provider import (
     MIN_USEFUL_NUM_CTX,
 )
 from .session import STATE_DIR
+
+#: The one key in the file that is not a setting. Hooks are a list per event,
+#: not a scalar, so they are edited in the file rather than typed at `config
+#: set` -- and this constant is what keeps `load` from reporting the block as
+#: an unknown setting.
+HOOKS_KEY = "hooks"
 
 GLOBAL_PATH = STATE_DIR / "config.json"
 WORKSPACE_NAME = Path(".bkht-coder") / "config.json"
@@ -191,6 +198,12 @@ def parse(key: str, raw: object) -> object:
     """One key and one value, coerced and validated, or ``ConfigError``."""
     spec = BY_NAME.get(key)
     if spec is None:
+        if key == HOOKS_KEY:
+            raise ConfigError(
+                "hooks are a list of commands per event, not a single value. "
+                "Edit the \"hooks\" block in config.json; `coder doctor` lists "
+                "what it finds."
+            )
         raise ConfigError(f"unknown setting {key!r}. Known: {', '.join(BY_NAME)}.")
     return _validate(spec, _coerce(spec, raw))
 
@@ -236,6 +249,9 @@ class Settings:
 
     values: dict = field(default_factory=dict)
     sources: dict = field(default_factory=dict)
+    #: ``event -> commands``, from the same two files. Not a ``Field``: a
+    #: setting is one value the user can type, and this is a list per event.
+    hooks: dict = field(default_factory=dict)
     #: What could not be read, ready to print. Empty when everything loaded.
     error: str = ""
     #: A sentence about a decision this resolution made on the user's behalf --
@@ -341,6 +357,15 @@ def load(root=None) -> Settings:
         if problem:
             problems.append(problem)
         for key, raw in stored.items():
+            if key == HOOKS_KEY:
+                block, problems_here = hooks_module.parse(raw)
+                problems.extend(f"{path}: {problem}" for problem in problems_here)
+                # Per event, not merged: the workspace shadows the global the
+                # same way every other layer here does. A project that says
+                # what happens after a write is saying it instead of, not as
+                # well as, whatever the personal file said.
+                settings.hooks.update(block)
+                continue
             try:
                 settings.values[key] = parse(key, raw)
             except ConfigError as exc:
@@ -401,6 +426,7 @@ def set_value(key: str, raw: object, scope: str = GLOBAL, root=None) -> object:
 def unset(key: str, scope: str = GLOBAL, root=None) -> bool:
     """Remove one setting from one scope. False when it was not set there."""
     if key not in BY_NAME:
+        parse(key, "")  # raises, and says the useful thing about `hooks`
         raise ConfigError(f"unknown setting {key!r}. Known: {', '.join(BY_NAME)}.")
     path = path_for(scope, root)
     stored, problem = _read(path)
@@ -485,6 +511,7 @@ def _get(root: Path, rest: list[str]) -> int:
         raise ConfigError(f"get takes one key.\n{USAGE}")
     key = rest[0]
     if key not in BY_NAME:
+        parse(key, "")  # raises, and says the useful thing about `hooks`
         raise ConfigError(f"unknown setting {key!r}. Known: {', '.join(BY_NAME)}.")
     settings = load(root)
     _announce(settings)

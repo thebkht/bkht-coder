@@ -143,3 +143,27 @@ def test_the_tool_needs_no_approval(project):
     registry = Registry()
     register_task_tool(registry, project, FakeProvider([]))
     assert registry.get("task").mutating is False
+
+
+def test_the_sub_agent_gets_the_parents_hooks(project):
+    """A gate the agent can get around by delegating is not a gate."""
+    from bkht.coder import hooks as hooks_module
+
+    class Fired:
+        def __init__(self):
+            self.events = []
+
+        def fire(self, event, **context):
+            self.events.append((event, context))
+            return []
+
+    fired = Fired()
+    registry = Registry()
+    provider = FakeProvider([call("read_file", path="src/util.py"), "it doubles"])
+    register_task_tool(registry, project, provider=provider, hooks=fired)
+
+    registry.get("task").run(instruction="what does helper do?")
+    assert (
+        hooks_module.PRE_TOOL,
+        {"tool": "read_file", "arguments": {"path": "src/util.py"}},
+    ) in fired.events

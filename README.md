@@ -994,6 +994,106 @@ being yours:
 `--no-verify` turns it off for a session without erasing what you configured,
 and `/context` says which it is.
 
+## Hooks
+
+`permissions.json` remembers what you allowed. It cannot *do* anything. A hook
+can: run the formatter after a write, refuse a call whose shape this project
+never wants, kick off a build when the turn ends.
+
+They live in `config.json`, beside the settings — the one key in that file that
+is not a setting, because a list of commands per event is not something you
+type at a prompt:
+
+```json
+{
+  "model": "qwen2.5-coder:14b",
+  "hooks": {
+    "post_tool": ["[ -n \"$CODER_PATH\" ] && ruff format \"$CODER_PATH\""],
+    "pre_tool": ["scripts/gate.sh"],
+    "turn_end": ["git status --short"]
+  }
+}
+```
+
+Three events, and only one of them can say no:
+
+| Event | When | Can it refuse? |
+|---|---|---|
+| `pre_tool` | Before a call runs, after validation and permission | **Yes** |
+| `post_tool` | After a call has run, whatever it returned | No |
+| `turn_end` | Once, after the turn stops, however it stopped | No |
+
+A non-zero `pre_tool` exit **blocks the call**, and what the hook printed
+becomes the tool result — so the model reads the refusal and works around it,
+which is the same correction path a malformed call or a denied permission
+already takes:
+
+```
+● write_file(vendor/lib.py)
+  ERROR: blocked by a hook: nothing under vendor/ is ours to edit
+● write_file(src/lib.py)
+  Wrote 12 lines
+```
+
+`post_tool`'s exit code is reported and ignored. The call already happened;
+there is nothing left to refuse — but a `post_tool` hook that *failed* is said
+out loud, because a formatter that silently rewrote the file the model just
+wrote makes the next tool result inexplicable. A hook that blocked is not said
+twice: its sentence is the tool result.
+
+Everything a hook might want is in the environment, not on the command line —
+a command line means quoting, and quoting means a hook that silently does the
+wrong thing on a path with a space in it:
+
+| Variable | Set on | What it holds |
+|---|---|---|
+| `CODER_EVENT` | all | `pre_tool`, `post_tool` or `turn_end` |
+| `CODER_ROOT` | all | The workspace root, which is also the working directory |
+| `CODER_TOOL` | tool events | The tool's name |
+| `CODER_ARGS` | tool events | Its arguments, as JSON |
+| `CODER_PATH` | tool events | The `path` argument, when there is one |
+| `CODER_OK` | `post_tool` | `1` or `0` — whether the call succeeded |
+| `CODER_STOPPED` | `turn_end` | `answered`, `iteration-cap`, `denied`, … |
+| `CODER_EDITED` | `turn_end` | `1` when the turn changed a file |
+| `CODER_TOOL_CALLS` | `turn_end` | How many calls the turn made |
+
+`CODER_PATH` is lifted out of the JSON on purpose. Every hook anybody actually
+writes — format this, lint this — wants exactly that one value, and making each
+of them parse JSON in a shell would make hooks a thing only people who like
+`jq` can use.
+
+The bounds:
+
+- **Every hook is timed out**, at 30 seconds. A formatter that hangs must not
+  be indistinguishable from a model that hangs.
+- **A `pre_tool` hook that times out blocks the call it was asked to rule on.**
+  That is the one place failing open is worse than failing loudly: a gate
+  nobody heard from is not a gate.
+- **A `pre_tool` gate whose script has gone missing blocks too.** The shell
+  ran and said `127`, which is an answer; a gate that waves calls through
+  because it can no longer find itself is not one. The only case that blocks
+  nothing is a machine with no shell at all, where nothing was heard from
+  because nothing could be spawned.
+- **Every hook for an event runs**, even after one of them has refused. A hook
+  that only sometimes runs is a hook nobody can reason about.
+- **The sub-agent behind `task` gets the same hooks.** A `pre_tool` gate is not
+  a gate if delegating the read is the way around it.
+
+`post_tool` fires for a *failed* call too. "The write did not happen" is
+exactly what a hook watching writes needs to hear, and hearing nothing is
+indistinguishable from not being configured.
+
+A hook is an arbitrary command out of a config file that fires without anyone
+asking, so it is never invisible. `coder doctor` names every one it finds:
+
+```
+  ok    hooks         2 configured
+        These run without asking -- pre_tool: `scripts/gate.sh`; turn_end: `git status --short`
+```
+
+`--no-hooks` turns all of them off for one session, which is what you want the
+moment you are not sure what is in that file. See `SECURITY.md`.
+
 ## How it talks to the model
 
 `qwen2.5-coder:14b` emits tool calls as ordinary message **content** with

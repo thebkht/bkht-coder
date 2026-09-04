@@ -11,8 +11,7 @@ You should get an acknowledgement within a week.
 
 ## Supported versions
 
-There are no releases yet. The latest `main` is the only supported version, and
-fixes land there.
+The latest release is the supported version, and fixes land on `main` first.
 
 ## What this tool actually does
 
@@ -36,6 +35,20 @@ prompt you answer. Every mutating tool call goes through it.
 `--auto` removes the safety net deliberately. Don't point it at a workspace
 whose contents you don't trust.
 
+**Hooks execute arbitrary commands from a config file.** `config.json` may
+carry a `hooks` block — commands fired before a tool call, after one, and at
+the end of a turn (see the README). They are your commands, run as you, with
+your environment, and nothing prompts before one runs. Two things follow. A
+workspace `.bkht-coder/config.json` you did not write is code you are about to
+execute, so treat cloning a repository and starting `coder` in it the way you
+would treat any other repo-supplied build script. And `coder doctor` names
+every hook it can find, precisely so none of them is invisible; `--no-hooks`
+runs a session with none of them.
+
+A `pre_tool` hook can *refuse* a call, and that direction is a safety feature
+rather than a risk — but it is a second line, not the first. The permission
+layer is the first, and a hook is not a substitute for `ask` mode.
+
 **Remembered approvals are scoped to a call, not a tool.** Answering `a` at the
 prompt remembers *that* command and *that* path — see `bkht/coder/rules.py`. It
 does not hand the model a category of action.
@@ -47,6 +60,7 @@ does not hand the model a category of action.
 - Any mutating call reaching the system without approval in `ask` mode, or at
   all in `plan` mode
 - A remembered approval matching more broadly than the call it was granted for
+- A `pre_tool` hook that refuses a call, and the call running anyway
 - **Prompt injection that bypasses the permission layer.** The agent reads files
   and command output it did not write, so content that tries to steer it is
   expected and is not itself a vulnerability. Content that gets a mutating call
@@ -57,5 +71,7 @@ does not hand the model a category of action.
 - The model proposing something wrong or destructive that you then approve.
   Reviewing the diff is what the prompt is for.
 - Anything reached through `--auto`, which is documented as removing the gate.
+- A hook you configured doing what you configured it to do. A `hooks` block is
+  a list of commands to run; running them is the feature.
 - Vulnerabilities in Ollama, in the models themselves, or in `uv` — please
   report those upstream.
