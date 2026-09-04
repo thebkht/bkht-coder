@@ -269,3 +269,38 @@ def test_updating_without_uv_says_which_command_is_missing(monkeypatch, capsys):
     monkeypatch.setattr(update.subprocess, "call", missing)
     assert update._install("0.3.0") == 1
     assert "uv" in capsys.readouterr().out
+
+
+# --- when uv cannot verify TLS ---------------------------------------------
+
+
+def test_a_failed_install_is_retried_against_the_system_cert_store(monkeypatch, capsys):
+    # The managed-laptop case: a proxy re-signs HTTPS, uv checks its own
+    # bundled roots, and the install dies on a machine where git and the
+    # browser both work.
+    calls = []
+
+    def call(argv, env=None):
+        calls.append(env)
+        return 1 if env is None else 0
+
+    monkeypatch.setattr(update.subprocess, "call", call)
+    assert update._install("0.7.1") == 0
+    assert calls[0] is None
+    assert calls[1]["UV_NATIVE_TLS"] == "1" and calls[1]["UV_SYSTEM_CERTS"] == "1"
+
+
+def test_a_successful_install_is_not_retried(monkeypatch):
+    calls = []
+    monkeypatch.setattr(update.subprocess, "call", lambda argv, env=None: calls.append(env) or 0)
+
+    assert update._install("0.7.1") == 0
+    assert calls == [None]
+
+
+def test_both_attempts_failing_says_what_to_try(monkeypatch, capsys):
+    monkeypatch.setattr(update.subprocess, "call", lambda argv, env=None: 1)
+
+    assert update._install("0.7.1") == 1
+    printed = capsys.readouterr().out
+    assert "--no-python-downloads" in printed and "SSL_CERT_FILE" in printed

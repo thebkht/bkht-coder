@@ -227,6 +227,34 @@ uv tool install --editable .        # then just: coder
 
 On Windows, state lives in `%USERPROFILE%\.bkht-coder\sessions\`.
 
+### If uv fails on a certificate
+
+```
+error: Failed to download ... cpython-3.14.7+...-x86_64-pc-windows-msvc...tar.gz
+  Caused by: invalid peer certificate: UnknownIssuer
+```
+
+That is uv fetching a Python interpreter, not coder failing to build, and it
+means something on the machine is re-signing HTTPS — a corporate proxy, or an
+antivirus with TLS inspection turned on. uv verifies against roots it bundles
+itself, so it fails where git, the browser and everything else on that machine
+work fine. The installers retry this on their own; by hand it is:
+
+```powershell
+$env:UV_NATIVE_TLS = 1; $env:UV_SYSTEM_CERTS = 1     # both: the flag was renamed
+uv tool install --force git+https://github.com/thebkht/bkht-coder.git
+```
+
+If the interpreter download is the only thing failing, a Python you already
+have avoids it entirely:
+
+```powershell
+uv tool install --force --no-python-downloads git+https://github.com/thebkht/bkht-coder.git
+```
+
+Failing both, `SSL_CERT_FILE` pointed at your own CA bundle works everywhere uv
+does.
+
 The shell tool works out of the box: with no `bash` on `PATH` the agent runs
 commands through PowerShell and is told to write PowerShell syntax. Installing
 [Git for Windows](https://git-scm.com/download/win) upgrades it to bash, which

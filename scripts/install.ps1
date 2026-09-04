@@ -228,8 +228,49 @@ if ($env:BKHT_CODER_REF) {
     }
 }
 
+# uv verifies TLS against roots it bundles itself, so a proxy or antivirus that
+# re-signs HTTPS -- the ordinary managed-laptop setup -- fails here with
+# `invalid peer certificate: UnknownIssuer` on a machine where git, the browser
+# and everything else work. Retried against the platform certificate store,
+# which is where that machine's real root already is.
+#
+# Set as environment variables rather than passed as a flag, and in both
+# spellings, because the flag was renamed (`--native-tls` to `--system-certs`)
+# and this has to work on whichever uv the user already has: an environment
+# variable uv does not know is ignored, where a flag it does not know is a hard
+# error that would replace the real failure with a worse one.
+# PowerShell 7.4 turned `$PSNativeCommandUseErrorActionPreference` on by
+# default, which makes a non-zero exit from a native command throw under
+# `$ErrorActionPreference = 'Stop'`. That would end the script on the first
+# attempt and the retry below would never run, so it is turned off for the
+# length of this step and put back afterwards.
+$nativeErrors = $null
+if (Test-Path Variable:PSNativeCommandUseErrorActionPreference) {
+    $nativeErrors = $PSNativeCommandUseErrorActionPreference
+    $PSNativeCommandUseErrorActionPreference = $false
+}
+
 uv tool install --force $target
-if ($LASTEXITCODE -ne 0) { Write-Fail "uv tool install failed for $target" }
+if ($LASTEXITCODE -ne 0) {
+    Write-Warn "retrying with this machine's certificate store"
+    $env:UV_NATIVE_TLS = '1'
+    $env:UV_SYSTEM_CERTS = '1'
+    uv tool install --force $target
+}
+
+if ($null -ne $nativeErrors) { $PSNativeCommandUseErrorActionPreference = $nativeErrors }
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ''
+    Write-Host 'If that failed on a certificate error, a proxy or antivirus is'
+    Write-Host 'signing HTTPS on this machine. Either install from a Python you'
+    Write-Host 'already have, so uv downloads no interpreter:'
+    Write-Host "     uv tool install --force --no-python-downloads $target"
+    Write-Host 'or point uv at your certificate bundle first:'
+    Write-Host '     $env:SSL_CERT_FILE = "<path to your CA bundle>"'
+    Write-Host ''
+    Write-Fail "uv tool install failed for $target"
+}
 Write-Pass 'coder installed'
 
 if (-not (Test-Have coder)) {

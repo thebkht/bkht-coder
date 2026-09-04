@@ -23,6 +23,7 @@ interactive terminal, and switched off entirely by `update_check false`.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import threading
@@ -198,16 +199,56 @@ def notice(settings=None, stream=None) -> str:
     return f"v{latest} available · coder update" if latest else ""
 
 
+#: uv verifies TLS against roots it bundles itself, so a proxy or antivirus
+#: that re-signs HTTPS -- the ordinary managed-laptop setup -- fails with
+#: `invalid peer certificate: UnknownIssuer` on a machine where git, curl and
+#: the browser all work. These tell uv to trust the platform's certificate
+#: store instead.
+#:
+#: Set as environment variables rather than passed as a flag, and in both
+#: spellings, because the flag was renamed (`--native-tls` to `--system-certs`)
+#: and this has to work on whichever uv the user already has: an environment
+#: variable uv does not know is ignored, where a flag it does not know is a
+#: hard error that would replace the real failure with a worse one.
+SYSTEM_CERTS = {"UV_NATIVE_TLS": "1", "UV_SYSTEM_CERTS": "1"}
+
+TLS_HELP = """\
+That is uv failing to verify TLS, not coder failing to build. It usually means
+a proxy or antivirus is re-signing HTTPS on this machine, and uv checks against
+its own bundled roots rather than the system store.
+
+Retried with the system store already. If it still fails:
+  * install from a Python you already have, so uv downloads no interpreter:
+      uv tool install --force --no-python-downloads {target}
+  * or point uv at your certificate bundle:
+      SSL_CERT_FILE=<path to your CA bundle>"""
+
+
 def _install(tag: str) -> int:
     """Re-install from a tag, showing the work.
 
     `uv tool install --force` is what the installer runs, so an update lands a
     user in exactly the state a fresh install would have.
+
+    A failure is retried once against the platform's certificate store. The
+    retry is unconditional because the output is streamed rather than captured
+    -- reading the reason would mean hiding the progress of an install that
+    takes minutes -- and a second attempt on a network that was never the
+    problem costs one repeated error message.
     """
     target = f"{GIT_URL}@v{tag}"
+    argv = ["uv", "tool", "install", "--force", target]
     print(f"Installing {target}")
     try:
-        return subprocess.call(["uv", "tool", "install", "--force", target])
+        code = subprocess.call(argv)
+        if code == 0:
+            return 0
+
+        print("\nRetrying with this machine's certificate store.")
+        code = subprocess.call(argv, env={**os.environ, **SYSTEM_CERTS})
+        if code != 0:
+            print("\n" + TLS_HELP.format(target=target))
+        return code
     except FileNotFoundError:
         print("uv is not on PATH. See https://docs.astral.sh/uv/ to install it.")
         return 1

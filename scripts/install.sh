@@ -260,7 +260,25 @@ else
   warn "no release tags found — installing from the default branch"
 fi
 
-uv tool install --force "$TARGET" || fail "uv tool install failed for $TARGET"
+# uv verifies TLS against roots it bundles itself, so a proxy or antivirus that
+# re-signs HTTPS fails here with `invalid peer certificate: UnknownIssuer` on a
+# machine where git, curl and the browser all work. Retried against the
+# platform certificate store, in both spellings of the setting, because the
+# flag was renamed and an environment variable uv does not know is ignored
+# where an unknown flag would be a hard error hiding the real one.
+if ! uv tool install --force "$TARGET"; then
+  warn "retrying with this machine's certificate store"
+  if ! UV_NATIVE_TLS=1 UV_SYSTEM_CERTS=1 uv tool install --force "$TARGET"; then
+    printf '\n'
+    printf 'If that failed on a certificate error, a proxy or antivirus is signing\n'
+    printf 'HTTPS here. Either install from a Python you already have, so uv\n'
+    printf 'downloads no interpreter:\n'
+    printf '     uv tool install --force --no-python-downloads %s\n' "$TARGET"
+    printf 'or point uv at your certificate bundle:\n'
+    printf '     SSL_CERT_FILE=<path to your CA bundle>\n\n'
+    fail "uv tool install failed for $TARGET"
+  fi
+fi
 pass "coder installed"
 
 if ! have coder; then

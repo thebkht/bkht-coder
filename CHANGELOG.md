@@ -9,6 +9,23 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Installing behind a TLS-inspecting proxy failed with no explanation.** uv
+  verifies against roots it bundles itself, so on a machine whose HTTPS is
+  re-signed by a corporate proxy or an antivirus -- where git, curl and the
+  browser all work -- `uv tool install` dies fetching a Python interpreter with
+  `invalid peer certificate: UnknownIssuer`, and both installers reported only
+  "uv tool install failed". They now retry against the platform's certificate
+  store and, if that fails too, name the two other ways out
+  (`--no-python-downloads`, `SSL_CERT_FILE`). `coder update` does the same.
+
+  The setting is passed as an environment variable rather than a flag, in both
+  spellings (`UV_NATIVE_TLS` and `UV_SYSTEM_CERTS`), because the flag was
+  renamed between uv versions: an environment variable uv does not know is
+  ignored, where a flag it does not know is a hard error that would replace the
+  real failure with a worse one.
+
 ## [0.7.1] - 2026-09-04
 
 ### Added
