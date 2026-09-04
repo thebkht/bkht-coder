@@ -2,7 +2,7 @@
 
 import pytest
 
-from bkht.coder.language import ENGLISH, RUSSIAN, UZBEK, detect
+from bkht.coder.language import ENGLISH, RUSSIAN, UZBEK, detect, words
 
 
 @pytest.mark.parametrize(
@@ -54,3 +54,27 @@ def test_no_signal_is_none(text):
 def test_english_possessive_is_not_uzbek():
     """`dog's` carries a g' -- the ASCII apostrophe must not count as Uzbek."""
     assert detect("the dog's owner can't fix this file") == ENGLISH
+
+
+def test_an_uzbek_request_full_of_loanwords_is_not_english():
+    # From a real session. `folder` scored for English and `qilib` for Uzbek,
+    # and a draw used to resolve to English -- so the analysis came back in
+    # English to a user writing Uzbek.
+    assert detect("osm folder ichidagi osm kernel packageni tahlil qilib ber to'liq") == UZBEK
+
+
+def test_the_verbs_of_an_ordinary_request_are_markers():
+    assert detect("projectni ko'rib chiqib xulosa ber") == UZBEK
+    assert detect("salom new absni o'rganib chiq muoomolarini top") == UZBEK
+
+
+def test_english_and_russian_are_still_themselves():
+    assert detect("read the file please") == ENGLISH
+    assert detect("hello there") == ENGLISH
+    assert detect("привет как дела") == RUSSIAN
+
+
+def test_words_keeps_the_apostrophe_inside_a_word():
+    # The tokenizer retrieval reuses. Splitting here yields `rib`, which
+    # matches `position: absolute` in every stylesheet in the workspace.
+    assert words("projectni ko'rib chiqib") == ["projectni", "ko'rib", "chiqib"]

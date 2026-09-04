@@ -45,8 +45,11 @@ UZBEK_WORDS = frozenset(
     koʻrsat ko'rsat koʻrsating ko'rsating tushuntir tushuntiring
     tuzat tuzating oʻzgartir o'zgartir qoʻsh qo'sh oʻchir o'chir
     och ochib oʻqi o'qi oʻqib o'qib tekshir tekshiring ishla ishlaydi ishlamayapti
-    fayl faylni fayllar papka kod kodni qator qatorda xato xatolik xatosi
-    uchun bilan haqida ichida keyin lekin ammo yana juda hammasi bugun
+    koʻrib ko'rib oʻrganib o'rganib oʻrgan o'rgan chiq chiqib
+    tahlil xulosa ber bering berish toʻliq to'liq topib top
+    fayl faylni fayllar papka papkasi kod kodni qator qatorda xato xatolik xatosi
+    muammo muammosi muammolar muammolarini
+    uchun bilan haqida ichida ichidagi keyin lekin ammo yana juda hammasi bugun
     yoʻq yo'q ha mayli boʻl bo'l boʻladi bo'ladi bor yaxshi zoʻr zo'r
     men sen siz bu shu ular biz meni menga sizga yordam
     """.split()
@@ -77,6 +80,16 @@ ENGLISH_WORDS = frozenset(
     hello hi hey thanks thank ok okay yes no help about here there
     """.split()
 )
+
+
+def words(text: str) -> list[str]:
+    """The words in ``text``, lowercased, with oʻ and gʻ left intact.
+
+    Public because retrieval needs the same tokenizer. Splitting Uzbek on the
+    apostrophe is not a smaller mistake there than it is here: it turns
+    `ko'rib` into `rib`, and a search for `rib` matches `position: absolute`.
+    """
+    return _WORD.findall(text.lower())
 
 
 def _script(text: str) -> str:
@@ -120,5 +133,13 @@ def detect(text: str) -> str | None:
     english = _score(words, ENGLISH_WORDS)
 
     if uzbek == 0 and english == 0:
+        return None
+    if uzbek == english:
+        # A draw is not evidence for English. Half the marker words here are
+        # loanwords the two languages share -- "osm folder ichidagi ... qilib"
+        # scored one each, on `folder` and on `qilib` -- and calling that
+        # English answered an Uzbek question in English, which is the exact
+        # failure this module was written to prevent. None keeps whatever the
+        # session had, which on a turn like that is already the right answer.
         return None
     return UZBEK if uzbek > english else ENGLISH
