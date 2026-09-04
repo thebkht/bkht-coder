@@ -8,10 +8,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .base import Registry, Tool, ToolError, ToolResult, Workspace, validate_arguments
+from .base import (
+    Reads,
+    Registry,
+    Tool,
+    ToolError,
+    ToolResult,
+    Workspace,
+    validate_arguments,
+)
 from .fs import register_read_tools
 
 __all__ = [
+    "Reads",
     "Registry",
     "Tool",
     "ToolError",
@@ -53,7 +62,10 @@ def build_registry(
     """
     workspace = Workspace(Path(root))
     registry = Registry()
-    register_read_tools(registry, workspace)
+    # Shared by the two halves of the filesystem surface: the read tools fill
+    # it in, and `edit_file` refuses to change a file that is not in it.
+    reads = Reads()
+    register_read_tools(registry, workspace, reads)
 
     from .search import register_search_tools
 
@@ -95,7 +107,7 @@ def build_registry(
         from .fs import register_write_tools
         from .shell import register_shell_tools
 
-        register_write_tools(registry, workspace, snapshots)
+        register_write_tools(registry, workspace, snapshots, reads)
         register_shell_tools(registry, workspace)
 
         if jobs is not None:

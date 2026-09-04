@@ -142,8 +142,12 @@ def test_fix_goes_through_the_permission_gate(repo):
 
 def test_fix_applies_an_approved_change(repo):
     finding = Finding("calc.py", 2, "high", "correctness", "divides by zero", "", "", CONFIRMED)
+    # The read is part of the script because it is part of the work: editing a
+    # file this session has not read is refused, and a fix pass is no exception
+    # -- it is handed a line number, not the line.
     provider = FakeProvider(
         [
+            call("read_file", path="calc.py"),
             call("edit_file", path="calc.py", old_string="sum(n) / len(n)", new_string="sum(n) / len(n) if n else 0.0"),
             "Guarded the empty case.",
         ]

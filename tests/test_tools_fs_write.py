@@ -18,6 +18,18 @@ def run(registry, name, **kwargs):
     return registry.get(name).run(**kwargs)
 
 
+def edit(registry, path, **kwargs):
+    """`edit_file`, with the read it now requires.
+
+    Editing a file the session has not read is refused -- see the precondition
+    tests at the bottom. Every other test here is about what `edit_file` does
+    once that is satisfied, so the read happens here rather than in each of
+    them.
+    """
+    run(registry, "read_file", path=path)
+    return run(registry, "edit_file", path=path, **kwargs)
+
+
 # --- write_file -------------------------------------------------------------
 
 
@@ -58,8 +70,8 @@ def test_write_cannot_escape_the_workspace(tools):
 
 def test_edit_replaces_a_unique_string(tools, project):
     registry, _, _ = tools
-    result = run(
-        registry, "edit_file", path="src/util.py", old_string="x * 2", new_string="x * 3"
+    result = edit(
+        registry, "src/util.py", old_string="x * 2", new_string="x * 3"
     )
     assert result.ok
     assert "x * 3" in (project / "src" / "util.py").read_text()
@@ -68,7 +80,7 @@ def test_edit_replaces_a_unique_string(tools, project):
 def test_edit_no_match_fails_loudly_and_says_which_case(tools):
     registry, _, _ = tools
     with pytest.raises(ToolError) as exc:
-        run(registry, "edit_file", path="src/util.py", old_string="nonexistent", new_string="x")
+        edit(registry, "src/util.py", old_string="nonexistent", new_string="x")
     message = str(exc.value)
     assert "was not found" in message
     assert "match the file exactly" in message
@@ -78,7 +90,7 @@ def test_edit_multi_match_fails_loudly_and_says_which_case(tools, project):
     registry, _, _ = tools
     (project / "dup.py").write_text("a = 1\nb = 1\nc = 1\n")
     with pytest.raises(ToolError) as exc:
-        run(registry, "edit_file", path="dup.py", old_string="= 1", new_string="= 2")
+        edit(registry, "dup.py", old_string="= 1", new_string="= 2")
     message = str(exc.value)
     assert "appears 3 times" in message
     assert "replace_all" in message
@@ -89,8 +101,8 @@ def test_edit_multi_match_fails_loudly_and_says_which_case(tools, project):
 def test_edit_multi_match_succeeds_with_replace_all(tools, project):
     registry, _, _ = tools
     (project / "dup.py").write_text("a = 1\nb = 1\n")
-    result = run(
-        registry, "edit_file", path="dup.py", old_string="= 1", new_string="= 2", replace_all=True
+    result = edit(
+        registry, "dup.py", old_string="= 1", new_string="= 2", replace_all=True
     )
     assert "2 occurrences" in result.content
     assert (project / "dup.py").read_text() == "a = 2\nb = 2\n"
@@ -99,13 +111,13 @@ def test_edit_multi_match_succeeds_with_replace_all(tools, project):
 def test_edit_rejects_an_empty_old_string(tools):
     registry, _, _ = tools
     with pytest.raises(ToolError, match="must not be empty"):
-        run(registry, "edit_file", path="src/util.py", old_string="", new_string="x")
+        edit(registry, "src/util.py", old_string="", new_string="x")
 
 
 def test_edit_rejects_a_no_op(tools):
     registry, _, _ = tools
     with pytest.raises(ToolError, match="identical"):
-        run(registry, "edit_file", path="src/util.py", old_string="x * 2", new_string="x * 2")
+        edit(registry, "src/util.py", old_string="x * 2", new_string="x * 2")
 
 
 def test_edit_on_a_missing_file(tools):
@@ -117,7 +129,7 @@ def test_edit_on_a_missing_file(tools):
 def test_edit_preserves_the_rest_of_the_file(tools, project):
     registry, _, _ = tools
     before = (project / "src" / "main.py").read_text()
-    run(registry, "edit_file", path="src/main.py", old_string="total = 0", new_string="total = 1")
+    edit(registry, "src/main.py", old_string="total = 0", new_string="total = 1")
     after = (project / "src" / "main.py").read_text()
     assert after == before.replace("total = 0", "total = 1")
 
@@ -128,7 +140,7 @@ def test_edit_preserves_the_rest_of_the_file(tools, project):
 def test_undo_restores_an_edited_file(tools, project):
     registry, _, snapshots = tools
     before = (project / "src" / "util.py").read_text()
-    run(registry, "edit_file", path="src/util.py", old_string="x * 2", new_string="x * 9")
+    edit(registry, "src/util.py", old_string="x * 2", new_string="x * 9")
     assert snapshots.undo() == "restored util.py"
     assert (project / "src" / "util.py").read_text() == before
 
@@ -158,7 +170,7 @@ def test_undo_on_an_empty_stack(tools):
 def test_a_failed_edit_leaves_no_snapshot(tools):
     registry, _, snapshots = tools
     with pytest.raises(ToolError):
-        run(registry, "edit_file", path="src/util.py", old_string="nope", new_string="x")
+        edit(registry, "src/util.py", old_string="nope", new_string="x")
     assert len(snapshots) == 0
 
 
@@ -185,8 +197,10 @@ def test_an_edit_importing_a_name_that_does_not_exist_still_writes(package):
     worse than one that misses an incorrect edit.
     """
     registry, root = package
-    result = registry.get("edit_file").run(
-        path="pkg/commands.py",
+    result = edit(
+        registry,
+        "pkg/commands.py",
+        
         old_string="from .session import STATE_DIR",
         new_string="from .session import STATE_DIR, Input",
     )
@@ -196,8 +210,10 @@ def test_an_edit_importing_a_name_that_does_not_exist_still_writes(package):
 
 def test_the_model_is_told_about_the_name_in_the_same_breath(package):
     registry, _ = package
-    result = registry.get("edit_file").run(
-        path="pkg/commands.py",
+    result = edit(
+        registry,
+        "pkg/commands.py",
+        
         old_string="from .session import STATE_DIR",
         new_string="from .session import STATE_DIR, Input",
     )
@@ -210,8 +226,10 @@ def test_an_edit_that_would_not_parse_is_refused(package):
     before = (root / "pkg" / "commands.py").read_text()
 
     with pytest.raises(ToolError, match="unparseable"):
-        registry.get("edit_file").run(
-            path="pkg/commands.py", old_string="def go():", new_string="def go(:"
+        edit(
+            registry,
+            "pkg/commands.py",
+            old_string="def go():", new_string="def go(:"
         )
 
     assert (root / "pkg" / "commands.py").read_text() == before, "nothing was written"
@@ -226,8 +244,10 @@ def test_write_file_is_checked_the_same_way(package):
 
 def test_a_correct_edit_says_nothing_extra(package):
     registry, _ = package
-    result = registry.get("edit_file").run(
-        path="pkg/commands.py", old_string="return STATE_DIR", new_string="return str(STATE_DIR)"
+    result = edit(
+        registry,
+        "pkg/commands.py",
+        old_string="return STATE_DIR", new_string="return str(STATE_DIR)"
     )
     assert result.ok and "Warning" not in result.content
 
@@ -236,3 +256,91 @@ def test_a_non_python_file_is_written_unchecked(package):
     registry, root = package
     result = registry.get("write_file").run(path="notes.md", content="def go(:\n")
     assert result.ok and (root / "notes.md").exists()
+
+
+# --- editing a file nobody read ---------------------------------------------
+
+
+def test_editing_an_unread_file_is_refused(tools):
+    """An exact-string match is not evidence that the model read anything.
+
+    A string remembered from an earlier session, or reconstructed from the
+    file's name, either matches or it does not. When it does not the turn
+    spends three iterations finding out -- edit, `old_string was not found`,
+    read, edit. When it does, the edit landed somewhere nobody looked.
+    """
+    registry, _, _ = tools
+    with pytest.raises(ToolError, match="have not read"):
+        run(registry, "edit_file", path="src/util.py", old_string="x * 2", new_string="x * 3")
+
+
+def test_the_refusal_says_what_to_do_instead(tools):
+    registry, _, _ = tools
+    with pytest.raises(ToolError) as raised:
+        run(registry, "edit_file", path="src/util.py", old_string="x * 2", new_string="x * 3")
+    assert "read_file" in str(raised.value)
+
+
+def test_a_file_that_was_read_may_be_edited(tools, project):
+    registry, _, _ = tools
+    run(registry, "read_file", path="src/util.py")
+    result = run(
+        registry, "edit_file", path="src/util.py", old_string="x * 2", new_string="x * 3"
+    )
+    assert result.ok
+    assert "x * 3" in (project / "src" / "util.py").read_text()
+
+
+def test_a_file_that_moved_since_it_was_read_is_refused(tools, project):
+    """The other half of the same problem.
+
+    A file read ten minutes ago and saved by a human since is a file whose
+    remembered text is no longer what surrounds the edit -- and an exact match
+    against the part that did not move is how that goes unnoticed.
+    """
+    registry, _, _ = tools
+    run(registry, "read_file", path="src/util.py")
+
+    target = project / "src" / "util.py"
+    target.write_text("# somebody else got here first\n" + target.read_text())
+    import os
+
+    os.utime(target, (0, 0))
+
+    with pytest.raises(ToolError, match="changed since you read it"):
+        run(registry, "edit_file", path="src/util.py", old_string="x * 2", new_string="x * 3")
+
+
+def test_a_turn_may_make_two_edits_to_one_file(tools, project):
+    """Its own first write must not lock it out of the second."""
+    registry, _, _ = tools
+    run(registry, "read_file", path="src/util.py")
+    assert run(
+        registry, "edit_file", path="src/util.py", old_string="x * 2", new_string="x * 3"
+    ).ok
+    assert run(
+        registry, "edit_file", path="src/util.py", old_string="x * 3", new_string="x * 4"
+    ).ok
+    assert "x * 4" in (project / "src" / "util.py").read_text()
+
+
+def test_write_file_needs_no_prior_read(tools, project):
+    """It states the whole file, so there is no remembered text to be wrong."""
+    registry, _, _ = tools
+    assert run(registry, "write_file", path="src/util.py", content="x = 1\n").ok
+
+
+def test_a_written_file_may_then_be_edited(tools, project):
+    registry, _, _ = tools
+    run(registry, "write_file", path="fresh.py", content="value = 1\n")
+    assert run(
+        registry, "edit_file", path="fresh.py", old_string="value = 1", new_string="value = 2"
+    ).ok
+    assert (project / "fresh.py").read_text() == "value = 2\n"
+
+
+def test_a_missing_file_keeps_its_own_error(tools):
+    """"You have not read it" is true of a file that is not there, and useless."""
+    registry, _, _ = tools
+    with pytest.raises(ToolError, match="file not found"):
+        run(registry, "edit_file", path="nope.py", old_string="a", new_string="b")

@@ -10,7 +10,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from .. import verify
-from .base import Tool, ToolError, ToolResult, Workspace, output_chars, truncate
+from .base import (
+    Reads,
+    Tool,
+    ToolError,
+    ToolResult,
+    Workspace,
+    output_chars,
+    truncate,
+)
 
 IGNORED_DIRS = {
     ".git",
@@ -58,8 +66,14 @@ def read_text(path: Path) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-def register_read_tools(registry, workspace: Workspace):
-    """Add the non-mutating filesystem tools to ``registry``."""
+def register_read_tools(registry, workspace: Workspace, reads: Reads | None = None):
+    """Add the non-mutating filesystem tools to ``registry``.
+
+    ``reads`` is the session's record of what has been read, which
+    :func:`register_write_tools` consults before it will edit anything. None
+    means nobody is keeping one -- a read-only registry has no editor to
+    inform, so it costs nothing not to.
+    """
 
     def read_file(path: str, offset: int = 1, limit: int = DEFAULT_READ_LIMIT) -> ToolResult:
         target = workspace.resolve(path)
@@ -76,6 +90,13 @@ def register_read_tools(registry, workspace: Workspace):
             )
         text = read_text(target)
         lines = text.splitlines()
+
+        # Noted on the whole file, not on the window. A partial read is still a
+        # read: the model saw the part it is about to quote, and the alternative
+        # is refusing to edit a 3,000-line file until it has been paged through
+        # in full, which costs the window the paging was avoiding.
+        if reads is not None:
+            reads.note(target)
 
         if offset < 1:
             raise ToolError("offset is 1-based; the first line is 1")
@@ -214,16 +235,31 @@ def _with_warnings(message: str, warnings: list[str]) -> str:
     return message + "\n\nWarning: " + "\n".join(warnings)
 
 
-def register_write_tools(registry, workspace: Workspace, snapshots=None):
+def register_write_tools(
+    registry, workspace: Workspace, snapshots=None, reads: Reads | None = None
+):
     """Add the mutating filesystem tools to ``registry``.
 
     ``snapshots`` records the previous contents of every file touched, so
     ``/undo`` works without requiring the workspace to be a git repository.
+
+    ``reads`` is what :func:`register_read_tools` filled in, and what
+    ``edit_file`` requires before it will change an existing file. None turns
+    the requirement off entirely, which is what the tests that predate it use.
     """
 
     def _snapshot(target: Path) -> None:
         if snapshots is not None:
             snapshots.capture(target)
+
+    def _wrote(target: Path) -> None:
+        """The file as it is now is the file the model last saw.
+
+        Without this a turn making two edits to one file would be refused on the
+        second: its own first write moved the mtime it was checked against.
+        """
+        if reads is not None:
+            reads.note(target)
 
     def write_file(path: str, content: str) -> ToolResult:
         target = workspace.resolve(path)
@@ -241,6 +277,10 @@ def register_write_tools(registry, workspace: Workspace, snapshots=None):
         target.parent.mkdir(parents=True, exist_ok=True)
         existed = target.exists()
         target.write_text(content, encoding="utf-8")
+        # Not gated on a prior read the way `edit_file` is: `write_file` states
+        # the whole file, so there is no remembered text for it to be wrong
+        # about. It still settles what the model has seen -- it wrote it.
+        _wrote(target)
 
         verb = "Updated" if existed else "Created"
         lines = len(content.splitlines())
@@ -272,6 +312,14 @@ def register_write_tools(registry, workspace: Workspace, snapshots=None):
         path: str, old_string: str, new_string: str, replace_all: bool = False
     ) -> ToolResult:
         target = workspace.resolve(path)
+
+        # Asked before the file is read, so the answer is about what the model
+        # has seen rather than about what this call is about to see.
+        if reads is not None:
+            complaint = reads.complaint(target, workspace.relative(target))
+            if complaint:
+                raise ToolError(complaint)
+
         text = read_text(target)
 
         if not old_string:
@@ -310,6 +358,7 @@ def register_write_tools(registry, workspace: Workspace, snapshots=None):
 
         _snapshot(target)
         target.write_text(updated, encoding="utf-8")
+        _wrote(target)
 
         where = f"{count} occurrences" if replace_all and count > 1 else "1 occurrence"
         return ToolResult.success(

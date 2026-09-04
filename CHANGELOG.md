@@ -11,6 +11,20 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ### Changed
 
+- **`edit_file` will no longer change a file this session has not read.** An
+  exact-string match was the only precondition, and it is not evidence that the
+  model read anything: a string remembered from an earlier session, or
+  reconstructed from the file's name, either matches or it does not. When it
+  does not, the turn spends three iterations discovering that -- edit,
+  `old_string was not found`, read, edit. When it does, the edit landed in a
+  file nobody looked at. It now says which of the two is wrong and what to do
+  about it. The same record catches the other half: a file saved by somebody
+  else since the agent read it is refused until it is read again, because an
+  exact match against the part that did not move is exactly how that goes
+  unnoticed. `write_file` is unaffected -- it states the whole file, so there is
+  no remembered text for it to be wrong about -- and a turn's own writes count
+  as having seen the file, so two edits to one file still work.
+
 - **Two more small-model rules now stop at the edge of a small window.** The
   loop refuses a byte-identical repeat and declares the turn stuck on the
   third, and the scout searches the workspace before the model has seen the

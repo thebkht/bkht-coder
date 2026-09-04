@@ -258,6 +258,72 @@ class Workspace:
 
 
 @dataclass
+class Reads:
+    """Which files this session has read, and how they looked at the time.
+
+    `edit_file` is the only thing that asks. An exact-string match is not on
+    its own evidence that the model read anything: a string it remembered from
+    an earlier session, or reconstructed from the file's name, either matches
+    or it does not. When it does not, the turn spends three iterations finding
+    that out -- edit, `old_string was not found`, read, edit. When it does, the
+    edit lands somewhere nobody looked.
+
+    The mtime is kept for the second half of the same problem. A file the agent
+    read ten minutes ago and a human has saved since is a file whose remembered
+    text is no longer what surrounds the edit, and an exact match against the
+    part that did not move is exactly how that goes unnoticed.
+
+    A path that cannot be stat'd is recorded as read anyway, with no mtime.
+    Losing the ability to edit a file is a worse failure than not noticing it
+    moved, and the read genuinely happened.
+    """
+
+    seen: dict[Path, float | None] = field(default_factory=dict)
+
+    def note(self, path: Path) -> None:
+        """Record ``path`` as read, as it is right now."""
+        path = Path(path)
+        try:
+            self.seen[path] = path.stat().st_mtime
+        except OSError:
+            self.seen[path] = None
+
+    def complaint(self, path: Path, shown: str) -> str:
+        """What is wrong with editing ``path`` from memory, or "" if nothing is.
+
+        ``shown`` is how the path is named to the model, so the sentence it
+        gets back names the file the way it asked for it.
+        """
+        path = Path(path)
+        # A file that is not there has a better error than this one waiting for
+        # it two lines further on. "You have not read it" is true and useless.
+        if not path.exists():
+            return ""
+        if path not in self.seen:
+            return (
+                f"you have not read {shown} in this session. `old_string` has to "
+                "match the file exactly, and the file is the only place that "
+                "text is -- read it with `read_file` first, then copy the lines "
+                "you mean out of what comes back."
+            )
+
+        remembered = self.seen[path]
+        if remembered is None:
+            return ""
+        try:
+            current = path.stat().st_mtime
+        except OSError:
+            return ""
+        if current == remembered:
+            return ""
+        return (
+            f"{shown} has changed since you read it, so what you remember of it "
+            "is not what is there now. Read it again before editing, or your "
+            "edit lands in a file you have not seen."
+        )
+
+
+@dataclass
 class Registry:
     """Name -> Tool, kept small on purpose.
 
