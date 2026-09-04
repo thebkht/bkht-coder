@@ -506,3 +506,19 @@ def test_context_says_off_when_no_command_is_configured(repl):
     r, lines = repl
     r.dispatch("/context")
     assert "verify     off" in "\n".join(lines)
+
+
+def test_the_agent_command_prints_the_surface(repl, project):
+    # The question that brings someone here mid-session is "why is the model
+    # not using what I wrote", and the answer is in this listing.
+    session, lines = repl
+    directory = project / "agent" / "skills" / "releasing"
+    directory.mkdir(parents=True)
+    (project / "agent" / "agent.json").write_text("{}")
+    (directory / "SKILL.md").write_text(
+        "---\nname: releasing\ndescription: Cut a release.\n---\n\nTag it.\n"
+    )
+
+    session.dispatch("/agent")
+    printed = "\n".join(lines)
+    assert "skills/releasing" in printed and "skills: releasing" in printed

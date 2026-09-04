@@ -37,17 +37,29 @@ whose contents you don't trust.
 
 **Hooks execute arbitrary commands from a config file.** `config.json` may
 carry a `hooks` block — commands fired before a tool call, after one, and at
-the end of a turn (see the README). They are your commands, run as you, with
-your environment, and nothing prompts before one runs. Two things follow. A
-workspace `.bkht-coder/config.json` you did not write is code you are about to
-execute, so treat cloning a repository and starting `coder` in it the way you
-would treat any other repo-supplied build script. And `coder doctor` names
-every hook it can find, precisely so none of them is invisible; `--no-hooks`
-runs a session with none of them.
+the end of a turn (see the README) — and so may `agent/hooks/<event>/`, where
+each executable file is one such command. They are your commands, run as you,
+with your environment, and nothing prompts before one runs. Two things follow.
+A workspace `.bkht-coder/config.json` or `agent/hooks/` you did not write is
+code you are about to execute, so treat cloning a repository and starting
+`coder` in it the way you would treat any other repo-supplied build script. And
+`coder doctor` names every hook it can find, precisely so none of them is
+invisible; `--no-hooks` runs a session with none of them.
 
 A `pre_tool` hook can *refuse* a call, and that direction is a safety feature
 rather than a risk — but it is a second line, not the first. The permission
 layer is the first, and a hook is not a substitute for `ask` mode.
+
+**Tools under `agent/tools/` are imported into the agent's own process.** They
+are the workspace's Python, running before the first turn, with everything the
+agent itself can reach — a larger hazard than a hook, which is at least a
+command you typed into your own config file. Cloning a repository is never
+enough to run one: the `agent/` directory has to carry an `agent.json` marker,
+the `agent_tools` setting has to be on (it ships off), and `--no-agent-tools`
+turns it off again for one session. `coder doctor` names every tool that would
+load and the file it comes from, and a tool may not take a built-in's name —
+one answering to `write_file` would take calls the permission layer had already
+approved under that name.
 
 **Remembered approvals are scoped to a call, not a tool.** Answering `a` at the
 prompt remembers *that* command and *that* path — see `bkht/coder/rules.py`. It

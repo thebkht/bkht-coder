@@ -180,7 +180,7 @@ def entries(directory: Path, name: str) -> list[Path]:
             for event in sorted(directory.iterdir()) if event.is_dir()
             for child in event.iterdir()
         )
-    return sorted(directory.iterdir())
+    return sorted(path for path in directory.iterdir() if path.name != "__pycache__")
 
 
 def inventory(found: Surface, root) -> list[tuple[str, list[tuple[str, list[str]]]]]:

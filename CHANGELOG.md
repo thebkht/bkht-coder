@@ -9,6 +9,56 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ## [Unreleased]
 
+### Added
+
+- **Hooks can be files.** `agent/hooks/<event>/format.sh` -- the directory names
+  the event, the file is the command, and a diff can review it, where the same
+  hook written into `config.json` is a JSON string with escaped quotes in it.
+  Both sources fire, config first, appended rather than shadowed: a setting is
+  one value and the specific one wins, but a hook is a thing that happens, and a
+  project asking for a formatter has not asked for your own hook to stop. The
+  execute bit is required and a file without it is reported, because everything
+  in that directory is a candidate to run and a hook that silently never fires
+  is worse than one that was never written.
+
+- **Subagents: a delegated task handed to somebody in particular.** `task`
+  already ran a second agent, but every delegation got the same empty prompt and
+  the same skills -- right for "find where the registry is built", wrong for
+  "review this diff the way we review diffs here". A subagent is a directory
+  under `agent/subagents/` with a description to choose it by, its own
+  instructions, and its own skills. Its own, not the workspace's: a reviewer
+  that inherited every skill in the project would be the parent agent under
+  another name.
+
+  With none written the `task` tool has the schema it always had, because a
+  parameter offering a choice of nothing can only be got wrong. There is no
+  per-subagent model: on a machine serving one, naming a second means evicting
+  the first to load it and evicting it back, which costs more than the
+  delegation saves.
+
+- **Tools a workspace writes for itself, behind two switches.**
+  `agent/tools/<name>.py`, one tool per file, named for the file, exposing
+  `TOOL` or `tool(workspace)`. The tool set is short on purpose -- every extra
+  tool costs selection accuracy on a small model -- but that argument is about
+  *this* project's tools, not about the one integration a workspace lives inside
+  and otherwise reaches through a shell. A user tool's `run` is wrapped, because
+  every other tool here promises the loop it raises `ToolError` and nothing
+  else, and a traceback out of one would end the turn rather than the call.
+
+  This imports the workspace's Python into the agent's own process before the
+  first turn, which is a larger hazard than hooks. Cloning a repository must not
+  be enough to run it, so three things have to be true: `agent/` is marked with
+  an `agent.json`, `agent_tools` is on (it ships **off**), and
+  `--no-agent-tools` was not passed. Then `doctor` and `/tools` name every tool
+  and its file. A user tool cannot take a built-in's name -- one answering to
+  `write_file` would take calls the permission layer had already approved under
+  that name, which is not a tool but a way around the gate.
+
+- **`coder info` says what loaded, not only what is on disk**, and `/agent`
+  prints the same view mid-session. The tree alone cannot show a skill refused
+  for want of a description; the summary alone cannot show which file that skill
+  is sitting in.
+
 ## [0.7.0] - 2026-09-04
 
 ### Added

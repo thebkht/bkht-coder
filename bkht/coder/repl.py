@@ -30,6 +30,7 @@ Commands
   /diff               show uncommitted changes in the workspace
   /instructions [reload]  show the project instructions, or re-read them
   /skills             list the skills the model can open
+  /agent              show the agent/ surface this workspace loads
   /jobs [stop <id>]   background processes this session started
   /sessions [agent]   earlier sessions here, this agent's or another's
   /review [base]      review uncommitted changes, or this branch against base
@@ -160,6 +161,18 @@ class Repl:
             self.out(f"  {instruction.source}{marker}")
             for line in instruction.text.splitlines():
                 self.out(f"      {line}")
+        return Command()
+
+    def do_agent(self, argument: str) -> Command:
+        """Show the `agent/` surface, the same view `coder info` prints.
+
+        Mid-session because that is when the question comes up: a slot spelled
+        wrong loads nothing and says nothing, and the first sign of it is the
+        model never using what you wrote.
+        """
+        from .cli import info
+
+        info(self.workspace.root, out=self.out)
         return Command()
 
     def do_skills(self, argument: str) -> Command:

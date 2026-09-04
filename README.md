@@ -8,6 +8,7 @@
 ```sh
 coder                          # interactive REPL in the current directory
 coder doctor                   # check this install can actually run a turn
+coder info                     # what this workspace's agent/ directory loads
 coder "add a --verbose flag"   # one-shot
 coder --resume                 # continue the last session here
 coder --auto                   # no permission prompts
@@ -17,7 +18,7 @@ coder --model qwen2.5-coder:7b
 ```
 
 Slash commands: `/tools`, `/context`, `/clear`, `/undo`, `/diff`, `/review`,
-`/instructions`, `/skills`, `/jobs`, `/sessions`, `/permissions`, `/model`,
+`/instructions`, `/skills`, `/agent`, `/jobs`, `/sessions`, `/permissions`, `/model`,
 `/mode`, `/config`, `/doctor`, `/help`, `/exit`. `!cmd` shells out, and `exit`
 on its own leaves.
 
@@ -256,6 +257,7 @@ wins over anything on disk.
 | `--max-iterations`  | `25`                     | Cap on agent loop iterations per task                            |
 | `--no-instructions` | off                      | Ignore `AGENTS.md` / `CLAUDE.md`                                 |
 | `--no-skills`       | off                      | Ignore skills, and omit the `skill` tool                         |
+| `--no-agent-tools`  | off                      | Do not load the tools written under `agent/tools/`               |
 | `--version`         | —                        | Print the version, and which copy of coder is running            |
 
 A few environment variables are read by the **tooling**, not the agent:
@@ -458,6 +460,155 @@ telling it invites arguing with the rule.
 `--auto` and `--plan` are unchanged and are decided before any rule is
 consulted.
 
+## The `agent/` directory
+
+Instructions, skills, slash commands and hooks each landed somewhere different,
+by a rule of their own. `agent/` is one rule instead, borrowed from
+[eve](https://eve.dev): **the slot a file lands in decides how it loads**, and
+its name comes from its path.
+
+```
+agent/
+├── agent.json                    the marker; {} is enough
+├── instructions.md               or instructions/*.md, composed in order
+├── skills/
+│   ├── releasing/SKILL.md        a directory skill, which may ship files
+│   └── summarize.md              a flat skill; the file is the skill
+├── commands/review-tests.md      -> /review-tests
+├── hooks/
+│   └── post_tool/format.sh       the directory names the event
+├── subagents/
+│   └── reviewer/
+│       ├── agent.md              description: what this one is for
+│       ├── instructions.md       its standing rules
+│       └── skills/               its own, not the workspace's
+└── tools/jira.py                 off until you turn it on
+```
+
+Two roots, and everything they hold layers *over* the older paths rather than
+replacing them — `AGENTS.md`, `.claude/skills` and `.bkht-coder/commands` all
+still load:
+
+1. `~/.bkht-coder/agent/` — applies everywhere
+2. `<workspace>/agent/` — applies to one project, and **wins** a name collision
+
+### The marker
+
+A workspace `agent/` is only read when it holds an `agent.json` — any JSON
+object, `{}` included. The global root, inside coder's own state directory,
+needs none.
+
+This is not ceremony. `agent/` is exactly the directory an eve project keeps
+its own agent in, and without the marker, starting coder inside one would adopt
+that project's system prompt as coder's own and import its Python into coder's
+tool registry. An `agent/` we were not given is passed over in silence — it
+belongs to somebody else. A marker that is present and *broken* is reported,
+because that file exists because somebody meant this to work.
+
+### Seeing what loaded
+
+```
+$ coder info
+agent
+  skills
+    skills/releasing
+    skills/summarize.md
+  hooks
+    hooks/post_tool/format.sh
+    hooks/post_tool/notes.md
+  subagents
+    subagents/reviewer
+
+Loaded
+  skills: releasing, summarize
+  subagents: reviewer
+  hooks: post_tool: agent/hooks/post_tool/format.sh
+  hook skipped: agent/hooks/post_tool/notes.md: not executable, so it will never run (`chmod +x` it)
+```
+
+Both halves are the point. The tree alone cannot show a skill that was refused
+for want of a description; the summary alone cannot show which file that skill
+is sitting in. `/agent` prints the same thing mid-session, and `coder doctor`
+reports the surface among its other checks.
+
+### Subagents
+
+`task` hands a question to a second agent, which reads in a window of its own
+and gives back prose. A subagent is a directory saying *who* to ask:
+
+```
+agent/subagents/reviewer/agent.md
+```
+
+```markdown
+---
+description: Reviews a diff the way this project reviews diffs.
+---
+```
+
+That description is the only thing the model sees when it picks one, so it is
+written for choosing between them — what this agent is for, not how it works.
+Its `instructions.md` replaces the prompt a delegated task would otherwise run
+on, and its `skills/` are its own: a reviewer that quietly inherited every skill
+in the project would be the parent agent with a different name.
+
+With none written, the `task` tool has exactly the schema it always had. A
+parameter offering a choice of nothing is a parameter that can only be got
+wrong.
+
+There is no per-subagent model, deliberately. On a machine serving one model,
+naming a second means evicting the first to load it and evicting it back
+afterwards — which costs more than the delegation saves.
+
+### Tools of your own
+
+The tool set is short on purpose: every extra tool measurably costs selection
+accuracy on a small model. That argument is about *this* project's tools. It
+says nothing about the one integration your workspace lives inside — the ticket
+tracker, the deploy API, the internal search — which no shipped tool set can
+contain and which the model otherwise has to reach through a shell.
+
+```python
+# agent/tools/greet.py
+from bkht.coder.tools.base import Tool, ToolResult
+
+TOOL = Tool(
+    name="greet",                       # the file is the name; this is a label
+    description="Says hello to somebody by name.",
+    parameters={"type": "object", "properties": {"who": {"type": "string"}},
+                "required": ["who"]},
+    run=lambda who: ToolResult.success(f"hello {who}"),
+)
+```
+
+One tool per file, named for the file. A module may export `TOOL` as above, or
+`tool(workspace)` — a factory handed the workspace, for a tool that needs to
+stay inside it. Its `run` is wrapped, because every other tool here promises the
+loop it raises `ToolError` and nothing else, and a traceback out of yours would
+end the turn rather than the call.
+
+**This imports your workspace's Python into the agent's own process, before the
+first turn.** That is a larger hazard than hooks, which are at least a command
+you typed into your own config file. Cloning a repository must never be enough
+to run its Python, so three things have to be true first:
+
+1. `agent/` is marked as yours, with an `agent.json`.
+2. `agent_tools` is on — and it ships **off**. Marking a directory for its
+   skills and instructions is not consent to run its code.
+3. `--no-agent-tools` was not passed, which is the escape hatch `--no-hooks` is,
+   for the same moment: you are not sure what is in there.
+
+```sh
+coder config set agent_tools true --workspace
+```
+
+Then every tool that loaded is named by `coder doctor` and `/tools`, with the
+file it came from. A tool may not take a built-in's name: one answering to
+`write_file` would take calls the permission layer had already approved under
+that name, which is not a tool but a way around the gate. Mutating tools are
+left out of plan mode and out of a delegated sub-agent's registry, like every
+other mutating tool.
+
 ## Skills
 
 `AGENTS.md` charges for its text on every turn, whether or not the turn has
@@ -488,9 +639,18 @@ Bump the version in pyproject.toml, run the suite, tag it, then ...
 Three roots are scanned, one level deep, later ones winning a name collision:
 
 1. `~/.bkht-coder/skills/` — applies everywhere
-2. `<workspace>/.claude/skills/` — read for compatibility with a workspace
+2. `~/.bkht-coder/agent/skills/` — the same, in the `agent/` layout
+3. `<workspace>/.claude/skills/` — read for compatibility with a workspace
    already set up for another agent; never written to
-3. `<workspace>/.bkht-coder/skills/`
+4. `<workspace>/.bkht-coder/skills/`
+5. `<workspace>/agent/skills/` — see [The `agent/`
+   directory](#the-agent-directory)
+
+Under `agent/skills/` a skill may also be a single markdown file —
+`agent/skills/summarize.md` is the skill `summarize`, named for its path. A flat
+skill ships no resources: its neighbours are other skills, not its files, so
+`skill(resource=...)` on one is refused by name rather than reaching sideways
+into somebody else's directory.
 
 Files sitting beside a `SKILL.md` can be pulled in by name —
 `skill(name="releasing", resource="checklist.md")` — and nothing outside the
@@ -677,6 +837,9 @@ A sub-agent that stops without an answer is reported as a failed tool call
 rather than as an empty success, so the parent goes and looks itself instead
 of writing up an answer it never received.
 
+A workspace can write specialists to hand these questions to — see
+[Subagents](#subagents). Without any, this is the whole of the feature.
+
 ### Turning them off
 
 ```sh
@@ -778,7 +941,8 @@ still takes arguments rather than discarding them. Frontmatter is optional and
 only its `description` is read, which is what `/help` lists them with.
 
 Files in `~/.bkht-coder/commands/` apply everywhere, and a workspace can shadow
-one with its own. Nothing here can shadow a built-in: `/undo` has to keep
+one with its own; `agent/commands/` is the same thing in the `agent/` layout,
+and shadows both — see [The `agent/` directory](#the-agent-directory). Nothing here can shadow a built-in: `/undo` has to keep
 meaning `/undo`, and file lookup happens only after the built-in table has been
 checked. Nor is any of it executable — the body is prose sent to the model, and
 a slash command that could run something would be a permission gate with a back
@@ -1014,6 +1178,23 @@ type at a prompt:
   }
 }
 ```
+
+A hook that has outgrown a JSON string with escaped quotes in it can be a file
+instead, under `agent/hooks/<event>/`:
+
+```
+agent/hooks/post_tool/format.sh
+agent/hooks/pre_tool/no-force-push.sh
+agent/hooks/turn_end/build.sh
+```
+
+The directory names the event, the file is the command, and a diff can review
+it. Both sources fire, `config.json` first, appended rather than shadowed — a
+setting is one value and the specific one wins, but a hook is a thing that
+happens, and a project asking for a formatter has not asked for your own hook
+to stop running. The execute bit is required: everything in that directory is a
+candidate to run, so a file without it is reported rather than skipped, because
+a hook that silently never fires is worse than one that was never written.
 
 Three events, and only one of them can say no:
 

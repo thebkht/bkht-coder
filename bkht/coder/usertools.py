@@ -86,11 +86,18 @@ def _import(path: Path):
     # Registered before execution, because a module that imports itself or uses
     # dataclasses looks itself up in `sys.modules` while it is still running.
     sys.modules[module_name] = module
+    # And no bytecode: importing these would otherwise drop a __pycache__ into
+    # the user's own agent/tools/, which is a directory we were invited to read
+    # and not to write.
+    written = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
     try:
         spec.loader.exec_module(module)
     except BaseException:
         sys.modules.pop(module_name, None)
         raise
+    finally:
+        sys.dont_write_bytecode = written
     return module
 
 

@@ -1100,16 +1100,64 @@ def config_argv(argv: list[str], valued: set[str] = None) -> list[str]:
 
 
 def info(root: Path, out=print) -> int:
-    """Print the `agent/` surface, slot by slot.
+    """Print the `agent/` surface: what is on disk, then what loaded from it.
 
     A layout discovered from the filesystem is only as trustworthy as the
-    listing of what it discovered: without this, a skill in the wrong directory
-    and a skill the model chose not to use look identical from outside.
+    listing of what it discovered. Both halves are needed for that: the tree
+    alone cannot show a skill that was refused for want of a description, and
+    the summary alone cannot show the file that skill is sitting in.
     """
     from . import layout
 
     out(layout.render(layout.surface(root), root))
+
+    settings = config.load(root)
+    written, hook_problems = hooks_module.discover(root)
+    loaded = [
+        summarize_instructions(load_instructions(root)),
+        summarize_skills(discover_skills(root)),
+        summarize_subagents(subagents.discover(root)),
+        _hook_summary(written, hook_problems),
+        _tool_summary(root, settings.values.get("agent_tools", False)),
+    ]
+    lines = [line for summary in loaded for line in summary.splitlines() if line]
+    if lines:
+        out("")
+        out("Loaded")
+        for line in lines:
+            out(f"  {line}")
     return 0
+
+
+def _hook_summary(written: dict, problems: list[str]) -> str:
+    """The hooks written as files, named -- they run without being asked."""
+    parts = []
+    if written:
+        named = ", ".join(
+            f"{event}: {command}" for event, commands in written.items() for command in commands
+        )
+        parts.append(f"hooks: {named}")
+    if problems:
+        parts.extend(f"hook skipped: {problem}" for problem in problems)
+    return "\n".join(parts)
+
+
+def _tool_summary(root: Path, enabled: bool) -> str:
+    """The workspace's own tools, and whether they would actually load.
+
+    Written-but-off is worth a line of its own: otherwise a workspace that
+    wrote tools and never turned them on looks exactly like one whose tools
+    are broken.
+    """
+    found = usertools.discover(root, workspace=Workspace(root))
+    if not (found.tools or found.problems):
+        return ""
+    if not enabled:
+        return (
+            f"agent tools: {len(found.tools)} written, not loaded "
+            f"(`coder config set agent_tools true` to load them)"
+        )
+    return usertools.summarize(found)
 
 
 def main(argv: list[str] | None = None) -> int:
