@@ -1002,3 +1002,44 @@ def test_an_interrupted_turn_is_not_a_turn_to_learn_from():
     from bkht.coder.training.ingest import GOOD_STOPS
 
     assert "interrupted" not in GOOD_STOPS
+
+
+# --- what a large window switches off ---------------------------------------
+
+def test_a_roomy_window_lets_the_same_call_run_twice(project):
+    """The repeat refusal describes a small window, and only a small one.
+
+    It exists because freeing context costs the model what it read, so a second
+    read is a symptom of the loop that made it forget. Nothing was dropped in a
+    400,000-token window, and there a second read is a choice -- refusing it
+    denies a call that would have worked, and three of them declare a working
+    turn stuck.
+    """
+    registry, workspace = build_registry(project, read_only=True)
+    provider = FakeProvider(
+        [call("read_file", path="src/util.py")] * 2 + ["done"], num_ctx=1_000_000
+    )
+    agent = Agent(provider, registry, Session(system=""))
+
+    assert agent.dedupe is False
+    outcome = agent.run("what does helper do?")
+    assert outcome.stopped == "answered"
+    assert not any("already ran" in error for error in outcome.errors)
+    # Both calls really ran: the second result is the file, not a refusal.
+    assert "def helper" in agent.session.messages[-2]["content"]
+
+
+def test_a_small_window_still_refuses_the_repeat(loop):
+    agent, _ = loop([call("read_file", path="src/util.py")] * 2 + ["done"])
+    assert agent.dedupe is True
+    outcome = agent.run("what does helper do?")
+    assert any("already ran" in error for error in outcome.errors)
+
+
+def test_the_caller_may_settle_deduplication_itself(project):
+    """The window decides unless somebody says otherwise."""
+    registry, _ = build_registry(project, read_only=True)
+    roomy = FakeProvider(["done"], num_ctx=1_000_000)
+    assert Agent(roomy, registry, Session(), dedupe=True).dedupe is True
+    small = FakeProvider(["done"], num_ctx=16384)
+    assert Agent(small, registry, Session(), dedupe=False).dedupe is False

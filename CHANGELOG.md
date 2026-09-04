@@ -9,6 +9,20 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ## [Unreleased]
 
+### Changed
+
+- **Two more small-model rules now stop at the edge of a small window.** The
+  loop refuses a byte-identical repeat and declares the turn stuck on the
+  third, and the scout searches the workspace before the model has seen the
+  request. Both are right at 16,384 tokens: freeing context costs the model
+  what it read, so a second read really is a symptom, and a 14b model that is
+  not handed a search will answer without doing one. Neither describes a
+  400,000-token window, where nothing was dropped, a second read is a choice,
+  and the prompt has to spend a paragraph telling the model to ignore a search
+  it never asked for. Above 65,536 the repeat runs and the scout is off, unless
+  `scout` is written down -- a setting in a config file means what it says
+  whatever the window is.
+
 ### Added
 
 - **A turn with room to work in may now batch its tool calls.** The prompt said

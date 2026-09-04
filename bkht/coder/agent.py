@@ -24,7 +24,7 @@ from .cancel import interruptible
 from .context import compact, elide_tool_results, should_compact
 from .language import detect as detect_language
 from .parsing import ToolCall
-from .provider import Provider, ProviderError, Reply, collect
+from .provider import Provider, ProviderError, Reply, collect, roomy
 from .retrieval import scout, terms
 from .session import Session
 from .tools.base import Registry, ToolError, ToolResult, truncate, validate_arguments
@@ -35,6 +35,11 @@ MAX_RETRIES = 2
 #: How many times a turn may ask for a call it has already made before the turn
 #: is declared stuck. Two is a model that lost something and reached for it
 #: again, which is ordinary; a third is a model going round.
+#:
+#: Only counted while deduplication is on, which is only in a small window --
+#: see `Agent.dedupe`. Where there is room to hold what was read, reading the
+#: same file twice is a choice rather than a symptom, and a turn that does it
+#: is bounded by the iteration and time caps like any other.
 MAX_REPLAYS = 2
 
 #: How much of a replayed result to hand back. Generous, because the point is
@@ -114,6 +119,7 @@ class Agent:
         verify_command: str = "",
         verify_root: Path | str | None = None,
         hooks=None,
+        dedupe: bool | None = None,
         clock=time.monotonic,
     ) -> None:
         self.provider = provider
@@ -140,6 +146,10 @@ class Agent:
         # configured any -- is one identity check per call rather than a dict
         # lookup and a shell resolution.
         self.hooks = hooks or None
+        # Whether an exact repeat is refused; see `_execute`. Decided by the
+        # window unless a caller says otherwise, because the behaviour it
+        # prevents only happens in a small one.
+        self.dedupe = (not roomy(provider)) if dedupe is None else dedupe
         # All reset at the top of every turn; see _loop.
         self._summarized = False
         self._made: dict[tuple[str, str], str] = {}
@@ -527,15 +537,20 @@ class Agent:
         Never raises: every failure comes back as a :class:`ToolResult` whose
         text tells the model what to do differently.
         """
-        # An exact repeat is refused before anything else runs. Freeing context
-        # necessarily costs the model some of what it read, and a model that has
-        # lost a file reaches for it again -- which spends the window that made
-        # it forget, and loses the file again. Left alone the turn reads the same
-        # file until the iteration cap. Refusing is what breaks the cycle: it
-        # costs nothing, and the round counts as no progress, so the retry bound
-        # ends the turn instead of the iteration cap.
+        # An exact repeat is refused before anything else runs -- in a small
+        # window. Freeing context necessarily costs the model some of what it
+        # read, and a model that has lost a file reaches for it again, which
+        # spends the window that made it forget and loses the file again. Left
+        # alone the turn reads the same file until the iteration cap. Refusing
+        # breaks the cycle: it costs nothing, and the round counts as no
+        # progress, so the retry bound ends the turn instead.
+        #
+        # None of that describes a 400,000-token window, where nothing was
+        # dropped and a second read is deliberate. There the refusal is the
+        # bug: it denies a call that would have worked and, three of them in,
+        # declares a working turn stuck.
         signature = (call.name, json.dumps(call.arguments, sort_keys=True))
-        if signature in self._made:
+        if self.dedupe and signature in self._made:
             self._replays += 1
             return ToolResult.failure(
                 prompts.repeated_call(call.name, self._made[signature])
@@ -585,7 +600,10 @@ class Agent:
         # Remembered only once it has actually run, and only its own text: a
         # call that was refused permission or failed to validate never happened,
         # and should not be replayed as though it had.
-        self._made[signature] = truncate(result.as_message(), max_chars=REPLAY_LIMIT)
+        if self.dedupe:
+            self._made[signature] = truncate(
+                result.as_message(), max_chars=REPLAY_LIMIT
+            )
         return result
 
     def _fire(self, event: str, **context):

@@ -37,7 +37,7 @@ from pathlib import Path
 from . import hooks as hooks_module
 from .agent import MAX_ITERATIONS
 from .permissions import ASK, AUTO, MODES, PLAN
-from .provider import settle
+from .provider import roomy_window, settle
 from .provider import (
     BACKENDS,
     DEFAULTS,
@@ -320,6 +320,23 @@ class Settings:
                      "verify_command"):
             if getattr(args, name, "missing") is None:
                 setattr(args, name, follows.get(name, self.values[name]))
+
+        # The scout is a small-model adaptation like the other two, and like
+        # them it is decided by the window -- see `provider.roomy`. It writes a
+        # search into history that the model never asked for, and the prompt
+        # then spends a paragraph telling the model to ignore it when the
+        # request was not about this workspace. That trade is worth it at
+        # 16,384, where the alternative is a model that answers without looking
+        # at anything; it is noise at 400,000, where the model will search.
+        #
+        # Only when nobody said otherwise. `scout` written in a config file and
+        # a typed `--no-scout` both mean exactly what they say.
+        if (
+            getattr(args, "no_scout", "missing") is None
+            and self.source("scout") == DEFAULT
+            and roomy_window(getattr(args, "num_ctx", None) or self.values["num_ctx"])
+        ):
+            args.no_scout = True
 
         # The negative switches carry only one bit: present means off, absent
         # means "whatever was configured". So they are filled from the inverse.

@@ -119,6 +119,15 @@ READ_TIMEOUT = 300.0
 ROOMY_NUM_CTX = 65_536
 
 
+def roomy_window(num_ctx: int) -> bool:
+    """Whether ``num_ctx`` is large enough to drop the small-model rules.
+
+    Takes the number rather than the provider because one caller has only the
+    number: `config` settles the scout before a provider has been built.
+    """
+    return (num_ctx or 0) >= ROOMY_NUM_CTX
+
+
 def roomy(provider) -> bool:
     """Whether ``provider`` has room enough to drop the small-model rules.
 
@@ -128,7 +137,7 @@ def roomy(provider) -> bool:
     128k local model gets the same treatment as a frontier one without this
     file needing to have heard of their model.
     """
-    return getattr(provider, "num_ctx", 0) >= ROOMY_NUM_CTX
+    return roomy_window(getattr(provider, "num_ctx", 0))
 
 
 class ProviderError(RuntimeError):

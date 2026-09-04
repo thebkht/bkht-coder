@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from bkht.coder import config
+from bkht.coder import config, provider
 from bkht.coder.cli import build_agent_parser
 from bkht.coder.config import ConfigError, Settings
 
@@ -279,6 +279,41 @@ def test_a_mode_flag_beats_a_configured_mode(home, project):
     config.load(project).apply(args)
     # Left exactly as typed, so --auto --plan still contradicts itself.
     assert (args.auto, args.plan) == (True, None)
+
+
+def test_a_roomy_window_turns_the_scout_off_by_itself(home, project):
+    """The scout is the third adaptation the window decides.
+
+    It writes a search into history the model never asked for, and the prompt
+    then spends a paragraph telling the model to ignore it when the request was
+    not about this workspace. Worth it at 16,384; noise at 400,000.
+    """
+    write(home, num_ctx=400_000)
+    args = namespace()
+    config.load(project).apply(args)
+    assert args.no_scout is True
+
+
+def test_the_default_window_keeps_the_scout(home, project):
+    args = namespace()
+    config.load(project).apply(args)
+    assert args.no_scout is False
+
+
+def test_a_configured_scout_beats_the_window(home, project):
+    """Written down means meant, whatever the window says."""
+    write(home, num_ctx=400_000, scout=True)
+    args = namespace()
+    config.load(project).apply(args)
+    assert args.no_scout is False
+
+
+def test_a_large_backend_turns_the_scout_off_through_its_own_window(home, project):
+    """`--provider claude-code` moves num_ctx, and the scout follows it."""
+    args = namespace(provider="claude-code")
+    config.load(project).apply(args)
+    assert args.num_ctx == provider.CLAUDE_CODE_NUM_CTX
+    assert args.no_scout is True
 
 
 def test_apply_tolerates_a_namespace_without_every_flag(home, project):
