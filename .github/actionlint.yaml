@@ -1,0 +1,6 @@
+# The review workflow runs on a self-hosted box with a model on it. actionlint
+# cannot know that label exists, and would otherwise report the one runner in
+# this repository that is not GitHub's as a typo.
+self-hosted-runner:
+  labels:
+    - ollama

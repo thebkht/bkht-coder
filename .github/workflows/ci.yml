@@ -58,6 +58,12 @@ jobs:
       - name: Check
         run: uv run ruff check .
 
+      # The workflows themselves. A file GitHub refuses to parse fails with no
+      # job, no log and no annotation -- the run is simply red -- so the check
+      # that would have named the line has to happen somewhere it can be read.
+      - name: Check the workflows
+        uses: raven-actions/actionlint@v2
+
   # The installers had no coverage at all, which is how a PowerShell branch
   # written on a Mac reached a release. Two things are checked, in this order:
   # that each script parses on the shells it claims to support, and that it
@@ -78,11 +84,15 @@ jobs:
       # A script tested on one is untested on the other.
       matrix:
         shell: [powershell, pwsh]
+    # Up here rather than on each step: `shell:` on a step accepts no
+    # expression, because no context is available to it.
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
     steps:
       - uses: actions/checkout@v4
 
       - name: It parses
-        shell: ${{ matrix.shell }}
         run: |
           $errors = $null
           [System.Management.Automation.Language.Parser]::ParseFile(
@@ -97,7 +107,6 @@ jobs:
       # Rules are named rather than left to the default set, so that a new
       # release of the analyser cannot fail a build nobody changed.
       - name: It analyses
-        shell: ${{ matrix.shell }}
         run: |
           Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
           $found = Invoke-ScriptAnalyzer -Path scripts/install.ps1 -Severity Error `
@@ -143,7 +152,6 @@ jobs:
       # code under review rather than the newest published tag -- which is also
       # what lets this job work on a pull request from a fork.
       - name: It runs
-        shell: ${{ matrix.shell }}
         env:
           BKHT_CODER_YES: '1'
           BKHT_CODER_NO_MODEL: '1'
@@ -151,7 +159,6 @@ jobs:
         run: ./scripts/install.ps1
 
       - name: And installed something that works
-        shell: ${{ matrix.shell }}
         run: |
           $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
           coder --version
