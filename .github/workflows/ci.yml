@@ -57,3 +57,163 @@ jobs:
 
       - name: Check
         run: uv run ruff check .
+
+  # The installers had no coverage at all, which is how a PowerShell branch
+  # written on a Mac reached a release. Two things are checked, in this order:
+  # that each script parses on the shells it claims to support, and that it
+  # actually runs end to end.
+  #
+  # What cannot be checked here is the failure these last grew a fix for -- a
+  # proxy re-signing TLS needs a proxy. This proves the retry path executes and
+  # that the script around it is well-formed; that it cures the certificate
+  # error stays a thing somebody confirms on an affected machine.
+  installer-windows:
+    name: install.ps1 (${{ matrix.shell }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      # Windows PowerShell 5.1 and PowerShell 7 differ in the one place this
+      # script leans on: 7.4 turned $PSNativeCommandUseErrorActionPreference on
+      # by default, so a failing native command throws there and does not here.
+      # A script tested on one is untested on the other.
+      matrix:
+        shell: [powershell, pwsh]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: It parses
+        shell: ${{ matrix.shell }}
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path scripts/install.ps1), [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) {
+            $errors | ForEach-Object { Write-Host "::error::$($_.Extent.StartLineNumber): $($_.Message)" }
+            exit 1
+          }
+          Write-Host 'install.ps1 parses'
+
+      # Undefined variables and unreachable branches, which a parse cannot see.
+      # Rules are named rather than left to the default set, so that a new
+      # release of the analyser cannot fail a build nobody changed.
+      - name: It analyses
+        shell: ${{ matrix.shell }}
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
+          $found = Invoke-ScriptAnalyzer -Path scripts/install.ps1 -Severity Error `
+            -IncludeRule PSAvoidUsingUndeclaredVariable, PSUseDeclaredVarsMoreThanAssignments, `
+                         PSAvoidGlobalVars, PSPossibleIncorrectComparisonWithNull
+          if ($found) { $found | Format-List; exit 1 }
+          Write-Host 'install.ps1 analyses clean'
+
+      # The installer skips the whole Ollama branch when a server already
+      # answers, and skips the model when told to -- so a socket that returns
+      # one JSON object stands in for both, and what is left is every step that
+      # is actually ours. Python rather than HttpListener: binding a prefix
+      # there wants a urlacl or elevation, and a socket wants neither.
+      - name: A server for it to find
+        shell: pwsh
+        run: |
+          @'
+          from http.server import BaseHTTPRequestHandler, HTTPServer
+
+          class Tags(BaseHTTPRequestHandler):
+              def do_GET(self):
+                  body = b'{"models":[]}'
+                  self.send_response(200)
+                  self.send_header("Content-Type", "application/json")
+                  self.send_header("Content-Length", str(len(body)))
+                  self.end_headers()
+                  self.wfile.write(body)
+
+              def log_message(self, *args):
+                  pass
+
+          HTTPServer(("127.0.0.1", 11434), Tags).serve_forever()
+          '@ | Set-Content stub-ollama.py
+          Start-Process python -ArgumentList 'stub-ollama.py' -WindowStyle Hidden
+          $up = $false
+          foreach ($i in 1..30) {
+            try { Invoke-WebRequest http://127.0.0.1:11434/api/tags -UseBasicParsing -TimeoutSec 2 | Out-Null; $up = $true; break }
+            catch { Start-Sleep -Seconds 1 }
+          }
+          if (-not $up) { throw 'the stub server never answered' }
+
+      # BKHT_CODER_REPO points it at this checkout, so the run installs the
+      # code under review rather than the newest published tag -- which is also
+      # what lets this job work on a pull request from a fork.
+      - name: It runs
+        shell: ${{ matrix.shell }}
+        env:
+          BKHT_CODER_YES: '1'
+          BKHT_CODER_NO_MODEL: '1'
+          BKHT_CODER_REPO: '.'
+        run: ./scripts/install.ps1
+
+      - name: And installed something that works
+        shell: ${{ matrix.shell }}
+        run: |
+          $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
+          coder --version
+          coder doctor --json | Out-Null
+
+  installer-posix:
+    name: install.sh (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: It parses
+        run: sh -n scripts/install.sh
+
+      # POSIX-mode shellcheck, because the script's shebang is /bin/sh and the
+      # bashisms it would otherwise permit are exactly what breaks on dash.
+      - name: It analyses
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y shellcheck
+          shellcheck --shell=sh scripts/install.sh
+
+      - name: A server for it to find
+        run: |
+          cat > stub-ollama.py <<'PY'
+          from http.server import BaseHTTPRequestHandler, HTTPServer
+
+          class Tags(BaseHTTPRequestHandler):
+              def do_GET(self):
+                  body = b'{"models":[]}'
+                  self.send_response(200)
+                  self.send_header("Content-Type", "application/json")
+                  self.send_header("Content-Length", str(len(body)))
+                  self.end_headers()
+                  self.wfile.write(body)
+
+              def log_message(self, *args):
+                  pass
+
+          HTTPServer(("127.0.0.1", 11434), Tags).serve_forever()
+          PY
+          python3 stub-ollama.py &
+          for i in $(seq 30); do
+            if curl -sf -o /dev/null http://127.0.0.1:11434/api/tags; then exit 0; fi
+            sleep 1
+          done
+          echo "the stub server never answered" >&2
+          exit 1
+
+      - name: It runs
+        env:
+          BKHT_CODER_YES: '1'
+          BKHT_CODER_NO_MODEL: '1'
+          BKHT_CODER_REPO: '.'
+        run: sh scripts/install.sh
+
+      - name: And installed something that works
+        run: |
+          PATH="$HOME/.local/bin:$PATH"
+          coder --version
+          coder doctor --json > /dev/null

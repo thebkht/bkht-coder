@@ -12,13 +12,18 @@
 #   MODEL                   model tag to pull (default: picked from host RAM)
 #   OLLAMA_HOST_URL         where the server should answer (default 127.0.0.1:11434)
 #   BKHT_CODER_REF          git branch/tag to install instead of the default
+#   BKHT_CODER_REPO         install this instead of the published repository:
+#                           a fork's URL, or a path to a checkout
 #   BKHT_CODER_NO_MODEL=1   skip the model pull entirely
 #   BKHT_CODER_YES=1        assume yes; required when there is no terminal
 #   BKHT_CODER_ALLOW_ROOT=1 permit running as root on Linux
 #
 set -eu
 
-REPO_URL="git+https://github.com/thebkht/bkht-coder.git"
+# Overridable so that a fork, a mirror, or a checkout can be installed by the
+# same script -- which is also what lets CI run this file against the code in
+# the pull request rather than against whatever is published.
+REPO_URL="${BKHT_CODER_REPO:-git+https://github.com/thebkht/bkht-coder.git}"
 MODEL_DEFAULT="qwen2.5-coder:14b"
 MODEL_SMALL="qwen2.5-coder:7b"
 HOST="${OLLAMA_HOST_URL:-http://127.0.0.1:11434}"
@@ -246,10 +251,17 @@ latest_tag() {
   | awk 'NR == 1 { sub(/^refs\/tags\//, "", $2); print $2 }'
 }
 
-# What gets installed, most specific first: an explicit ref, else the newest
-# release, else the default branch -- which is what this did before any tag
-# existed, and is still the honest answer on a repository with none.
-if [ -n "${BKHT_CODER_REF:-}" ]; then
+# What gets installed, most specific first: a repository named outright, then an
+# explicit ref, else the newest release, else the default branch -- which is
+# what this did before any tag existed, and is still the honest answer on a
+# repository with none.
+#
+# BKHT_CODER_REPO takes no tag resolution: it may be a local path, which has no
+# remote to list tags from, and naming it means naming exactly what to install.
+if [ -n "${BKHT_CODER_REPO:-}" ]; then
+  TARGET="$REPO_URL"
+  step "installing coder from $REPO_URL (BKHT_CODER_REPO)"
+elif [ -n "${BKHT_CODER_REF:-}" ]; then
   TARGET="$REPO_URL@$BKHT_CODER_REF"
   step "installing coder from $BKHT_CODER_REF (BKHT_CODER_REF)"
 elif TAG="$(latest_tag)" && [ -n "$TAG" ]; then

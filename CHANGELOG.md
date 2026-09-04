@@ -9,6 +9,24 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ## [Unreleased]
 
+### Added
+
+- **The installers are tested in CI**, on the shells they claim to support:
+  `install.ps1` under both Windows PowerShell 5.1 and PowerShell 7 -- which
+  differ in the one place it leans on, since 7.4 turned
+  `$PSNativeCommandUseErrorActionPreference` on by default -- and `install.sh`
+  on Linux and macOS. Each is parsed, analysed, and then actually run: a socket
+  answering `/api/tags` stands in for Ollama, which is enough for the installer
+  to skip that whole branch, so what is exercised is every step that is
+  genuinely ours. Neither script had any coverage before, which is how a
+  PowerShell branch written on a Mac reached a release.
+
+- **`BKHT_CODER_REPO`** installs a fork, a mirror, or a local checkout instead
+  of the published repository. It is also what lets the CI above run each
+  installer against the code in the pull request rather than against whatever
+  is already published -- including on a pull request from a fork, whose
+  commits the published repository has never seen.
+
 ## [0.7.2] - 2026-09-04
 
 ### Fixed

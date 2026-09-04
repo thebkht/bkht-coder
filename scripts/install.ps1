@@ -11,6 +11,8 @@
       MODEL                   model tag to pull (default: picked from host RAM)
       OLLAMA_HOST_URL         where the server should answer
       BKHT_CODER_REF          git branch/tag to install instead of the default
+      BKHT_CODER_REPO         install this instead of the published repository:
+                              a fork's URL, or a path to a checkout
       BKHT_CODER_NO_MODEL=1   skip the model pull entirely
       BKHT_CODER_YES=1        assume yes; don't prompt
 #>
@@ -21,7 +23,10 @@ if ($PSVersionTable.PSVersion.Major -lt 5) {
     throw 'bkht-coder needs PowerShell 5.1 or newer.'
 }
 
-$RepoUrl      = 'git+https://github.com/thebkht/bkht-coder.git'
+# Overridable so that a fork, a mirror, or a checkout can be installed by the
+# same script -- which is also what lets CI run this file against the code in
+# the pull request rather than against whatever is published.
+$RepoUrl      = if ($env:BKHT_CODER_REPO) { $env:BKHT_CODER_REPO } else { 'git+https://github.com/thebkht/bkht-coder.git' }
 $ModelDefault = 'qwen2.5-coder:14b'
 $ModelSmall   = 'qwen2.5-coder:7b'
 # Not $Host -- that name is taken by PowerShell's own console object.
@@ -211,10 +216,17 @@ function Get-LatestTag {
     return ($line -split '\s+')[1] -replace '^refs/tags/', ''
 }
 
-# What gets installed, most specific first: an explicit ref, else the newest
-# release, else the default branch -- which is what this did before any tag
-# existed, and is still the honest answer on a repository with none.
-if ($env:BKHT_CODER_REF) {
+# What gets installed, most specific first: a repository named outright, then an
+# explicit ref, else the newest release, else the default branch -- which is
+# what this did before any tag existed, and is still the honest answer on a
+# repository with none.
+#
+# BKHT_CODER_REPO takes no tag resolution: it may be a local path, which has no
+# remote to list tags from, and naming it means naming exactly what to install.
+if ($env:BKHT_CODER_REPO) {
+    $target = $RepoUrl
+    Write-Step "installing coder from $RepoUrl (BKHT_CODER_REPO)"
+} elseif ($env:BKHT_CODER_REF) {
     $target = "$RepoUrl@$($env:BKHT_CODER_REF)"
     Write-Step "installing coder from $($env:BKHT_CODER_REF) (BKHT_CODER_REF)"
 } else {

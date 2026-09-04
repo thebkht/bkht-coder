@@ -132,6 +132,7 @@ Read it first if you'd rather not pipe a script into a shell — it is
 | `MODEL`                 | Model tag to pull, overriding the RAM-based choice      |
 | `BKHT_CODER_NO_MODEL=1` | Skip the model pull; `ollama pull` it yourself later    |
 | `BKHT_CODER_REF`        | Install a branch or tag instead of the newest release   |
+| `BKHT_CODER_REPO`       | Install a fork, a mirror, or a local checkout instead    |
 | `BKHT_CODER_YES=1`      | Don't ask; required when there is no terminal to ask on |
 
 ## Updating
@@ -296,6 +297,7 @@ A few environment variables are read by the **tooling**, not the agent:
 | `MODEL`                 | `scripts/verify.sh` (as `pytest --model`), `scripts/install.sh` (tag to pull) | `qwen2.5-coder:14b`      |
 | `BKHT_CODER_NO_MODEL`   | `scripts/install.sh` — skip the model pull                                    | unset                    |
 | `BKHT_CODER_REF`        | `scripts/install.sh` — branch or tag to install                               | unset                    |
+| `BKHT_CODER_REPO`       | `scripts/install.sh` — repository or path to install instead of the published one | unset                |
 | `BKHT_CODER_YES`        | `scripts/install.sh` — skip the confirmation prompt                           | unset                    |
 | `BKHT_CODER_ALLOW_ROOT` | `scripts/install.sh` — permit running as root                                 | unset                    |
 
