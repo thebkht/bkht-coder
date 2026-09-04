@@ -9,6 +9,53 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-09-04
+
+### Fixed
+
+- **A code fence switched off the check that makes the dataset trustworthy.**
+  Tool calls travel in message content, and a small model routinely wraps one
+  in ```` ```json ````. The loop has always parsed that correctly. The training
+  exporter did not: it asked whether a reply was a call by testing whether its
+  first character was `{`, and a fence begins with a backtick. So a fenced call
+  was filed as prose, in all four places that question is asked -- it was never
+  checked against a real registry, a trajectory that stopped on one was read as
+  having finished, and `verify`, whose whole job is to refuse a call coder
+  cannot parse, skipped it. A real session exported clean with an unvalidated
+  call to whatever the model had named. The question is whether the content
+  parses, so that is now what is asked.
+
+- **An Uzbek question came back answered in English.** `detect` scored "osm
+  folder ichidagi osm kernel packageni tahlil qilib ber to'liq" as English and
+  the model duly wrote a page of analysis in the wrong language. Two reasons,
+  and the second is the interesting one: the vocabulary was missing the verbs
+  of an ordinary request, and a *draw* resolved to English. Half the words in a
+  sentence like that are loanwords the two languages share -- `folder` scored
+  for English, `qilib` for Uzbek, one each -- so a draw is not evidence of
+  English. It now leaves the session's language alone rather than switching it.
+
+- **A greeting searched the codebase, and Uzbek words were searched half at a
+  time.** The scout's block is the first thing in a turn, so what it matches
+  decides where the turn looks. Its token pattern stopped at an apostrophe,
+  which turned `ko'rib` into `rib` and `o'rganib` into `rganib` -- and `rib`
+  ranks `position: absolute; top: 4px` in every stylesheet in the workspace,
+  which is what a request to review the project was handed. Its stopword list
+  was also English-only, so `thanks` correctly searched for nothing while
+  `salom` searched for something: in a PL/SQL repository whose own fixtures
+  pass the literal string `'salom'`, saying hello cost four lines of test.sql.
+  Both lists now come from the language detector, which already curates this
+  vocabulary, rather than being written out a second time and left to drift.
+
+- **A turn you interrupted left no sign you had asked anything.** Esc abandons
+  the task, which is the point of it, but the interrupt was caught outside the
+  code that writes a turn down -- so the session file kept the question and the
+  search it triggered, and then simply the next question, with nothing between
+  them. Unreadable later, and worse than unreadable to anything reading
+  sessions back: turns are separated by their outcomes, so an abandoned request
+  became a hole in the middle of a trajectory instead of the end of one. An
+  interrupted turn is now recorded as `interrupted`, which is also what lets a
+  dataset cut there -- a turn you gave up on is not one to imitate.
+
 ## [0.7.3] - 2026-09-04
 
 ### Added
@@ -544,7 +591,8 @@ job, GitHub and GitLab tools; resumable sessions; skills and slash commands;
 GitLab Code Quality reports; `coder doctor`; `coder config`; and Claude Code and
 Codex as borrowed model backends.
 
-[Unreleased]: https://github.com/thebkht/bkht-coder/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/thebkht/bkht-coder/compare/v0.7.4...HEAD
+[0.7.4]: https://github.com/thebkht/bkht-coder/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/thebkht/bkht-coder/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/thebkht/bkht-coder/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/thebkht/bkht-coder/compare/v0.7.0...v0.7.1
