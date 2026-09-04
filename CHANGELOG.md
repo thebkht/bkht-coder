@@ -9,6 +9,8 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-09-04
+
 ### Added
 
 - **The installers are tested in CI**, on the shells they claim to support:
@@ -26,6 +28,16 @@ below it, and the release workflow refuses a tag this file does not describe.
   installer against the code in the pull request rather than against whatever
   is already published -- including on a pull request from a fork, whose
   commits the published repository has never seen.
+
+### Fixed
+
+- **The certificate retry scolded you on its way past.** 0.7.2 set both
+  spellings of uv's system-certificate setting, on the reasoning that an
+  unknown environment variable is ignored where an unknown flag is fatal. A uv
+  new enough to have the new spelling prints a deprecation warning for the old
+  one, so the retry put `UV_NATIVE_TLS is deprecated` in the middle of an
+  install that was already going badly. Which one to set is now asked of uv,
+  whose own help is the authority.
 
 ## [0.7.2] - 2026-09-04
 
@@ -79,7 +91,7 @@ below it, and the release workflow refuses a tag this file does not describe.
   `agent/tools/<name>.py`, one tool per file, named for the file, exposing
   `TOOL` or `tool(workspace)`. The tool set is short on purpose -- every extra
   tool costs selection accuracy on a small model -- but that argument is about
-  *this* project's tools, not about the one integration a workspace lives inside
+  _this_ project's tools, not about the one integration a workspace lives inside
   and otherwise reaches through a shell. A user tool's `run` is wrapped, because
   every other tool here promises the loop it raises `ToolError` and nothing
   else, and a traceback out of one would end the turn rather than the call.
@@ -130,7 +142,7 @@ below it, and the release workflow refuses a tag this file does not describe.
   answer silently is worse than no source at all.
 
 - **Hooks: your own commands, fired on tool events.** `permissions.json`
-  remembers what you allowed but cannot *do* anything. A `hooks` block in
+  remembers what you allowed but cannot _do_ anything. A `hooks` block in
   `config.json` can -- run the formatter after a write, refuse a call whose
   shape this project never wants, kick off a build when the turn ends.
 
@@ -224,8 +236,8 @@ below it, and the release workflow refuses a tag this file does not describe.
   turn never reached the check at all -- it ends through `_final_answer`, and a
   turn that ran out mid-edit is precisely the one most likely to have left the
   tests broken; it now runs there too, reported and never fed back. And the
-  "did this turn write anything" flag meant *at some point* rather than *since
-  the last check*, so a model that read a failure, correctly judged it
+  "did this turn write anything" flag meant _at some point_ rather than _since
+  the last check_, so a model that read a failure, correctly judged it
   unrelated, and answered without editing paid for a second identical run.
 
 - `verify_command` and `verify` settings. `verify_command` is the one text
@@ -251,7 +263,7 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 - `grep` handed a glob where a path goes now says which argument the pattern
   belongs in, and writes out the call that would have worked. `path not found:
-  .github/workflows/*.yml` is true and useless -- the string was never meant to
+.github/workflows/*.yml` is true and useless -- the string was never meant to
   be a path, so the model saw nothing to change and resent the same call until
   the loop's bounds ended the turn. Found in a real session that spent its
   whole iteration budget that way and answered from vendored workflows it had
@@ -288,7 +300,7 @@ having the number before anyone reaches for the lever.
 Two limits on the reading, stated because the figure invites more weight than
 it can carry. It is two tasks on one machine, and this one is spilling 1 GB of
 KV cache to CPU, so the per-turn cost is high and its variance with it. And the
-benchmark measures what a turn *costs*, never whether it was right -- the first
+benchmark measures what a turn _costs_, never whether it was right -- the first
 task answered a question about the agent loop without opening a file in either
 arm, which is fast in both and only useful if the answer is true. Correctness
 is a different instrument, and this is not it.
@@ -386,7 +398,7 @@ than staying a fixed fraction of it.
   pytest reports the deselected count on every run, so nothing is skipped
   quietly.
 
-- `doctor` chooses its checks by what a backend *is* rather than by whether it
+- `doctor` chooses its checks by what a backend _is_ rather than by whether it
   is the one listed first. The old `provider != DEFAULT_PROVIDER` test read
   correctly only for as long as the default happened to be Ollama; with the
   default moved it inverted exactly, checking Ollama for a command on PATH and
@@ -474,7 +486,7 @@ introduced — a 7b does the same thing without them, answering from the snippet
 and reading nothing — but it is what decides how often either new tool is
 reached for, so it is stated here rather than left to be discovered. `--no-scout`
 is the lever today. A footer reworded to tell the model to read before it
-*answers*, not only before it changes anything, was tried and did not shift the
+_answers_, not only before it changes anything, was tried and did not shift the
 behaviour; it was reverted rather than shipped unvalidated. Making the two
 features agree is the next thing to look at.
 
@@ -532,7 +544,8 @@ job, GitHub and GitLab tools; resumable sessions; skills and slash commands;
 GitLab Code Quality reports; `coder doctor`; `coder config`; and Claude Code and
 Codex as borrowed model backends.
 
-[Unreleased]: https://github.com/thebkht/bkht-coder/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/thebkht/bkht-coder/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/thebkht/bkht-coder/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/thebkht/bkht-coder/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/thebkht/bkht-coder/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/thebkht/bkht-coder/compare/v0.6.0...v0.7.0
@@ -542,3 +555,7 @@ Codex as borrowed model backends.
 [0.3.0]: https://github.com/thebkht/bkht-coder/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/thebkht/bkht-coder/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/thebkht/bkht-coder/releases/tag/v0.1.0
+
+## [0.7.3]
+
+#
