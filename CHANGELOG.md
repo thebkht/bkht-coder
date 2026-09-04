@@ -9,7 +9,30 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-04
+
 ### Added
+
+- **`agent/`: one directory for everything this project authors.** Instructions,
+  skills, commands and hooks each landed somewhere different, by a rule of their
+  own. `agent/` is the floor of one rule instead -- the slot a file lands in
+  decides how it loads -- with `instructions`, `skills`, `commands`, `hooks`,
+  `subagents` and `tools` as the slots.
+
+  Layered, not moved. `AGENTS.md`, `.claude/skills` and `.bkht-coder/commands`
+  all still load, and `agent/` goes last, where the most specific source
+  belongs. A workspace root needs an `agent.json` marker and the global root
+  does not: `agent/` is exactly what an eve project calls its own agent, and
+  adopting one unasked would make its system prompt ours.
+
+  Skills gain the flat form, where the file is the skill and its path is its
+  name. A flat skill ships no resources -- its neighbours are other skills, not
+  its files -- so `skill(resource=...)` refuses one by name rather than reaching
+  sideways into somebody else's directory.
+
+  `coder info` prints the surface before anything reads from it, and `doctor`
+  reports it, for the same reason hooks are listed: a source that shapes every
+  answer silently is worse than no source at all.
 
 - **Hooks: your own commands, fired on tool events.** `permissions.json`
   remembers what you allowed but cannot *do* anything. A `hooks` block in
@@ -414,7 +437,8 @@ job, GitHub and GitLab tools; resumable sessions; skills and slash commands;
 GitLab Code Quality reports; `coder doctor`; `coder config`; and Claude Code and
 Codex as borrowed model backends.
 
-[Unreleased]: https://github.com/thebkht/bkht-coder/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/thebkht/bkht-coder/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/thebkht/bkht-coder/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/thebkht/bkht-coder/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/thebkht/bkht-coder/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/thebkht/bkht-coder/compare/v0.3.0...v0.4.0
