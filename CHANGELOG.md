@@ -9,6 +9,23 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A reply that carried a whole imagined turn had all of it executed.** The
+  prompt has always promised that a call's result comes back before the next
+  call is made, and the loop has never enforced it: `parse_tool_calls` returns
+  every object in a reply and every one of them ran. So when a small model
+  slipped from calling a tool into narrating a session -- listing the files,
+  then reading `pyproject.toml`, then grepping, all in one reply -- the loop
+  ran the lot. A real turn in this repo's own workspace on
+  `qwen2.5-coder:7b` emitted twelve calls that way and came back to twelve
+  results at once, which is more than a 16,384-token window holds; the answer
+  after it was "Sorry, but I can't assist with that." A serial turn now runs
+  the first call and says why the rest did not: they were written before their
+  predecessor's result existed, so they were guesses about output the model was
+  never given. A turn with room to batch is unaffected -- there the calls are
+  meant.
+
 ### Changed
 
 - **`edit_file` will no longer change a file this session has not read.** An

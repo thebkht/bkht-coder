@@ -55,15 +55,66 @@ def test_system_prompt_is_sent_first(loop):
     assert "Calling a tool" in provider.calls[0][0]["content"]
 
 
-def test_several_calls_in_one_reply_all_run(loop):
+def test_a_serial_turn_runs_only_the_first_call_in_a_reply(loop):
+    """The prompt promises a result before the next call; the loop now keeps it.
+
+    A reply's second call was written before the first one's result existed, so
+    it is a guess about output the model was never given. On a small model that
+    is what a format slip looks like -- one reply in this repo's own workspace
+    carried twelve calls, and running all twelve came back with more results
+    than the window could hold.
+    """
+    agent, _ = loop(
+        [
+            call("read_file", path="src/util.py") + "\n" + call("read_file", path="README.md"),
+            "read the first.",
+        ]
+    )
+    outcome = agent.run("read both files")
+    assert outcome.tool_calls == 1
+    assert [m.get("name") for m in agent.session.messages if m["role"] == "tool"] == [
+        "read_file",
+        "system",
+    ]
+
+
+def test_the_dropped_calls_are_explained_rather_than_swallowed(loop):
+    agent, _ = loop(
+        [
+            call("read_file", path="src/util.py") + "\n" + call("read_file", path="README.md"),
+            "read the first.",
+        ]
+    )
+    agent.run("read both files")
+    note = agent.session.messages[-2]["content"]
+    assert "contained 2 tool calls" in note
+    assert "Only the first was run" in note
+
+
+def test_a_roomy_turn_runs_every_call_in_a_reply(project):
+    """Batching is the point of a large window; see `provider.roomy`."""
+    registry, workspace = build_registry(project, read_only=True)
+    provider = FakeProvider(
+        [
+            call("read_file", path="src/util.py") + "\n" + call("read_file", path="README.md"),
+            "read both.",
+        ],
+        num_ctx=1_000_000,
+    )
+    agent = Agent(provider, registry, Session(system=""))
+    assert agent.parallel is True
+    assert agent.run("read both files").tool_calls == 2
+
+
+def test_the_caller_may_settle_batching_itself(loop):
     agent, _ = loop(
         [
             call("read_file", path="src/util.py") + "\n" + call("read_file", path="README.md"),
             "read both.",
-        ]
+        ],
+        parallel=True,
     )
-    outcome = agent.run("read both files")
-    assert outcome.tool_calls == 2
+    assert agent.run("read both files").tool_calls == 2
 
 
 def test_prose_around_a_call_does_not_end_the_loop(loop):

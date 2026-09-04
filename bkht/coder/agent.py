@@ -120,6 +120,7 @@ class Agent:
         verify_root: Path | str | None = None,
         hooks=None,
         dedupe: bool | None = None,
+        parallel: bool | None = None,
         clock=time.monotonic,
     ) -> None:
         self.provider = provider
@@ -150,6 +151,10 @@ class Agent:
         # window unless a caller says otherwise, because the behaviour it
         # prevents only happens in a small one.
         self.dedupe = (not roomy(provider)) if dedupe is None else dedupe
+        # Whether a reply may carry more than one call; see `_loop`. The same
+        # question `prompts.tool_protocol` is built from, asked of the same
+        # provider, so the rule the model was given is the rule it is held to.
+        self.parallel = roomy(provider) if parallel is None else parallel
         # All reset at the top of every turn; see _loop.
         self._summarized = False
         self._made: dict[tuple[str, str], str] = {}
@@ -340,8 +345,23 @@ class Agent:
                 )
                 continue
 
+            # Held to the protocol it was given. A serial prompt promises that
+            # a call's result comes back before the next call is made, so the
+            # calls after the first in one reply were written against output
+            # the model had not been given -- they are narration of a turn it
+            # imagined, not requests. Running them is running a plan built on
+            # invented results, and on a small model that is exactly what a
+            # format slip produces: one reply in this repo's own workspace
+            # carried twelve, and the twelve results it came back to were more
+            # than the window could hold.
+            calls = reply.tool_calls
+            unrun = 0
+            if not self.parallel and len(calls) > 1:
+                unrun = len(calls) - 1
+                calls = calls[:1]
+
             progressed = False
-            for call in reply.tool_calls:
+            for call in calls:
                 outcome.tool_calls += 1
                 self.listener.on_tool_call(call)
                 result = self._execute(call)
@@ -359,6 +379,14 @@ class Agent:
                     if result.error.startswith("permission denied"):
                         outcome.stopped = "denied"
                         return outcome
+
+            # Said after the result, so the model reads what it actually got
+            # before being told what it did not.
+            if unrun:
+                self.listener.on_retry(
+                    f"ran the first of {unrun + 1} calls in one reply"
+                )
+                self.session.add_tool_result("system", prompts.one_call_at_a_time(unrun))
 
             # A model that keeps asking for calls it has already made is going
             # round, not working. The replay gives it back what it asked for, so

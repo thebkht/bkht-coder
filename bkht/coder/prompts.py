@@ -337,6 +337,28 @@ def repeated_call(name: str, earlier: str = "") -> str:
     )
 
 
+def one_call_at_a_time(unrun: int) -> str:
+    """Sent when a serial reply carried more than one call.
+
+    The extra calls are not run, and this says why in the terms the protocol
+    used: a call after the first was written before its predecessor's result
+    existed, so it is a guess about output the model was never given. Handing
+    those guesses to the tools executes a plan built on invented results.
+
+    Phrased as a fact rather than a reprimand, like every other corrective
+    message here. The model has just been given one real result, and what it
+    needs next is to read it.
+    """
+    return (
+        f"That reply contained {unrun + 1} tool calls. Only the first was run, "
+        "and its result is above.\n"
+        "One call per reply, then wait: the calls after the first were written "
+        "before you had seen the first one's result, so they were guesses about "
+        "output you had not been given. Read the result above and make your next "
+        "call from what it actually says."
+    )
+
+
 def out_of_steps() -> str:
     """Asked for once the loop has run out of room to keep working."""
     return (
