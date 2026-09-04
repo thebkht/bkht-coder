@@ -20,7 +20,9 @@ from pathlib import Path
 
 import httpx
 
+from .hooks import Hooks
 from .instructions import load_instructions
+from . import layout
 from .provider import DEFAULTS, DEFAULT_NUM_CTX
 from .provider import DEFAULT_PROVIDER, ProviderError, build
 from .session import STATE_DIR
@@ -610,6 +612,30 @@ def check_state_dir(directory: Path = None) -> Check:
     return Check("state", OK, f"{directory} is writable")
 
 
+def check_agent_surface(root: Path) -> Check:
+    """Which `agent/` roots this workspace loads, and what they hold.
+
+    Named rather than counted, and named even when there is nothing, because
+    the surface is discovered from the filesystem: a slot spelled wrong loads
+    nothing and says nothing, and this is the line that tells the two apart.
+    """
+    found = layout.surface(root)
+    if found.problems:
+        return Check(
+            "agent", WARN, "; ".join(found.problems),
+            f"A workspace surface is {layout.DIRECTORY}/ with a JSON object in "
+            f"{layout.MARKER} -- `{{}}` is enough.",
+        )
+    if not found:
+        return Check("agent", OK, f"no {layout.DIRECTORY}/ surface")
+
+    described = [
+        f"{base} ({', '.join(name for name, _ in slots) or 'empty'})"
+        for base, slots in layout.inventory(found, root)
+    ]
+    return Check("agent", OK, "; ".join(described))
+
+
 def check_instructions(root: Path) -> Check:
     loaded = load_instructions(root)
     if not loaded:
@@ -652,6 +678,25 @@ def check_verify(root: Path, command: str = "") -> Check:
         "verify", OK, "not set; no test command runs after an edit",
         f"This project looks like `{suggestion}` -- "
         f"`coder config set verify_command '{suggestion}'` to check edits with it.",
+    )
+
+
+def check_hooks(configured: dict | None = None) -> Check:
+    """Every hook that would run, named.
+
+    Listed rather than counted, and listed even when there are none, because a
+    hook is an arbitrary command out of a config file that fires without anyone
+    asking. The whole safety argument for the feature is that it is never
+    invisible, and this is where it stops being invisible.
+    """
+    hooks = Hooks(commands=configured or {})
+    listing = hooks.listing()
+    if not listing:
+        return Check("hooks", OK, "none configured")
+
+    named = "; ".join(f"{event}: `{command}`" for event, command in listing)
+    return Check(
+        "hooks", OK, f"{len(listing)} configured", f"These run without asking -- {named}"
     )
 
 
@@ -812,6 +857,7 @@ def run_checks(
     num_ctx: int = DEFAULT_NUM_CTX,
     provider: str = DEFAULT_PROVIDER,
     verify_command: str = "",
+    hooks: dict | None = None,
 ) -> list[Check]:
     """Every check, in the order a failing install should be read in.
 
@@ -827,9 +873,11 @@ def run_checks(
         check_shell(),
         check_git(),
         check_state_dir(),
+        check_agent_surface(root),
         check_instructions(root),
         check_skills(root),
         check_verify(root, verify_command),
+        check_hooks(hooks),
     ]
 
 
@@ -859,13 +907,14 @@ def report(
     num_ctx: int = DEFAULT_NUM_CTX,
     provider: str = DEFAULT_PROVIDER,
     verify_command: str = "",
+    hooks: dict | None = None,
     as_json: bool = False,
     out=print,
 ) -> int:
     """Run every check and print it. Non-zero exit when one failed, for CI."""
     checks = run_checks(
         root, model=model, host=host, num_ctx=num_ctx, provider=provider,
-        verify_command=verify_command,
+        verify_command=verify_command, hooks=hooks,
     )
     out(json.dumps([c.payload() for c in checks], indent=2) if as_json else render(checks))
     return 1 if any(check.failed for check in checks) else 0

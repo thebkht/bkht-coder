@@ -70,6 +70,7 @@ Commands:
 
   review [range]                 Review changes, a branch, or a commit range
   doctor                         Check that this install can run a turn
+  info                           Show the agent/ surface this workspace loads
   dataset [build|stats|show]     Build a training corpus from transcripts
   help                           Show this help
 
@@ -82,6 +83,7 @@ Flags:
   --no-delegation         Omit the task tool, which runs a sub-agent
   --verify-command <cmd>  Test command to run after a turn's edits
   --no-verify             Do not run it for this session
+  --no-hooks              Do not run the hooks configured in config.json
   --max-iterations <n>    Cap on loop iterations per task
 {COMMON}
   -h, --help              Display this help and exit
@@ -154,6 +156,14 @@ Settings:
   verify_command          Test command run after a turn's edits; off by default
   verify                  Run verify_command after a turn that changed files
   update_check            Ask once a day whether a newer release exists
+
+Hooks are the one part of config.json that is not a setting: an object of
+event -> commands, under "hooks". The events are pre_tool, post_tool and
+turn_end; a non-zero pre_tool exit blocks the call and its output is what the
+model is told. Edit the file by hand, and see `coder doctor`, which lists every
+hook it finds. They run arbitrary commands -- see SECURITY.md.
+
+  "hooks": {"post_tool": ["[ -n \"$CODER_PATH\" ] && ruff format $CODER_PATH"]}
 
 Flags:
   --workspace             Write .bkht-coder/config.json, not the personal file
@@ -363,6 +373,31 @@ Examples:
   coder config set update_check false
       Never check for a release again
 """
+
+INFO_HELP = """\
+coder info
+Show the `agent/` surface this workspace loads.
+
+An agent built out of directories is only as debuggable as its listing of
+them. This prints every adopted root, slot by slot, with the files each holds
+and anything that was refused.
+
+A workspace surface is an `agent/` directory with an `agent.json` in it -- the
+marker is what separates ours from the `agent/` an eve project keeps for its
+own agent. A personal one is `~/.bkht-coder/agent/`, which needs no marker.
+
+Usage:
+  coder info [flags]
+
+Flags:
+  --cwd <path>            Workspace root; defaults to the current directory
+  -h, --help              Display this help and exit
+
+Examples:
+  coder info
+      List what this workspace's agent/ directory contributes
+"""
+
 
 DOCTOR_HELP = f"""\
 coder doctor

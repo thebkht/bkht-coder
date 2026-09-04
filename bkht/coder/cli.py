@@ -18,6 +18,7 @@ from .doctor import running_from, version
 from .context import file_tree, usage_ratio
 from .instructions import load_instructions, render, summarize as summarize_instructions
 from .parsing import ToolCall
+from .hooks import Hooks
 from .permissions import ASK, AUTO, PLAN, Permissions, cycle as next_mode
 from .prompts import system_prompt
 from .prompt import Reader
@@ -304,6 +305,7 @@ def add_agent_arguments(parser) -> None:
     parser.add_argument("--no-planning", action="store_true", default=None, help="Omit the plan tool.")
     parser.add_argument("--no-delegation", action="store_true", default=None, help="Omit the task tool, which runs a sub-agent.")
     parser.add_argument("--no-verify", action="store_true", default=None, help="Do not run verify_command after a turn.")
+    parser.add_argument("--no-hooks", action="store_true", help="Do not run the hooks configured in config.json.")
     parser.add_argument("--max-iterations", type=int, default=None, help="Cap on loop iterations per task.")
     add_common_arguments(parser)
 
@@ -339,6 +341,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_common_arguments(checker)
     doctor.add_arguments(checker)
+
+    informer = subparsers.add_parser(
+        "info", help="Show the agent/ surface this workspace loads.",
+        page=usage.INFO_HELP,
+    )
+    informer.add_argument("--cwd", default=".", help="Workspace root. Defaults to the current directory.")
 
     updater = subparsers.add_parser(
         "update", help="Install the newest release, or check whether there is one.",
@@ -460,6 +468,11 @@ def configured(args):
     if settings.error:
         print(paint(settings.error, YELLOW, sys.stderr), file=sys.stderr)
     settings.apply(args)
+    # Carried on `args` like everything else resolved here, so `make_agent` and
+    # `doctor` read hooks the same way they read every other setting -- even
+    # though this one never became a flag, because a list per event is not
+    # something anybody types at a prompt.
+    args.hooks = settings.hooks
     # Said out loud, always. Resolution may have moved the session onto a
     # different backend than the default names, and a session running a model
     # the user did not pick is exactly the case where the next surprise has no
@@ -510,6 +523,13 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
         Discovery() if getattr(args, "no_skills", False) else discover_skills(root)
     )
 
+    # Built before the registry, because the sub-agent behind the `task` tool
+    # is given the same ones: a gate the agent can get around by delegating the
+    # call is not a gate.
+    hooks = None if getattr(args, "no_hooks", False) else Hooks(
+        commands=getattr(args, "hooks", None) or {}, root=root
+    )
+
     provider = build_provider(
         getattr(args, "provider", DEFAULT_PROVIDER),
         model=args.model, host=args.host, num_ctx=args.num_ctx,
@@ -558,6 +578,7 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
         # the one stretch of a turn the user cannot otherwise see.
         delegate=None if getattr(args, "no_delegation", False) else {
             "provider": provider, "skills": found_skills, "listener": listener,
+            "hooks": hooks,
         },
     )
     # The prompt pauses the status line for the whole exchange: without it the
@@ -626,6 +647,9 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
             else getattr(args, "verify_command", "") or ""
         ),
         verify_root=workspace.root,
+        # --no-hooks, built above: one session where nothing out of that file
+        # runs is what you want the moment you are not sure what is in it.
+        hooks=hooks,
     )
     return agent, snapshots, permissions, workspace, jobs, announced
 
@@ -1037,6 +1061,19 @@ def config_argv(argv: list[str], valued: set[str] = None) -> list[str]:
     return [argv[0], *head, *flags]
 
 
+def info(root: Path, out=print) -> int:
+    """Print the `agent/` surface, slot by slot.
+
+    A layout discovered from the filesystem is only as trustworthy as the
+    listing of what it discovered: without this, a skill in the wrong directory
+    and a skill the model chose not to use look identical from outside.
+    """
+    from . import layout
+
+    out(layout.render(layout.surface(root), root))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
@@ -1086,6 +1123,10 @@ def main(argv: list[str] | None = None) -> int:
     if argv[:1] == ["update"]:
         return update.run(build_parser().parse_args(argv))
 
+    if argv[:1] == ["info"]:
+        args = build_parser().parse_args(config_argv(argv))
+        return info(Path(args.cwd).expanduser().resolve())
+
     if argv[:1] == ["doctor"]:
         args = configured(build_parser().parse_args(argv))
         return doctor.report(
@@ -1093,6 +1134,7 @@ def main(argv: list[str] | None = None) -> int:
             model=args.model, host=args.host, num_ctx=args.num_ctx,
             provider=args.provider,
             verify_command=getattr(args, "verify_command", "") or "",
+            hooks=getattr(args, "hooks", None),
             as_json=args.json,
         )
 

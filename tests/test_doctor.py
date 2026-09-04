@@ -551,3 +551,64 @@ def test_an_unset_command_never_fails_the_report(tmp_path):
     # Not configuring it is a choice, not a broken install, and `doctor`'s exit
     # status is what CI reads.
     assert not doctor.check_verify(tmp_path).failed
+
+
+# --- the hooks check --------------------------------------------------------
+
+
+def test_no_hooks_is_a_sentence_not_a_silence():
+    check = doctor.check_hooks({})
+    assert check.status == doctor.OK
+    assert "none configured" in check.detail
+
+
+def test_every_configured_hook_is_named():
+    # Listed rather than counted. The whole safety argument for hooks is that
+    # they are never invisible, and this is where they stop being invisible.
+    check = doctor.check_hooks({"pre_tool": ["gate.sh"], "turn_end": ["make docs"]})
+    assert "2 configured" in check.detail
+    assert "gate.sh" in check.fix and "make docs" in check.fix
+    assert "without asking" in check.fix
+
+
+def test_hooks_never_fail_the_report():
+    # Configuring one is a choice, not a broken install, and `doctor`'s exit
+    # status is what CI reads.
+    assert not doctor.check_hooks({"pre_tool": ["gate.sh"]}).failed
+
+
+def test_the_report_carries_the_hooks_it_was_given(tmp_path, offline):
+    checks = doctor.run_checks(tmp_path, hooks={"turn_end": ["make"]})
+    named = [c for c in checks if c.name == "hooks"]
+    assert named and "make" in named[0].fix
+
+
+# --- the agent/ surface ---------------------------------------------------
+
+
+def test_the_agent_check_names_the_slots_it_found(tmp_path, monkeypatch):
+    monkeypatch.setattr(doctor.layout, "GLOBAL_ROOT", tmp_path / "nowhere")
+    (tmp_path / "agent" / "skills").mkdir(parents=True)
+    (tmp_path / "agent" / "agent.json").write_text("{}")
+
+    check = doctor.check_agent_surface(tmp_path)
+    assert check.status == doctor.OK and "skills" in check.detail
+
+
+def test_the_agent_check_is_quiet_about_somebody_elses_agent_directory(tmp_path, monkeypatch):
+    # An eve project's agent/ is not ours and is not a problem.
+    monkeypatch.setattr(doctor.layout, "GLOBAL_ROOT", tmp_path / "nowhere")
+    (tmp_path / "agent").mkdir()
+    (tmp_path / "agent" / "instructions.md").write_text("You are a data agent.\n")
+
+    check = doctor.check_agent_surface(tmp_path)
+    assert check.status == doctor.OK and "no agent/ surface" in check.detail
+
+
+def test_a_broken_marker_warns_and_says_what_it_should_hold(tmp_path, monkeypatch):
+    monkeypatch.setattr(doctor.layout, "GLOBAL_ROOT", tmp_path / "nowhere")
+    (tmp_path / "agent").mkdir()
+    (tmp_path / "agent" / "agent.json").write_text("{not json")
+
+    check = doctor.check_agent_surface(tmp_path)
+    assert check.status == doctor.WARN and "agent.json" in check.fix
