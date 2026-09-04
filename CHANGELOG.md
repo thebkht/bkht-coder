@@ -9,6 +9,8 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-09-04
+
 ### Fixed
 
 - **Installing behind a TLS-inspecting proxy failed with no explanation.** uv
@@ -512,7 +514,8 @@ job, GitHub and GitLab tools; resumable sessions; skills and slash commands;
 GitLab Code Quality reports; `coder doctor`; `coder config`; and Claude Code and
 Codex as borrowed model backends.
 
-[Unreleased]: https://github.com/thebkht/bkht-coder/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/thebkht/bkht-coder/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/thebkht/bkht-coder/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/thebkht/bkht-coder/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/thebkht/bkht-coder/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/thebkht/bkht-coder/compare/v0.5.0...v0.6.0
