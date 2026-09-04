@@ -9,6 +9,19 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ## [Unreleased]
 
+### Changed
+
+- **The language reminder no longer ends on prose.** It is appended to every
+  request in a language that is not English, and a turn with no plan ends its
+  request with it -- so the last thing the model reads before generating was
+  four sentences about writing sentences. A small model obliges: asked in Uzbek
+  to study this repo, `qwen2.5-coder:7b` answered in fluent Uzbek having called
+  no tool at all, in one run out of four. The language rule is stated first
+  now, and the note closes on the work: if the task is not finished, the next
+  reply is a tool call, not prose. Stated as a judgement rather than a measured
+  fix -- the same four runs produced three different outcomes, so nothing at
+  this sample size can tell a prompt change from a dice roll.
+
 ### Fixed
 
 - **Typing while a turn ran lost what you typed.** The thread watching for Esc

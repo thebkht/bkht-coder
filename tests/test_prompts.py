@@ -116,3 +116,23 @@ def test_the_session_prompt_carries_whichever_protocol_it_was_built_with(
     registry, root = registry_and_root
     assert "One tool call per reply" in system_prompt(registry, root)
     assert "One tool call per reply" not in system_prompt(registry, root, parallel=True)
+
+
+def test_the_language_reminder_ends_on_the_work_not_the_prose():
+    """It is the last thing a planless turn reads, so its last line matters.
+
+    Four sentences about writing sentences, read immediately before
+    generation, is an instruction a small model will follow: asked in Uzbek to
+    study this repo, `qwen2.5-coder:7b` answered in fluent Uzbek having called
+    nothing at all. The language rule goes first; the closing line says an
+    unfinished task is answered with a tool call.
+    """
+    reminder = language_reminder("Uzbek")
+    assert reminder.rstrip().endswith("your next reply is a tool call, not prose.)")
+    assert reminder.index("Uzbek") < reminder.index("not finished")
+
+
+def test_the_reminder_still_marks_itself_as_an_aside_and_names_the_language():
+    reminder = language_reminder("Uzbek")
+    assert "not a new request" in reminder
+    assert reminder.count("Uzbek") == 2

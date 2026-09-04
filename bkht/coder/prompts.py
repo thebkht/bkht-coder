@@ -186,10 +186,13 @@ All paths are relative to that root. You cannot read or write outside it.
 
 
 LANGUAGE_REMINDER = """\
-(A note about the reply, not a new request: answer in {language}. Write every
-sentence of your answer in {language}, and do not switch to another language
-part way through. File paths, code, command lines, and the JSON of a tool call
-are unaffected: they keep their exact form. Carry on with the task above.)"""
+(A note about the reply, not a new request. When you answer, write it in
+{language}: every sentence in {language}, without switching part way through.
+File paths, code, command lines, and the JSON of a tool call are unaffected --
+they keep their exact form, and a call carries no language at all.
+
+None of that is a reason to answer yet. If the task above is not finished,
+your next reply is a tool call, not prose.)"""
 
 
 def language_reminder(language: str) -> str:
@@ -199,6 +202,14 @@ def language_reminder(language: str) -> str:
     prompt above, which by then is thousands of tokens behind. Recency is the
     whole point: the standing rule is read once and forgotten, this is the last
     thing read before the answer is written.
+
+    Which is also the hazard, and the reason for the order below. A turn with
+    no plan ends its request with this note, so the last thing a model reads
+    before generating is four sentences about writing sentences -- and a small
+    one obliges. Asked in Uzbek to study this repo, `qwen2.5-coder:7b` answered
+    in fluent Uzbek having called nothing at all, in one run out of four. So
+    the language rule is stated first and the note ends on the work: the final
+    line it reads is the one saying an unfinished task is answered with a call.
     """
     return LANGUAGE_REMINDER.format(language=language)
 
