@@ -141,6 +141,7 @@ class Repl:
         if argument.strip() == "reload":
             from .context import file_tree
             from .prompts import system_prompt
+            from .provider import roomy
 
             # Rebuilt whole, so the skill listing has to be rebuilt with it --
             # reloading instructions must not quietly cost the session its
@@ -153,6 +154,7 @@ class Repl:
                 file_tree(self.workspace.root),
                 render(loaded),
                 render_skills(discover_skills(self.workspace.root)),
+                parallel=roomy(self.agent.provider),
             )
             self.out(f"Reloaded {len(loaded)} instruction file(s).")
 

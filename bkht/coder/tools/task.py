@@ -148,6 +148,7 @@ def register_task_tool(
         from ..agent import Agent, NullListener
         from ..context import file_tree
         from ..prompts import system_prompt
+        from ..provider import roomy
         from ..session import Session
         from ..skills import render as render_skills
         from . import build_registry
@@ -169,6 +170,7 @@ def register_task_tool(
                 file_tree(workspace.root),
                 instructions,
                 render_skills(available) if available else "",
+                parallel=roomy(provider),
             ),
             cwd=str(workspace.root),
             model=getattr(provider, "model", ""),

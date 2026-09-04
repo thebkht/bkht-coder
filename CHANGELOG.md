@@ -11,6 +11,19 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ### Added
 
+- **A turn with room to work in may now batch its tool calls.** The prompt said
+  "one tool call per reply, wait for the result" -- a rule measured on a 14b
+  model at a 16,384-token window, where four results at once is four results
+  there is nowhere to put. Nothing else ever enforced it: `extract_json_objects`
+  has always returned every object in a reply and `Agent._loop` has always
+  iterated the list. So on a backend that reports a large window -- 400,000 for
+  `codex`, 1,000,000 for `claude-code`, or a local server configured past
+  65,536 -- independent calls may now go out together, which is the difference
+  between reading four files in four round trips and reading them in one. The
+  ordering rule batching cannot relax is stated with it: a call that needs
+  another call's result waits for the next reply, so nothing edits a file in
+  the same breath it reads it.
+
 - **The system prompt now says how to answer, not only how to work.** It
   described the job in detail -- read before claiming, small verified steps,
   plan a long task -- and said nothing at all about the reply, which left the

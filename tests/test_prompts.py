@@ -73,3 +73,46 @@ def test_the_answering_section_sits_above_the_tool_protocol(registry_and_root):
     registry, root = registry_and_root
     prompt = system_prompt(registry, root)
     assert prompt.index("# Answering") < prompt.index("# Calling a tool")
+
+
+# --- batching ---------------------------------------------------------------
+
+def test_the_default_protocol_is_one_call_at_a_time():
+    """Serial is the default, and the training exporter depends on it.
+
+    `TOOL_PROTOCOL` is what `training.ingest.call_json` claims to match, so it
+    has to keep meaning the format a default local session actually sends.
+    """
+    from bkht.coder.prompts import TOOL_PROTOCOL, tool_protocol
+
+    assert TOOL_PROTOCOL == tool_protocol()
+    assert "One tool call per reply" in TOOL_PROTOCOL
+
+
+def test_a_roomy_window_is_allowed_to_batch_independent_calls():
+    from bkht.coder.prompts import tool_protocol
+
+    protocol = tool_protocol(parallel=True)
+    assert "One tool call per reply" not in protocol
+    assert "Several calls in one reply is allowed" in protocol
+
+
+def test_batching_still_forbids_a_call_that_needs_another_call_s_result():
+    """The one ordering rule that batching cannot relax.
+
+    Reading three files at once is free; editing a file in the same reply that
+    reads it is an edit against text the model has not seen.
+    """
+    from bkht.coder.prompts import tool_protocol
+
+    protocol = tool_protocol(parallel=True)
+    assert "goes in your next reply" in protocol
+    assert "cannot edit a file in the same reply you read it in" in protocol
+
+
+def test_the_session_prompt_carries_whichever_protocol_it_was_built_with(
+    registry_and_root,
+):
+    registry, root = registry_and_root
+    assert "One tool call per reply" in system_prompt(registry, root)
+    assert "One tool call per reply" not in system_prompt(registry, root, parallel=True)

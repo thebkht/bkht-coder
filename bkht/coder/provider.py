@@ -103,6 +103,34 @@ CONNECT_TIMEOUT = 5.0
 READ_TIMEOUT = 300.0
 
 
+#: The window above which the small-model adaptations stop applying.
+#:
+#: Several behaviours in this program exist because a 14b model at 16384 cannot
+#: hold what it read: one tool call per reply, refusing a byte-identical
+#: repeat, searching the workspace before the model has even seen the request.
+#: Each was measured, each is right at 16384, and each is wrong at 400,000 --
+#: where a second read of a file is ordinary rather than a symptom, and a turn
+#: that batches four reads is a turn that finishes.
+#:
+#: 65536 because nothing shipped here is near it -- the local default is 16384
+#: -- and nothing a large backend reports is below it: 400,000 for `codex`,
+#: 1,000,000 for `claude-code`. A local server configured past it is making the
+#: same claim those do, and is taken at its word.
+ROOMY_NUM_CTX = 65_536
+
+
+def roomy(provider) -> bool:
+    """Whether ``provider`` has room enough to drop the small-model rules.
+
+    Asked of the window rather than of the backend name. The window is the
+    thing the adaptations are actually about, it is already reported by every
+    provider here, and it is a number the user can set -- so somebody running a
+    128k local model gets the same treatment as a frontier one without this
+    file needing to have heard of their model.
+    """
+    return getattr(provider, "num_ctx", 0) >= ROOMY_NUM_CTX
+
+
 class ProviderError(RuntimeError):
     """The model could not be reached or returned an unusable response."""
 

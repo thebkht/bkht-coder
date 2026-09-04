@@ -15,7 +15,7 @@ from ..agent import Agent
 from ..context import file_tree
 from ..permissions import ASK, AUTO, Permissions, ask_terminal
 from ..prompts import system_prompt
-from ..provider import DEFAULT_PROVIDER, build, for_review
+from ..provider import DEFAULT_PROVIDER, build, for_review, roomy
 from ..session import Session, Snapshots
 from ..tools import build_registry
 from ..tools.base import set_output_budget
@@ -138,7 +138,10 @@ def fix(findings, provider, root: Path, mode: str = ASK, prompt=ask_terminal) ->
     snapshots = Snapshots()
     registry, workspace = build_registry(root, snapshots=snapshots)
     permissions = Permissions(mode=mode, workspace=workspace, prompt=prompt)
-    system = system_prompt(registry, str(workspace.root), file_tree(workspace.root))
+    system = system_prompt(
+        registry, str(workspace.root), file_tree(workspace.root),
+        parallel=roomy(provider),
+    )
 
     fixed = 0
     for index, finding in enumerate(findings, start=1):

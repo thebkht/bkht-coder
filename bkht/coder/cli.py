@@ -23,7 +23,7 @@ from .hooks import Hooks
 from .permissions import ASK, AUTO, PLAN, Permissions, cycle as next_mode
 from .prompts import system_prompt
 from .prompt import Reader
-from .provider import BACKENDS, DEFAULT_NUM_CTX, DEFAULT_PROVIDER
+from .provider import BACKENDS, DEFAULT_NUM_CTX, DEFAULT_PROVIDER, roomy
 from .provider import build as build_provider
 from .repl import Repl
 from .review import cli as review_cli
@@ -665,6 +665,9 @@ def make_agent(args, listener=None) -> tuple[Agent, Snapshots]:
             file_tree(workspace.root),
             render(loaded),
             render_skills(found_skills),
+            # Batching is a property of the window, not of the session: a turn
+            # that reads four files at once needs somewhere to put four files.
+            parallel=roomy(provider),
         ),
         registry.names(),
     )

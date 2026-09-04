@@ -200,3 +200,34 @@ def test_build_returns_the_named_backend():
 def test_build_names_what_is_available_when_the_backend_is_unknown():
     with pytest.raises(ProviderError, match="ollama"):
         build("gemini", model="m")
+
+
+# --- window size ------------------------------------------------------------
+
+class _Window:
+    """Just the attribute :func:`roomy` asks about."""
+
+    def __init__(self, num_ctx):
+        self.num_ctx = num_ctx
+
+
+def test_the_shipped_local_default_is_not_roomy():
+    """16384 is the window every small-model adaptation was measured at."""
+    from bkht.coder.provider import DEFAULT_NUM_CTX, roomy
+
+    assert not roomy(_Window(DEFAULT_NUM_CTX))
+
+
+def test_the_large_backends_are_roomy():
+    from bkht.coder.provider import CLAUDE_CODE_NUM_CTX, CODEX_NUM_CTX, roomy
+
+    assert roomy(_Window(CODEX_NUM_CTX))
+    assert roomy(_Window(CLAUDE_CODE_NUM_CTX))
+
+
+def test_a_provider_that_reports_no_window_is_treated_as_small():
+    """The safe answer: the small-model rules cost speed, never correctness."""
+    from bkht.coder.provider import roomy
+
+    assert not roomy(_Window(0))
+    assert not roomy(object())

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 
-TOOL_PROTOCOL = """\
+PROTOCOL = """\
 # Calling a tool
 
 To use a tool, reply with ONLY a JSON object, on its own, in this exact shape:
@@ -31,14 +31,48 @@ For example, to read a file:
 {"name": "read_file", "arguments": {"path": "src/main.py"}}
 
 Rules:
-- Emit the JSON object and nothing else. No explanation before or after it.
-- One tool call per reply. Wait for the result before calling the next tool.
+{rules}
 - Use exactly the argument names listed for that tool.
 - The result comes back as a `tool` message. Read it before deciding what to do.
 
 When you have finished the task, reply with a normal answer in plain prose and
 no JSON. That is how you signal you are done. A message that needed no tool at
 all is answered the same way: prose, no JSON."""
+
+SERIAL_RULES = """\
+- Emit the JSON object and nothing else. No explanation before or after it.
+- One tool call per reply. Wait for the result before calling the next tool."""
+
+PARALLEL_RULES = """\
+- Emit the JSON and nothing else. No explanation before or after it.
+- Several calls in one reply is allowed -- separate JSON objects, one after
+  another -- when they do not depend on each other: reading three files, or
+  grepping for two symbols. All of them run before you are asked again, so
+  batching is the cheapest way to work.
+- A call that needs another call's result goes in your next reply, not this
+  one. You cannot edit a file in the same reply you read it in."""
+
+
+def tool_protocol(parallel: bool = False) -> str:
+    """The wire protocol, with or without permission to batch calls.
+
+    Serial by default, and that default is the measured one: a 14b model at
+    16384 emitting two calls at once produces two results it has no room to
+    hold, and the loop spends its window paging them back in. The parser and
+    the loop have always handled a list -- ``extract_json_objects`` returns
+    every object in a reply and ``Agent._loop`` iterates them -- so the only
+    thing that has ever forbidden batching is this paragraph.
+
+    Concatenated rather than formatted: the template is full of the literal
+    braces the protocol is made of, and ``str.format`` would try to read them.
+    """
+    rules = PARALLEL_RULES if parallel else SERIAL_RULES
+    return PROTOCOL.replace("{rules}", rules)
+
+
+#: The serial protocol, which is what the review passes and the training
+#: exporter mean when they say "the format coder sends".
+TOOL_PROTOCOL = tool_protocol()
 
 
 def describe_tools(tools) -> str:
@@ -227,7 +261,12 @@ def skills_block(skills: str) -> str:
 
 
 def system_prompt(
-    registry, root: str, tree: str = "", instructions: str = "", skills: str = ""
+    registry,
+    root: str,
+    tree: str = "",
+    instructions: str = "",
+    skills: str = "",
+    parallel: bool = False,
 ) -> str:
     """Assemble the system prompt for a session.
 
@@ -235,6 +274,9 @@ def system_prompt(
     below it: the tool protocol has to be the last thing the model reads,
     because drifting away from the emission format is this model's
     characteristic failure.
+
+    ``parallel`` lets the turn batch independent calls; see
+    :func:`tool_protocol` for why it is off unless the window says otherwise.
     """
     tree_block = f"Files:\n{tree}" if tree else ""
     return SYSTEM.format(
@@ -243,7 +285,7 @@ def system_prompt(
         instructions=instructions_block(instructions),
         skills=skills_block(skills),
         tools=describe_tools(registry),
-        protocol=TOOL_PROTOCOL,
+        protocol=tool_protocol(parallel),
     )
 
 
