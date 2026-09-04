@@ -169,7 +169,7 @@ jobs:
           coder --version
           coder --help | Out-Null
           coder doctor --json | python -c "import json, sys; json.load(sys.stdin)"
-          Write-Host 'coder runs
+          Write-Host 'coder runs'
 
   installer-posix:
     name: install.sh (${{ matrix.os }})
