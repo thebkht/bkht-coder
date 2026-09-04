@@ -9,6 +9,8 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-04
+
 ### Added
 
 - **The project's own test command, run over what a turn wrote.** `verify.py`
@@ -68,6 +70,22 @@ below it, and the release workflow refuses a tag this file does not describe.
   second run of a comparison is not measuring the same work as the first, and
   the change under test gets credit or blame that belongs to the edit.
 
+### Changed
+
+- `grep` handed a glob where a path goes now says which argument the pattern
+  belongs in, and writes out the call that would have worked. `path not found:
+  .github/workflows/*.yml` is true and useless -- the string was never meant to
+  be a path, so the model saw nothing to change and resent the same call until
+  the loop's bounds ended the turn. Found in a real session that spent its
+  whole iteration budget that way and answered from vendored workflows it had
+  stumbled into. A path that is simply missing says only that, as before.
+- A pasted image is encoded once instead of once per round trip. The provider
+  base64s every image on the message it sends, and a turn sends its whole
+  history on each of up to twenty-five iterations, so one screenshot was read
+  off disk and encoded twenty-five times to produce twenty-five identical
+  strings. Keyed on the file's identity rather than its name, so an image
+  re-saved at the same path is encoded again.
+
 ### Measured
 
 The first thing the benchmark was pointed at was the scout, because its own
@@ -97,24 +115,6 @@ benchmark measures what a turn *costs*, never whether it was right -- the first
 task answered a question about the agent loop without opening a file in either
 arm, which is fast in both and only useful if the answer is true. Correctness
 is a different instrument, and this is not it.
-
-### Changed
-
-- `grep` handed a glob where a path goes now says which argument the pattern
-  belongs in, and writes out the call that would have worked. `path not found:
-  .github/workflows/*.yml` is true and useless -- the string was never meant to
-  be a path, so the model saw nothing to change and resent the same call until
-  the loop's bounds ended the turn. Found in a real session that spent its
-  whole iteration budget that way and answered from vendored workflows it had
-  stumbled into. A path that is simply missing says only that, as before.
-- A pasted image is encoded once instead of once per round trip. The provider
-  base64s every image on the message it sends, and a turn sends its whole
-  history on each of up to twenty-five iterations, so one screenshot was read
-  off disk and encoded twenty-five times to produce twenty-five identical
-  strings. Keyed on the file's identity rather than its name, so an image
-  re-saved at the same path is encoded again.
-
-### Measured
 
 Two other candidates were built, measured and dropped, which is the more useful
 half of the result:
@@ -355,7 +355,8 @@ job, GitHub and GitLab tools; resumable sessions; skills and slash commands;
 GitLab Code Quality reports; `coder doctor`; `coder config`; and Claude Code and
 Codex as borrowed model backends.
 
-[Unreleased]: https://github.com/thebkht/bkht-coder/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/thebkht/bkht-coder/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/thebkht/bkht-coder/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/thebkht/bkht-coder/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/thebkht/bkht-coder/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/thebkht/bkht-coder/compare/v0.2.0...v0.3.0
