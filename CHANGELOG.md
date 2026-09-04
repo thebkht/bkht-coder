@@ -555,7 +555,3 @@ Codex as borrowed model backends.
 [0.3.0]: https://github.com/thebkht/bkht-coder/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/thebkht/bkht-coder/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/thebkht/bkht-coder/releases/tag/v0.1.0
-
-## [0.7.3]
-
-#
