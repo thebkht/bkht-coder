@@ -168,7 +168,13 @@ jobs:
           $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
           coder --version
           coder --help | Out-Null
-          coder doctor --json | python -c "import json, sys; json.load(sys.stdin)"
+          # Parsed by PowerShell rather than piped to python: Windows
+          # PowerShell 5.1 puts its object pipeline between two native
+          # commands and re-encodes on the way through, so the JSON arrives
+          # mangled or not at all. ConvertFrom-Json throws on bad input, and
+          # Actions runs these steps with $ErrorActionPreference = 'Stop'.
+          $report = (coder doctor --json | Out-String)
+          $null = $report | ConvertFrom-Json
           Write-Host 'coder runs'
 
   installer-posix:
