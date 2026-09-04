@@ -196,3 +196,38 @@ def test_the_scout_says_nothing_about_a_ci_run(tmp_path):
     (tmp_path / ".github").mkdir()
     (tmp_path / ".github" / "review.yml").write_text("name: review\n")
     assert retrieval.scout(tmp_path, "review github run 33185669396") == ""
+
+
+# --- the other language this agent is used in ---------------------------------
+
+
+def test_an_uzbek_greeting_searches_for_nothing():
+    # `thanks` has always cost nothing. `salom` was searching the workspace,
+    # and in a PL/SQL repo whose fixtures pass the literal string 'salom' to a
+    # function, a greeting opened the turn with four lines of test.sql.
+    assert terms("salom") == []
+    assert terms("rahmat") == []
+    assert terms("assalomu alaykum") == []
+    # Not a claim that every inflection is covered -- this is a marker list,
+    # not a stemmer, and a word earns its place here by having been seen.
+
+
+def test_an_apostrophe_does_not_split_an_uzbek_word():
+    # `ko'rib` became `rib`, which ranked `position: absolute; top: 4px` in
+    # every stylesheet in the workspace and put it first in the turn.
+    assert "rib" not in terms("projectni ko'rib chiqib xulosa ber")
+    assert "rganib" not in terms("absni o'rganib chiq")
+
+
+def test_an_uzbek_request_keeps_the_words_worth_searching_for():
+    # The nouns survive; the verbs of "analyse it fully and give a summary" do
+    # not, exactly as their English counterparts already did not.
+    found = terms("osm folder ichidagi osm kernel packageni tahlil qilib ber to'liq")
+    assert "osm" in found and "kernel" in found
+    assert "tahlil" not in found and "ber" not in found
+
+
+def test_english_compounds_still_split():
+    # The apostrophe is the only separator that stopped being one.
+    assert set(terms("handle_undo")) >= {"handle_undo", "handle", "undo"}
+    assert "search" in terms("fix the undo depth in tools/search.py")

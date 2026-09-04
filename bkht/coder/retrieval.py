@@ -16,6 +16,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .language import UZBEK_CYRILLIC_WORDS, UZBEK_WORDS
 from .tools.base import truncate
 from .tools.fs import read_text
 from .tools.search import MAX_SCANNED_BYTES, iter_files
@@ -70,8 +71,30 @@ STOPWORDS = {
     "thanks", "thank", "ok", "okay", "good", "ahead", "sounds", "great",
 }
 
+# The same list in the other language this agent is used in. `salom` and
+# `rahmat` were being searched for -- the workspace's own test fixtures pass
+# the string 'salom' to a PL/SQL function, so a greeting opened the turn with
+# four lines of test.sql -- while the English `thanks` correctly searched for
+# nothing. Taken from `language`, which already curates this vocabulary for
+# the detector, rather than written out a second time here and left to drift.
+STOPWORDS |= UZBEK_WORDS | UZBEK_CYRILLIC_WORDS
+
+# The Uzbek counterparts of the task verbs above: asking to be told about
+# something is not a term to search for in either language. "xulosa ber" is
+# "give a summary", and searching the repository for `xulosa` ranks whatever
+# happens to say it.
+STOPWORDS |= {
+    "tahlil", "xulosa", "loyiha", "loyihani", "dastur", "kodni", "faylni",
+    "haqida", "qanday", "nima", "iltimos",
+}
+
 _QUOTED = re.compile(r"[\"'`]([^\"'`\n]{2,})[\"'`]")
-_TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_./-]*")
+# The apostrophes are the point. Uzbek writes oʻ and gʻ, and a token pattern
+# that stops at one turns `ko'rib` into `rib` and `o'rganib` into `rganib` --
+# terms that match nothing meaningful and rank `position: absolute; top: 4px`
+# in every stylesheet in the workspace. Matches `language._WORD`, which has
+# kept them for the same reason since it was written.
+_TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_./'\u02bb\u02bc\u2018-]*")
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _DEFINITION_KEYWORDS = "async def|def|class|function|const|let|var|type|struct|fn|interface"
 
@@ -111,6 +134,9 @@ def terms(message: str) -> list[str]:
         keep(token)
         # A path or a compound identifier is also worth searching for by its
         # parts: "tools/search.py" should find `search`, `handle_undo` `undo`.
+        # Split on the separators of a compound identifier, never on the
+        # apostrophe: `handle_undo` is two words worth searching for, `ko'rib`
+        # is one word and `rib` is not a word at all.
         if _is_pathlike(token) or "_" in token or token[1:] != token[1:].lower():
             for part in _IDENTIFIER.findall(re.sub(r"(?<!^)(?=[A-Z])", " ", token.replace("/", " ").replace(".", " ").replace("_", " "))):
                 keep(part)
