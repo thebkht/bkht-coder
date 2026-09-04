@@ -9,6 +9,35 @@ below it, and the release workflow refuses a tag this file does not describe.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-04
+
+### Added
+
+- **A turn with room to work in may now batch its tool calls.** The prompt said
+  "one tool call per reply, wait for the result" -- a rule measured on a 14b
+  model at a 16,384-token window, where four results at once is four results
+  there is nowhere to put. Nothing else ever enforced it: `extract_json_objects`
+  has always returned every object in a reply and `Agent._loop` has always
+  iterated the list. So on a backend that reports a large window -- 400,000 for
+  `codex`, 1,000,000 for `claude-code`, or a local server configured past
+  65,536 -- independent calls may now go out together, which is the difference
+  between reading four files in four round trips and reading them in one. The
+  ordering rule batching cannot relax is stated with it: a call that needs
+  another call's result waits for the next reply, so nothing edits a file in
+  the same breath it reads it.
+
+- **The system prompt now says how to answer, not only how to work.** It
+  described the job in detail -- read before claiming, small verified steps,
+  plan a long task -- and said nothing at all about the reply, which left the
+  register to the model. That is most of what a user means when an agent feels
+  wrong: a preamble announcing the plan, a summary repeating the tool calls
+  they just watched happen, a whole file pasted back to make a two-line point,
+  a comment explaining the change to the person who asked for it, a README
+  nobody wanted. There is now an `# Answering` section that rules each of those
+  out, asks for `file:line` so a claim can be opened, and asks for a failed
+  step to be reported with what it printed. It sits above the tool section,
+  because the emission format has to stay the last thing read.
+
 ### Changed
 
 - **The language reminder no longer ends on prose.** It is appended to every
@@ -26,6 +55,32 @@ below it, and the release workflow refuses a tag this file does not describe.
   judgement rather than a measured fix -- runs of the same request produce
   different outcomes, so nothing at this sample size tells a prompt change from
   a dice roll.
+
+- **`edit_file` will no longer change a file this session has not read.** An
+  exact-string match was the only precondition, and it is not evidence that the
+  model read anything: a string remembered from an earlier session, or
+  reconstructed from the file's name, either matches or it does not. When it
+  does not, the turn spends three iterations discovering that -- edit,
+  `old_string was not found`, read, edit. When it does, the edit landed in a
+  file nobody looked at. It now says which of the two is wrong and what to do
+  about it. The same record catches the other half: a file saved by somebody
+  else since the agent read it is refused until it is read again, because an
+  exact match against the part that did not move is exactly how that goes
+  unnoticed. `write_file` is unaffected -- it states the whole file, so there is
+  no remembered text for it to be wrong about -- and a turn's own writes count
+  as having seen the file, so two edits to one file still work.
+
+- **Two more small-model rules now stop at the edge of a small window.** The
+  loop refuses a byte-identical repeat and declares the turn stuck on the
+  third, and the scout searches the workspace before the model has seen the
+  request. Both are right at 16,384 tokens: freeing context costs the model
+  what it read, so a second read really is a symptom, and a 14b model that is
+  not handed a search will answer without doing one. Neither describes a
+  400,000-token window, where nothing was dropped, a second read is a choice,
+  and the prompt has to spend a paragraph telling the model to ignore a search
+  it never asked for. Above 65,536 the repeat runs and the scout is off, unless
+  `scout` is written down -- a setting in a config file means what it says
+  whatever the window is.
 
 ### Fixed
 
@@ -55,61 +110,6 @@ below it, and the release workflow refuses a tag this file does not describe.
   predecessor's result existed, so they were guesses about output the model was
   never given. A turn with room to batch is unaffected -- there the calls are
   meant.
-
-### Changed
-
-- **`edit_file` will no longer change a file this session has not read.** An
-  exact-string match was the only precondition, and it is not evidence that the
-  model read anything: a string remembered from an earlier session, or
-  reconstructed from the file's name, either matches or it does not. When it
-  does not, the turn spends three iterations discovering that -- edit,
-  `old_string was not found`, read, edit. When it does, the edit landed in a
-  file nobody looked at. It now says which of the two is wrong and what to do
-  about it. The same record catches the other half: a file saved by somebody
-  else since the agent read it is refused until it is read again, because an
-  exact match against the part that did not move is exactly how that goes
-  unnoticed. `write_file` is unaffected -- it states the whole file, so there is
-  no remembered text for it to be wrong about -- and a turn's own writes count
-  as having seen the file, so two edits to one file still work.
-
-- **Two more small-model rules now stop at the edge of a small window.** The
-  loop refuses a byte-identical repeat and declares the turn stuck on the
-  third, and the scout searches the workspace before the model has seen the
-  request. Both are right at 16,384 tokens: freeing context costs the model
-  what it read, so a second read really is a symptom, and a 14b model that is
-  not handed a search will answer without doing one. Neither describes a
-  400,000-token window, where nothing was dropped, a second read is a choice,
-  and the prompt has to spend a paragraph telling the model to ignore a search
-  it never asked for. Above 65,536 the repeat runs and the scout is off, unless
-  `scout` is written down -- a setting in a config file means what it says
-  whatever the window is.
-
-### Added
-
-- **A turn with room to work in may now batch its tool calls.** The prompt said
-  "one tool call per reply, wait for the result" -- a rule measured on a 14b
-  model at a 16,384-token window, where four results at once is four results
-  there is nowhere to put. Nothing else ever enforced it: `extract_json_objects`
-  has always returned every object in a reply and `Agent._loop` has always
-  iterated the list. So on a backend that reports a large window -- 400,000 for
-  `codex`, 1,000,000 for `claude-code`, or a local server configured past
-  65,536 -- independent calls may now go out together, which is the difference
-  between reading four files in four round trips and reading them in one. The
-  ordering rule batching cannot relax is stated with it: a call that needs
-  another call's result waits for the next reply, so nothing edits a file in
-  the same breath it reads it.
-
-- **The system prompt now says how to answer, not only how to work.** It
-  described the job in detail -- read before claiming, small verified steps,
-  plan a long task -- and said nothing at all about the reply, which left the
-  register to the model. That is most of what a user means when an agent feels
-  wrong: a preamble announcing the plan, a summary repeating the tool calls
-  they just watched happen, a whole file pasted back to make a two-line point,
-  a comment explaining the change to the person who asked for it, a README
-  nobody wanted. There is now an `# Answering` section that rules each of those
-  out, asks for `file:line` so a claim can be opened, and asks for a failed
-  step to be reported with what it printed. It sits above the tool section,
-  because the emission format has to stay the last thing read.
 
 ## [0.7.4] - 2026-09-04
 
@@ -693,7 +693,8 @@ job, GitHub and GitLab tools; resumable sessions; skills and slash commands;
 GitLab Code Quality reports; `coder doctor`; `coder config`; and Claude Code and
 Codex as borrowed model backends.
 
-[Unreleased]: https://github.com/thebkht/bkht-coder/compare/v0.7.4...HEAD
+[Unreleased]: https://github.com/thebkht/bkht-coder/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/thebkht/bkht-coder/compare/v0.7.4...v0.8.0
 [0.7.4]: https://github.com/thebkht/bkht-coder/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/thebkht/bkht-coder/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/thebkht/bkht-coder/compare/v0.7.1...v0.7.2
