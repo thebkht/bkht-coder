@@ -159,6 +159,21 @@ def parse_tool_calls(text: str) -> list[ToolCall]:
     return calls
 
 
+def is_tool_call(text: str) -> bool:
+    """True when ``text`` is one tool call rather than prose.
+
+    The question every caller actually has, asked once. Testing the first
+    character for `{` answers a different one: the model routinely wraps its
+    call in ```json ... ```, and a fence begins with a backtick -- so the
+    prefix test reads a call as prose and every check that follows is skipped.
+
+    One call, not "at least one": content carrying two of them round-trips to
+    something other than what it was rendered from, which is precisely what the
+    callers here exist to refuse.
+    """
+    return len(parse_tool_calls(text)) == 1
+
+
 #: A code fence, as the model writes one around a tool call it is about to
 #: make. Three backticks or more, optionally with a language after them.
 FENCE = "```"

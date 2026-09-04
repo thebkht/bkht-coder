@@ -7,6 +7,7 @@ import pytest
 from bkht.coder.parsing import (
     drop_empty_fences,
     extract_json_objects,
+    is_tool_call,
     open_fence,
     parse_tool_calls,
     strip_json,
@@ -149,3 +150,25 @@ def test_open_fence_finds_one_still_waiting_for_its_contents():
 
 def test_drop_empty_fences_leaves_a_lone_fence_alone():
     assert drop_empty_fences("```json\n") == "```json\n"
+
+
+# --- prose or a call ----------------------------------------------------------
+
+
+def test_is_tool_call_sees_through_a_fence():
+    # The shape a real session recorded. Testing the first character for `{`
+    # reads this as prose, because a fence begins with a backtick.
+    assert is_tool_call('```json\n{"name": "task", "arguments": {}}\n```')
+
+
+def test_is_tool_call_accepts_a_bare_call_and_one_wrapped_in_prose():
+    assert is_tool_call('{"name": "read_file", "arguments": {"path": "a.py"}}')
+    assert is_tool_call('Let me look:\n{"name": "read_file", "arguments": {"path": "a.py"}}')
+
+
+def test_is_tool_call_is_false_for_prose_and_for_two_calls():
+    assert not is_tool_call("It sets x to one.")
+    assert not is_tool_call("")
+    # Two is not one: content carrying a pair cannot round-trip to the call it
+    # was rendered from, so it is not something a caller may treat as a call.
+    assert not is_tool_call('{"name": "a", "arguments": {}}{"name": "b", "arguments": {}}')

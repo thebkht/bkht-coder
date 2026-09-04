@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import prompts
-from ..parsing import parse_tool_calls
+from ..parsing import is_tool_call, parse_tool_calls
 from ..session import prompt_hash
 from ..skills import Discovery
 from ..context import KEEP_TOOL_RESULTS, elide_tool_results
@@ -184,7 +184,7 @@ def render(
 
         if not content:
             continue
-        if role == "assistant" and content.lstrip().startswith("{") and allowed is not None:
+        if role == "assistant" and is_tool_call(content) and allowed is not None:
             fixed = conform(content, allowed)
             if fixed is None:
                 # Nothing after this call can be learned from -- every message
@@ -239,7 +239,7 @@ def _ending_in_an_answer(messages: list[dict]) -> list[dict]:
         message = messages[index]
         if message["role"] != "assistant":
             continue
-        if message["content"].lstrip().startswith("{"):
+        if is_tool_call(message["content"]):
             continue
         return messages[: index + 1]
     return []
@@ -302,7 +302,7 @@ def fit(messages: list[dict], budget: int) -> list[dict]:
     for start in range(1, len(body)):
         message = body[start]
         starts_here = message["role"] == "user" or (
-            message["role"] == "assistant" and message["content"].lstrip().startswith("{")
+            message["role"] == "assistant" and is_tool_call(message["content"])
         )
         if not starts_here:
             continue
@@ -336,10 +336,15 @@ def verify(example: Example) -> list[str]:
         if message["role"] != "assistant":
             continue
         content = message["content"]
-        if not content.lstrip().startswith("{"):
+        # Parsed once and branched on the count, rather than asked
+        # `is_tool_call` first: that predicate is false both for prose and for
+        # content carrying two calls, so gating on it would send the two-call
+        # case down the "prose, nothing to check" path -- the one shape this
+        # function most needs to catch.
+        calls = parse_tool_calls(content)
+        if not calls:
             # Prose. The other half of the protocol, and a valid thing to emit.
             continue
-        calls = parse_tool_calls(content)
         if len(calls) != 1:
             problems.append(
                 f"message {index}: parsed {len(calls)} calls out of what should be one"

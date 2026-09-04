@@ -62,6 +62,57 @@ def test_verify_catches_a_reply_carrying_two_calls():
     assert render.verify(example)
 
 
+def test_a_fenced_call_is_verified_rather_than_taken_for_prose():
+    # A real session recorded this shape: qwen2.5-coder wrapped its call in
+    # ```json ... ```, and every check keyed on content starting with `{` read
+    # the fence as prose and waved it through. verify() is what makes the
+    # dataset trustworthy; a code fence used to switch it off.
+    fenced = '```json\n{"name": "a", "arguments": {}}\n{"name": "b", "arguments": {}}\n```'
+    example = render.Example(
+        messages=[{"role": "assistant", "content": fenced}],
+        source="test", origin="t", system_hash="",
+    )
+    assert render.verify(example)
+
+
+def test_a_fenced_call_to_a_tool_that_does_not_exist_ends_the_trajectory(allowed):
+    # The same blindness in `render`: unconformable meant "not a call at all",
+    # so an unknown tool inside a fence was exported as an assistant answer.
+    fenced = "```json\n" + call_json("WebFetch", {"url": "x"}) + "\n```"
+    example = render.render(
+        made([
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": call_json("read_file", {"path": "a.py"})},
+            {"role": "tool", "name": "read_file", "content": "x = 1"},
+            {"role": "assistant", "content": "It sets x."},
+            {"role": "assistant", "content": fenced},
+            {"role": "tool", "name": "WebFetch", "content": "html"},
+            {"role": "assistant", "content": "and the page says so"},
+        ]),
+        system="SYS",
+        allowed=allowed,
+    )
+    assert [m["content"] for m in example.messages][-1] == "It sets x."
+
+
+def test_a_trajectory_ending_on_a_fenced_call_is_not_an_answer(allowed):
+    # `_ending_in_an_answer` exists to stop the model being taught to halt
+    # mid-work. A fenced call reading as prose was exactly that lesson.
+    fenced = "```json\n" + call_json("read_file", {"path": "b.py"}) + "\n```"
+    example = render.render(
+        made([
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": call_json("read_file", {"path": "a.py"})},
+            {"role": "tool", "name": "read_file", "content": "x = 1"},
+            {"role": "assistant", "content": "It sets x."},
+            {"role": "assistant", "content": fenced},
+        ]),
+        system="SYS",
+        allowed=allowed,
+    )
+    assert [m["content"] for m in example.messages][-1] == "It sets x."
+
+
 # --- conforming calls to the tools that exist ---------------------------------
 
 
