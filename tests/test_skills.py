@@ -279,3 +279,94 @@ def test_no_skills_means_no_section(project, registry_with):
     from bkht.coder.prompts import system_prompt
 
     assert "# Skills" not in system_prompt(registry_with(), str(project))
+
+
+# --- the agent/ slot ------------------------------------------------------
+
+
+@pytest.fixture
+def no_global_agent(monkeypatch, tmp_path):
+    monkeypatch.setattr(skills_module.layout, "GLOBAL_ROOT", tmp_path / "nowhere")
+
+
+def marked(root):
+    directory = root / "agent"
+    (directory / "skills").mkdir(parents=True, exist_ok=True)
+    (directory / "agent.json").write_text("{}")
+    return directory / "skills"
+
+
+def test_a_skill_under_agent_is_found(tmp_path, no_global_agent):
+    marked(tmp_path)
+    write_skill(tmp_path, "releasing", where="agent/skills")
+
+    found = discover(tmp_path, include_global=False)
+    assert [skill.name for skill in found.skills] == ["releasing"]
+
+
+def test_a_flat_markdown_file_is_a_skill_named_for_its_path(tmp_path, no_global_agent):
+    # eve's shape: the file is the skill, and where it is decides its name.
+    (marked(tmp_path) / "summarize.md").write_text(
+        "---\ndescription: Summarise a diff.\n---\n\nRead it, then say what changed.\n"
+    )
+
+    found = discover(tmp_path, include_global=False)
+    assert [skill.name for skill in found.skills] == ["summarize"]
+    assert body(found.get("summarize")) == "Read it, then say what changed."
+
+
+def test_a_flat_skill_still_needs_a_description(tmp_path, no_global_agent):
+    (marked(tmp_path) / "summarize.md").write_text("Just prose, no frontmatter.\n")
+
+    found = discover(tmp_path, include_global=False)
+    assert not found.skills and found.problems
+
+
+def test_frontmatter_wins_over_the_filename(tmp_path, no_global_agent):
+    # A skill borrowed from another agent keeps the name it was written under.
+    (marked(tmp_path) / "summarize.md").write_text(
+        "---\nname: digest\ndescription: Summarise a diff.\n---\n\nRead it.\n"
+    )
+
+    assert [s.name for s in discover(tmp_path, include_global=False).skills] == ["digest"]
+
+
+def test_agent_skills_shadow_the_older_root(tmp_path, no_global_agent):
+    marked(tmp_path)
+    write_skill(tmp_path, "releasing", description="The old one.")
+    write_skill(tmp_path, "releasing", description="The new one.", where="agent/skills")
+
+    found = discover(tmp_path, include_global=False)
+    assert found.get("releasing").description == "The new one."
+
+
+def test_an_unmarked_agent_directory_contributes_no_skills(tmp_path, no_global_agent):
+    (tmp_path / "agent" / "skills" / "theirs").mkdir(parents=True)
+    (tmp_path / "agent" / "skills" / "theirs" / "SKILL.md").write_text(
+        "---\nname: theirs\ndescription: Somebody else's.\n---\n\nx\n"
+    )
+
+    assert not discover(tmp_path, include_global=False).skills
+
+
+def test_a_flat_skill_refuses_to_read_its_neighbours(tmp_path, no_global_agent):
+    # Its neighbours are other skills, not its resources.
+    skills = marked(tmp_path)
+    (skills / "summarize.md").write_text("---\ndescription: Summarise.\n---\n\nDo it.\n")
+    (skills / "secret.md").write_text("---\ndescription: Other.\n---\n\nElsewhere.\n")
+
+    found = discover(tmp_path, include_global=False)
+    registry, _ = build_registry(tmp_path, skills=found)
+    with pytest.raises(ToolError, match="single file"):
+        registry.get("skill").run(name="summarize", resource="secret.md")
+
+
+def test_a_directory_skill_still_ships_its_files(tmp_path, no_global_agent):
+    marked(tmp_path)
+    directory = write_skill(tmp_path, "releasing", where="agent/skills")
+    (directory / "checklist.md").write_text("1. Tag it.\n")
+
+    found = discover(tmp_path, include_global=False)
+    registry, _ = build_registry(tmp_path, skills=found)
+    result = registry.get("skill").run(name="releasing", resource="checklist.md")
+    assert "Tag it" in result.content

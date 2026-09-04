@@ -11,7 +11,9 @@ paragraph of ``AGENTS.md`` costs, and the twenty bodies cost nothing at all
 until one of them is the right one.
 
 A skill is a directory containing ``SKILL.md``, whose frontmatter carries a
-``name`` and a ``description``:
+``name`` and a ``description`` -- or, under ``agent/skills/``, a single
+markdown file named for the skill, which is eve's shape and the right one for
+a skill that is three paragraphs and ships nothing beside them:
 
     ---
     name: releasing
@@ -26,6 +28,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import layout
 from .session import STATE_DIR
 from .tools.base import ToolError
 from .tools.fs import read_text
@@ -59,6 +62,10 @@ class Skill:
     description: str
     path: Path
     source: str
+    #: Whether this skill has a directory of its own. A flat file does not: its
+    #: neighbours are other skills, not its resources, and reaching them would
+    #: quietly widen the boundary :func:`directory` exists to draw.
+    resources: bool = True
 
     @property
     def directory(self) -> Path:
@@ -165,8 +172,8 @@ def _valid_name(name: str) -> bool:
     )
 
 
-def _load(path: Path, source: str) -> tuple[Skill | None, str]:
-    """One ``SKILL.md`` as a Skill, or a reason it could not be one."""
+def _load(path: Path, source: str, resources: bool = True) -> tuple[Skill | None, str]:
+    """One skill file as a Skill, or a reason it could not be one."""
     try:
         text = read_text(path)
     except (ToolError, OSError) as exc:
@@ -175,6 +182,13 @@ def _load(path: Path, source: str) -> tuple[Skill | None, str]:
     meta, _ = parse_frontmatter(text)
     name = meta.get("name", "").strip().lower()
     description = " ".join(meta.get("description", "").split())
+
+    # The path is the name, which is the whole of eve's convention: a file at
+    # skills/summarize.md is the skill `summarize` because of where it is.
+    # Frontmatter still wins where it disagrees, so a skill borrowed from
+    # another agent keeps the name it was written under.
+    if not name and not resources:
+        name = path.stem.strip().lower()
 
     if not name:
         return None, f"{source}: no 'name' in its frontmatter"
@@ -186,7 +200,9 @@ def _load(path: Path, source: str) -> tuple[Skill | None, str]:
     if len(description) > MAX_DESCRIPTION:
         description = description[: MAX_DESCRIPTION - 1].rstrip() + "…"
 
-    return Skill(name=name, description=description, path=path, source=source), ""
+    return Skill(
+        name=name, description=description, path=path, source=source, resources=resources
+    ), ""
 
 
 def _label(path: Path, root: Path) -> str:
@@ -207,10 +223,14 @@ def discover(root, include_global: bool = True) -> Discovery:
     to be explained is one the user will not trust.
     """
     root = Path(root)
+    surface = layout.surface(root, include_global=include_global)
+
     directories = []
     if include_global:
         directories.append(GLOBAL_ROOT)
+    directories.extend(surface.slot("skills", layout.GLOBAL))
     directories.extend(root / relative for relative in WORKSPACE_ROOTS)
+    directories.extend(surface.slot("skills", layout.WORKSPACE))
 
     found: dict[str, Skill] = {}
     problems: list[str] = []
@@ -218,10 +238,19 @@ def discover(root, include_global: bool = True) -> Discovery:
         if not directory.is_dir():
             continue
         for child in sorted(directory.iterdir()):
-            path = child / SKILL_FILE
-            if not path.is_file():
+            # A directory holding a SKILL.md, or a markdown file that is the
+            # skill. Anything else is somebody's notes, and is not ours to
+            # complain about.
+            if child.is_dir():
+                path, resources = child / SKILL_FILE, True
+                if not path.is_file():
+                    continue
+            elif child.suffix == ".md" and child.is_file():
+                path, resources = child, False
+            else:
                 continue
-            skill, problem = _load(path, _label(path, root))
+
+            skill, problem = _load(path, _label(path, root), resources)
             if skill is None:
                 problems.append(problem)
             else:

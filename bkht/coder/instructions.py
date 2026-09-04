@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import layout
 from .tools.base import ToolError
 from .tools.fs import read_text
 
@@ -77,6 +78,20 @@ def _fit(text: str, limit: int) -> tuple[str, bool]:
     return text[:limit].rstrip() + "\n" + TRUNCATION_NOTE, True
 
 
+def _agent_files(surface, scope: str) -> list[Path]:
+    """The instruction files one ``agent/`` root contributes.
+
+    A flat ``instructions.md`` or a directory of them; :mod:`~bkht.coder.layout`
+    settles which, and composes a directory in filename order so a project can
+    number the pieces it wants read first.
+    """
+    return [
+        path
+        for root in surface.roots if root.scope == scope
+        for path in layout.instructions(root.path)
+    ]
+
+
 def load_instructions(
     root,
     include_global: bool = True,
@@ -90,10 +105,19 @@ def load_instructions(
     instruction is the one the user is more likely to mean.
     """
     root = Path(root)
+    surface = layout.surface(root, include_global=include_global)
+
+    # Four sources, least specific first, which is the order the budget is then
+    # spent backwards through. The two agent/ ones sit beside the file they
+    # correspond to rather than at either end: a personal instructions.md is
+    # the personal AGENTS.md by another name, and a workspace one is the most
+    # specific thing the user has written, so it goes last and is paid first.
     candidates: list[Path] = []
     if include_global:
         candidates.append(GLOBAL_DIR / GLOBAL_NAME)
+    candidates.extend(_agent_files(surface, layout.GLOBAL))
     candidates.extend(root / name for name in WORKSPACE_NAMES)
+    candidates.extend(_agent_files(surface, layout.WORKSPACE))
 
     found = []
     for path in candidates:

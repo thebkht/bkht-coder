@@ -267,3 +267,54 @@ def test_reload_rebuilds_the_system_prompt(project, no_global):
 def test_workspace_sources_are_named_relative_to_the_root(tmp_path, no_global):
     (tmp_path / "CLAUDE.md").write_text("rule")
     assert load_instructions(tmp_path)[0].source == "CLAUDE.md"
+
+
+# --- the agent/ slot ------------------------------------------------------
+
+
+def agent_root(root, contents=None):
+    directory = root / "agent"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "agent.json").write_text("{}")
+    if contents is not None:
+        (directory / "instructions.md").write_text(contents)
+    return directory
+
+
+def test_agent_instructions_are_loaded(tmp_path, monkeypatch):
+    monkeypatch.setattr(I.layout, "GLOBAL_ROOT", tmp_path / "nowhere")
+    agent_root(tmp_path, "Two spaces, never tabs.\n")
+
+    loaded = load_instructions(tmp_path, include_global=False)
+    assert [i.source for i in loaded] == ["agent/instructions.md"]
+    assert loaded[0].text == "Two spaces, never tabs."
+
+
+def test_a_directory_of_agent_instructions_composes_in_order(tmp_path, monkeypatch):
+    monkeypatch.setattr(I.layout, "GLOBAL_ROOT", tmp_path / "nowhere")
+    directory = agent_root(tmp_path) / "instructions"
+    directory.mkdir()
+    (directory / "20-style.md").write_text("Style rules.")
+    (directory / "10-house.md").write_text("House rules.")
+
+    loaded = load_instructions(tmp_path, include_global=False)
+    assert [i.text for i in loaded] == ["House rules.", "Style rules."]
+
+
+def test_agents_md_still_loads_beside_the_agent_slot(tmp_path, monkeypatch):
+    # Layered, not replaced: AGENTS.md is a cross-tool convention and this
+    # change must not quietly stop reading it.
+    monkeypatch.setattr(I.layout, "GLOBAL_ROOT", tmp_path / "nowhere")
+    (tmp_path / "AGENTS.md").write_text("Old rules.")
+    agent_root(tmp_path, "New rules.")
+
+    loaded = load_instructions(tmp_path, include_global=False)
+    assert [i.text for i in loaded] == ["Old rules.", "New rules."]
+
+
+def test_an_unmarked_agent_directory_contributes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr(I.layout, "GLOBAL_ROOT", tmp_path / "nowhere")
+    (tmp_path / "agent").mkdir()
+    (tmp_path / "agent" / "instructions.md").write_text("You are a data agent.\n")
+
+    assert load_instructions(tmp_path, include_global=False) == []

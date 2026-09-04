@@ -5,6 +5,7 @@ is the smallest mechanism that does that: a Markdown file whose body becomes
 the task, named by the file.
 
     ~/.bkht-coder/commands/review-tests.md   ->  /review-tests
+    agent/commands/review-tests.md           ->  /review-tests
 
 It is deliberately not a scripting surface. The body is prose sent to the
 model, `$ARGUMENTS` is the one substitution, and nothing here can run anything
@@ -17,6 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import layout
 from .session import STATE_DIR
 from .skills import parse_frontmatter
 from .tools.base import ToolError
@@ -86,10 +88,14 @@ def discover(root, include_global: bool = True) -> dict[str, UserCommand]:
     Global first, so a workspace can shadow a personal command with its own.
     """
     root = Path(root)
+    surface = layout.surface(root, include_global=include_global)
+
     directories = []
     if include_global:
         directories.append(GLOBAL_ROOT)
+    directories.extend(surface.slot("commands", layout.GLOBAL))
     directories.append(root / WORKSPACE_ROOT)
+    directories.extend(surface.slot("commands", layout.WORKSPACE))
 
     found: dict[str, UserCommand] = {}
     for directory in directories:

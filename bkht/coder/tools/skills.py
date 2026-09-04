@@ -31,6 +31,13 @@ def register_skill_tool(registry, discovery):
         if resource is None:
             return ToolResult.success(skills_module.body(found))
 
+        # A flat skill is one file among other skills, so it has no directory
+        # of its own to be contained within. Reading its neighbours would be
+        # reading somebody else's skill, so it is refused here rather than
+        # bounded there.
+        if not found.resources:
+            raise ToolError(f"skill '{name}' is a single file and ships no other files")
+
         # A skill may ship files beside its SKILL.md, and may reach none but
         # its own -- the same boundary the workspace root has, drawn with the
         # same check.

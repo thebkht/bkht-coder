@@ -92,3 +92,30 @@ def test_summarize_names_each_command(project):
     text = summarize(discover(project))
     assert "/audit" in text and "Audit the error handling." in text
 
+
+
+# --- the agent/ slot ------------------------------------------------------
+
+
+def test_a_command_under_agent_is_found(tmp_path, monkeypatch):
+    monkeypatch.setattr(commands_module.layout, "GLOBAL_ROOT", tmp_path / "nowhere")
+    directory = tmp_path / "agent" / "commands"
+    directory.mkdir(parents=True)
+    (tmp_path / "agent" / "agent.json").write_text("{}")
+    (directory / "review-tests.md").write_text("Review the tests.\n")
+
+    found = discover(tmp_path, include_global=False)
+    assert found["review-tests"].body == "Review the tests."
+
+
+def test_an_agent_command_shadows_the_older_root(tmp_path, monkeypatch):
+    monkeypatch.setattr(commands_module.layout, "GLOBAL_ROOT", tmp_path / "nowhere")
+    old = tmp_path / ".bkht-coder" / "commands"
+    old.mkdir(parents=True)
+    (old / "review.md").write_text("The old one.\n")
+    new = tmp_path / "agent" / "commands"
+    new.mkdir(parents=True)
+    (tmp_path / "agent" / "agent.json").write_text("{}")
+    (new / "review.md").write_text("The new one.\n")
+
+    assert discover(tmp_path, include_global=False)["review"].body == "The new one."
