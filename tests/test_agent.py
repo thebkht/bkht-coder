@@ -1,6 +1,7 @@
 """The loop: tool dispatch, malformed-call recovery, and the bounds."""
 
 import itertools
+import json
 
 import pytest
 
@@ -968,3 +969,36 @@ def test_a_hook_that_went_wrong_and_blocks_nothing_is_still_said_out_loud(projec
     )
     agent.run("read it")
     assert [line for line in said if "fmt" in line and "exited 2" in line]
+
+
+# --- Esc ----------------------------------------------------------------------
+
+
+def test_an_interrupted_turn_is_recorded_and_still_interrupts(loop, tmp_path):
+    # The REPL abandons the task on Esc, which is right -- but it used to catch
+    # the interrupt outside `_finish`, so the turn was never written down. A
+    # real session shows the result: a user message, the scout's block, then
+    # the next user message, with no outcome and nothing saying anything had
+    # been asked.
+    agent, _ = loop([KeyboardInterrupt()])
+    agent.session.start_file(tmp_path)
+
+    with pytest.raises(KeyboardInterrupt):
+        agent.run("read every file and summarise it")
+
+    outcomes = [
+        json.loads(line)
+        for line in agent.session.path.read_text().splitlines()
+        if json.loads(line).get("type") == "outcome"
+    ]
+    assert [o["stopped"] for o in outcomes] == ["interrupted"]
+    assert outcomes[0]["errors"] == ["interrupted by the user"]
+
+
+def test_an_interrupted_turn_is_not_a_turn_to_learn_from():
+    # `ingest` segments trajectories on outcomes and cuts at the last good one.
+    # Naming the interrupt is what lets it cut there rather than stitch across
+    # the hole the abandoned turn left.
+    from bkht.coder.training.ingest import GOOD_STOPS
+
+    assert "interrupted" not in GOOD_STOPS

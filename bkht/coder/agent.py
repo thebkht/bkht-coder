@@ -86,6 +86,7 @@ class Outcome:
     iterations: int = 0
     tool_calls: int = 0
     #: answered | iteration-cap | retry-cap | looping | denied | provider-error
+    #: | time-cap | interrupted
     stopped: str = "answered"
     errors: list[str] = field(default_factory=list)
     #: What this turn cost, for the line printed under the answer. Per-turn,
@@ -155,7 +156,7 @@ class Agent:
         self._scout(user_message)
         # `_loop` directly rather than through `resume`, so the turn is recorded
         # once, with the duration that includes the scouting above.
-        return self._finish(self._loop(), started)
+        return self._run_to_finish(started)
 
     def _note_language(self, user_message: str) -> None:
         """Update the language the session is being conducted in.
@@ -200,7 +201,37 @@ class Agent:
     def resume(self) -> Outcome:
         """Continue from the current history without adding a user message."""
         started = self.clock()
-        return self._finish(self._loop(), started)
+        return self._run_to_finish(started)
+
+    def _run_to_finish(self, started: float) -> Outcome:
+        """:meth:`_loop`, recorded however it ends -- Esc included.
+
+        The REPL catches the ``KeyboardInterrupt`` and abandons the task, which
+        is right, but it catches it outside :meth:`_finish` -- so an
+        interrupted turn was never written down at all. A captured session
+        shows what that leaves: a user message, the scout's block, and then the
+        next user message, with no outcome between them and nothing saying a
+        question had been asked. Unreadable afterwards, and worse to anything
+        reading sessions back -- `ingest` segments turns on outcomes, so the
+        abandoned request became a hole in the middle of a trajectory, teaching
+        the model that a question followed by a search result may be ignored.
+
+        Re-raised once recorded, so the REPL still prints `[interrupted]` and
+        nothing about the interrupt itself changes.
+        """
+        try:
+            outcome = self._loop()
+        except KeyboardInterrupt:
+            outcome = Outcome(stopped="interrupted")
+            outcome.errors.append("interrupted by the user")
+            # Best effort: the turn is already being abandoned, and failing to
+            # write it down is not a reason to lose the Esc as well.
+            try:
+                self._finish(outcome, started)
+            except Exception:
+                pass
+            raise
+        return self._finish(outcome, started)
 
     def _finish(self, outcome: Outcome, started: float) -> Outcome:
         """Stamp a turn's duration and write down how it ended.

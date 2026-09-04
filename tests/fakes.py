@@ -11,7 +11,7 @@ class FakeProvider:
     """Replays a scripted list of replies, one per ``chat`` call.
 
     Each script entry is either a string (streamed as content) or an exception
-    to raise. Replies are chunked mid-string so the tests exercise the same
+    to raise -- including ``KeyboardInterrupt``, which is how Esc arrives. Replies are chunked mid-string so the tests exercise the same
     reassembly path the real stream uses.
     """
 
@@ -30,7 +30,9 @@ class FakeProvider:
             raise AssertionError("FakeProvider ran out of scripted replies")
 
         reply = self.script.pop(0)
-        if isinstance(reply, Exception):
+        # BaseException, not Exception: a test that scripts a KeyboardInterrupt
+        # is testing the one signal that does not inherit from it.
+        if isinstance(reply, BaseException):
             raise reply
 
         for i in range(0, len(reply), 7):
